@@ -653,7 +653,7 @@ static void invalidate_clock_cache(struct lwis_device *lwis_dev)
 	for (i = 0; i < lwis_dev->clocks->count; ++i) {
 		rate = clk_get_rate(lwis_dev->clocks->clk[i].clk);
 		if (rate == 0)
-			dev_err(lwis_dev->k_dev, "Failed to invalidate clk[%d]", i);
+			dev_dbg(lwis_dev->k_dev, "Failed to invalidate clk[%d]", i);
 	}
 }
 
@@ -710,18 +710,28 @@ int lwis_platform_device_enable(struct lwis_device *lwis_dev)
 void lwis_platform_set_device_state(struct lwis_device *lwis_dev, bool camera_up)
 {
 	static uint32_t camera_stat;
+	int64_t set_cam_stat;
 
-	/* Skip the test device. */
-	if (lwis_dev->type == DEVICE_TYPE_TEST)
+	/* Skip the virtual and invalid device type. */
+	if (lwis_dev->type == DEVICE_TYPE_TEST || lwis_dev->type >= NUM_DEVICE_TYPES ||
+	    lwis_dev->type < DEVICE_TYPE_TOP)
 		return;
 
+	set_cam_stat = camera_stat;
 	if (camera_up)
-		camera_stat++;
+		set_cam_stat++;
 	else
-		camera_stat--;
+		set_cam_stat--;
 
-	if (lwis_dev->type < NUM_DEVICE_TYPES && lwis_dev->type >= DEVICE_TYPE_TOP)
-		google_cdd_set_system_dev_stat(CDD_SYSTEM_DEVICE_CAMERA, (uint32_t)camera_stat);
+	/* cam_stat validation */
+	if (set_cam_stat > U32_MAX || set_cam_stat < 0) {
+		dev_err(lwis_dev->dev, "Invalid camera_stat(%lld)", (int64_t)set_cam_stat);
+		set_cam_stat = U32_MAX;
+		camera_stat = 0;
+	} else
+		camera_stat = set_cam_stat;
+
+	google_cdd_set_system_dev_stat(CDD_SYSTEM_DEVICE_CAMERA, (uint32_t)set_cam_stat);
 }
 
 int lwis_platform_device_disable(struct lwis_device *lwis_dev)
@@ -1867,4 +1877,10 @@ int lwis_platform_set_default_irq_affinity(unsigned int irq)
 int lwis_platform_get_default_pt_id(void)
 {
 	return PT_PTID_INVALID;
+}
+
+bool lwis_platform_is_batch_register_io_supported(void)
+{
+	/* Support for this feature begins with this platform device. */
+	return true;
 }

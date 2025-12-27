@@ -103,6 +103,9 @@ struct lwis_device_subclass_operations {
 	/* Called by lwis_device when device register needs to be read/written */
 	int (*register_io)(struct lwis_device *lwis_dev, struct lwis_io_entry *entry,
 			   int access_size);
+	/* Called by lwis_device when device register needs to be read/written without lock */
+	int (*register_io_locked)(struct lwis_device *lwis_dev, struct lwis_io_entry *entry,
+				  int access_size);
 	/* Grouped transfer that process batch_size of lwis_io_entries */
 	int (*batch_register_io)(struct lwis_device *lwis_dev, struct lwis_io_entry *entry,
 				 int access_size, int batch_size);
@@ -382,7 +385,7 @@ int lwis_dev_power_up_locked(struct lwis_device *lwis_dev);
  * Power down a LWIS device, should be called when lwis_dev->enabled become 0
  * lwis_dev->client_lock should be held before this function.
  */
-int lwis_dev_power_down_locked(struct lwis_device *lwis_dev);
+int lwis_dev_power_down_locked(struct lwis_device *lwis_dev, bool error_handling);
 
 /*
  * Process lwis device power sequence list

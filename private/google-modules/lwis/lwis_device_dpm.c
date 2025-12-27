@@ -19,6 +19,7 @@
 
 static struct lwis_device_subclass_operations dpm_vops = {
 	.register_io = NULL,
+	.register_io_locked = NULL,
 	.batch_register_io = NULL,
 	.register_io_barrier = NULL,
 	.device_enable = NULL,

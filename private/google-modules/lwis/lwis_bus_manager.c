@@ -239,16 +239,16 @@ static int create_kthread_workers(struct lwis_bus_manager *bus_manager,
  * check_thread_priority:
  * Checks if the lwis device being connected has the same priority as other devices
  * connected on the same bus.
- * Prints a warning message if there is a difference between the priorities on the
+ * Prints an error message if there is a difference between the priorities on the
  * device threads.
  */
 static void check_thread_priority(struct lwis_bus_manager *bus_manager,
 				  struct lwis_device *lwis_dev)
 {
 	if (bus_manager->bus_thread_priority != lwis_dev->transaction_thread_priority) {
-		dev_warn(lwis_dev->dev,
-			 "Mismatching thread priority for Bus manager(%d), device(%d)\n",
-			 bus_manager->bus_thread_priority, lwis_dev->transaction_thread_priority);
+		dev_err(lwis_dev->dev,
+			"Thread priority conflict: Bus manager(%d), device transaction priority(%d). Ensure these are aligned in the device tree.\n",
+			bus_manager->bus_thread_priority, lwis_dev->transaction_thread_priority);
 	}
 }
 

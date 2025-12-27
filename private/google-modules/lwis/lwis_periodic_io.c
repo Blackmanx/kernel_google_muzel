@@ -169,7 +169,6 @@ static int process_io_entries(struct lwis_client *client,
 	struct lwis_periodic_io_response_header *resp = periodic_io->resp;
 	size_t resp_size;
 	uint8_t *read_buf;
-	struct lwis_periodic_io_result *io_result;
 	const int reg_value_bytewidth = lwis_dev->native_value_bitwidth / 8;
 	unsigned long flags;
 
@@ -184,9 +183,20 @@ static int process_io_entries(struct lwis_client *client,
 						   /*use_read_barrier=*/false,
 						   /*use_write_barrier=*/true);
 	}
-
 	reinit_completion(&periodic_io->io_done);
+
+	/* Prepare the io_results */
+	lwis_io_entry_prepare_results(lwis_dev, info->io_entries, 0, info->num_io_entries, read_buf,
+				      /*is_periodic=*/true);
+
 	lwis_bus_manager_lock_bus(lwis_dev);
+
+	ret = lwis_io_entries_process(lwis_dev, info->io_entries, 0, info->num_io_entries, false);
+	if (ret < 0) {
+		resp->error_code = ret;
+		goto event_push;
+	}
+
 	for (i = 0; i < info->num_io_entries; ++i) {
 		/* Abort if periodic io is deactivated during processing.
 		 * Abort can only apply to <= 1 write entries to prevent partial writes,
@@ -199,81 +209,13 @@ static int process_io_entries(struct lwis_client *client,
 			goto event_push;
 		}
 		spin_unlock_irqrestore(&client->periodic_io_lock, flags);
+
 		entry = &info->io_entries[i];
-		if (entry->type == LWIS_IO_ENTRY_WRITE || entry->type == LWIS_IO_ENTRY_WRITE_V2 ||
-		    entry->type == LWIS_IO_ENTRY_WRITE_BATCH ||
-		    entry->type == LWIS_IO_ENTRY_WRITE_BATCH_V2 ||
-		    entry->type == LWIS_IO_ENTRY_MODIFY) {
-			ret = lwis_dev->vops.register_io(lwis_dev, entry,
-							 lwis_dev->native_value_bitwidth);
-			if (ret) {
-				resp->error_code = ret;
-				goto event_push;
-			}
-		} else if (entry->type == LWIS_IO_ENTRY_READ ||
-			   entry->type == LWIS_IO_ENTRY_READ_V2) {
-			io_result = (struct lwis_periodic_io_result *)read_buf;
-			io_result->io_result.bid = entry->rw.bid;
-			io_result->io_result.offset = entry->rw.offset;
-			io_result->io_result.num_value_bytes = reg_value_bytewidth;
-			io_result->timestamp_ns = ktime_to_ns(lwis_get_time());
-			ret = lwis_dev->vops.register_io(lwis_dev, entry,
-							 lwis_dev->native_value_bitwidth);
-			if (ret) {
-				resp->error_code = ret;
-				goto event_push;
-			}
-			memcpy(io_result->io_result.values, &entry->rw.val, reg_value_bytewidth);
-			read_buf += sizeof(struct lwis_periodic_io_result) +
-				    io_result->io_result.num_value_bytes;
-		} else if (entry->type == LWIS_IO_ENTRY_READ_BATCH ||
-			   entry->type == LWIS_IO_ENTRY_READ_BATCH_V2) {
-			io_result = (struct lwis_periodic_io_result *)read_buf;
-			io_result->io_result.bid = entry->rw_batch.bid;
-			io_result->io_result.offset = entry->rw_batch.offset;
-			io_result->io_result.num_value_bytes = entry->rw_batch.size_in_bytes;
-			entry->rw_batch.buf = io_result->io_result.values;
-			io_result->timestamp_ns = ktime_to_ns(lwis_get_time());
-			ret = lwis_dev->vops.register_io(lwis_dev, entry,
-							 lwis_dev->native_value_bitwidth);
-			if (ret) {
-				resp->error_code = ret;
-				goto event_push;
-			}
-			read_buf += sizeof(struct lwis_periodic_io_result) +
-				    io_result->io_result.num_value_bytes;
-		} else if (entry->type == LWIS_IO_ENTRY_POLL) {
-			ret = lwis_io_entry_poll(lwis_dev, entry, /*is_short=*/false);
-			if (ret) {
-				resp->error_code = ret;
-				goto event_push;
-			}
-		} else if (entry->type == LWIS_IO_ENTRY_POLL_SHORT) {
-			ret = lwis_io_entry_poll(lwis_dev, entry, /*is_short=*/true);
-			if (ret) {
-				resp->error_code = ret;
-				goto event_push;
-			}
-		} else if (entry->type == LWIS_IO_ENTRY_WAIT) {
-			ret = lwis_io_entry_wait(lwis_dev, entry);
-			if (ret) {
-				resp->error_code = ret;
-				goto event_push;
-			}
-		} else if (entry->type == LWIS_IO_ENTRY_READ_ASSERT) {
-			ret = lwis_io_entry_read_assert(lwis_dev, entry);
-			if (ret) {
-				resp->error_code = ret;
-				goto event_push;
-			}
-		} else if (entry->type == LWIS_IO_ENTRY_IGNORE) {
-			ret = 0;
-		} else {
-			pr_err_ratelimited("Unrecognized io_entry command\n");
-			resp->error_code = -EINVAL;
-			goto event_push;
-		}
+
+		read_buf = lwis_io_entry_result(read_buf, entry, reg_value_bytewidth,
+						/*is_periodic=*/true);
 	}
+
 	periodic_io->batch_count++;
 	resp->batch_size = periodic_io->batch_count;
 

@@ -34,9 +34,12 @@ static const struct file_operations pt_file_ops = {
 static int lwis_slc_disable(struct lwis_device *lwis_dev);
 static int lwis_slc_register_io(struct lwis_device *lwis_dev, struct lwis_io_entry *entry,
 				int access_size);
+static int lwis_slc_register_io_locked(struct lwis_device *lwis_dev, struct lwis_io_entry *entry,
+				       int access_size);
 
 static struct lwis_device_subclass_operations slc_vops = {
 	.register_io = lwis_slc_register_io,
+	.register_io_locked = lwis_slc_register_io_locked,
 	.batch_register_io = NULL,
 	.register_io_barrier = NULL,
 	.device_enable = NULL,
@@ -83,6 +86,15 @@ static int lwis_slc_register_io(struct lwis_device *lwis_dev, struct lwis_io_ent
 		container_of(lwis_dev, struct lwis_ioreg_device, base_dev);
 	lwis_save_register_io_info(lwis_dev, entry, access_size);
 	return lwis_ioreg_io_entry_rw(ioreg_dev, entry, access_size);
+}
+
+static int lwis_slc_register_io_locked(struct lwis_device *lwis_dev, struct lwis_io_entry *entry,
+				       int access_size)
+{
+	struct lwis_ioreg_device *ioreg_dev =
+		container_of(lwis_dev, struct lwis_ioreg_device, base_dev);
+	lwis_save_register_io_info(lwis_dev, entry, access_size);
+	return lwis_ioreg_io_entry_rw_locked(ioreg_dev, entry, access_size);
 }
 
 static void print_logs_for_pt_matching_failure(struct lwis_slc_device *slc_dev,

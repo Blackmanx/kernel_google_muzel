@@ -40,6 +40,7 @@ static int lwis_top_register_io(struct lwis_device *lwis_dev, struct lwis_io_ent
 static int lwis_top_close(struct lwis_device *lwis_dev);
 static struct lwis_device_subclass_operations top_vops = {
 	.register_io = lwis_top_register_io,
+	.register_io_locked = lwis_top_register_io,
 	.batch_register_io = NULL,
 	.register_io_barrier = NULL,
 	.device_enable = NULL,
@@ -255,7 +256,7 @@ static int lwis_top_event_subscribe(struct lwis_device *lwis_dev, int64_t trigge
 	spin_unlock_irqrestore(&lwis_top_dev->base_dev.lock, flags);
 
 	/* If the subscription does not exist in hash table, create one */
-	new_subscription = kmalloc(sizeof(struct lwis_event_subscribe_info), GFP_KERNEL);
+	new_subscription = kmalloc(sizeof(struct lwis_event_subscribe_info), GFP_ATOMIC);
 	if (!new_subscription)
 		return -ENOMEM;
 

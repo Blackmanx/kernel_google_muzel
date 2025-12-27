@@ -135,4 +135,10 @@ int lwis_platform_check_qos_box_probed(struct device *dev, const char *lwis_devi
 int lwis_platform_update_top_dev(struct lwis_device *top_dev, struct lwis_device *lwis_dev,
 				 bool *qos_box_probed);
 
+/*
+ * Checks if batch register IO is supported.
+ * True if batch register IO is supported, false otherwise.
+ */
+bool lwis_platform_is_batch_register_io_supported(void);
+
 #endif /* LWIS_PLATFORM_H_ */

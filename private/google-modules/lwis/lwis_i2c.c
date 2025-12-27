@@ -7,6 +7,7 @@
 
 #define pr_fmt(fmt) KBUILD_MODNAME "-i2c: " fmt
 
+#include "lwis_allocator.h"
 #include "lwis_i2c.h"
 #include "lwis_trace.h"
 #include "lwis_util.h"
@@ -63,9 +64,10 @@ static inline int get_msgs_len(struct i2c_msg *msgs, int nmsgs)
 	return total_len;
 }
 
-static inline void release_i2c_msg_context(struct i2c_msg_context *context)
+static inline void release_i2c_msg_context(struct lwis_device *lwis_dev,
+					   struct i2c_msg_context *context)
 {
-	kfree(context->buf);
+	lwis_allocator_free(lwis_dev, context->buf);
 }
 
 static inline bool check_bitwidth(const int bitwidth, const int min, const int max)
@@ -275,7 +277,7 @@ static int setup_i2c_write_batch(struct lwis_i2c_device *i2c, uint64_t start_off
 	}
 
 	msg_bytes = offset_bytes + write_buf_size;
-	context->buf = kmalloc(msg_bytes, GFP_KERNEL);
+	context->buf = lwis_allocator_allocate(&i2c->base_dev, msg_bytes, GFP_KERNEL);
 	if (!context->buf) {
 		dev_err(i2c->base_dev.dev, "Failed to allocate memory for I2C buffer\n");
 		return -ENOMEM;
@@ -381,13 +383,13 @@ int lwis_i2c_io_entry_mod(struct lwis_i2c_device *i2c, struct lwis_io_entry *ent
 
 	ret = setup_i2c_read(i2c, entry->mod.offset, &reg_value, &context, msg);
 	if (ret) {
-		release_i2c_msg_context(&context);
+		release_i2c_msg_context(&i2c->base_dev, &context);
 		return ret;
 	}
 
 	ret = i2c_transfer(client->adapter, msg, 2);
 	if (ret < 2) {
-		release_i2c_msg_context(&context);
+		release_i2c_msg_context(&i2c->base_dev, &context);
 		if (ret >= 0)
 			ret = -EIO;
 		return ret;
@@ -396,7 +398,7 @@ int lwis_i2c_io_entry_mod(struct lwis_i2c_device *i2c, struct lwis_io_entry *ent
 	parse_i2c_result(entry, &context, msg);
 	reg_value &= ~entry->mod.val_mask;
 	reg_value |= entry->mod.val_mask & entry->mod.val;
-	release_i2c_msg_context(&context);
+	release_i2c_msg_context(&i2c->base_dev, &context);
 	return lwis_i2c_write(i2c, entry->mod.offset, reg_value);
 }
 
@@ -446,7 +448,7 @@ int lwis_i2c_io_entry_rw(struct lwis_i2c_device *i2c, struct lwis_io_entry *entr
 	ret = setup_i2c_xfer(i2c, entry, &context, msg);
 	if (ret) {
 		dev_err(i2c->base_dev.dev, "failed to setup msg ret: %d\n", ret);
-		release_i2c_msg_context(&context);
+		release_i2c_msg_context(&i2c->base_dev, &context);
 		return ret;
 	}
 
@@ -455,7 +457,7 @@ int lwis_i2c_io_entry_rw(struct lwis_i2c_device *i2c, struct lwis_io_entry *entr
 	ret = i2c_transfer(client->adapter, msg, nmsgs);
 	LWIS_ATRACE_FUNC_INT_END(&(i2c->base_dev), trace_name, get_msgs_len(msg, nmsgs));
 	if (ret < nmsgs) {
-		release_i2c_msg_context(&context);
+		release_i2c_msg_context(&i2c->base_dev, &context);
 		dev_err(i2c->base_dev.dev, "less msg received : %d, expected: %d.\n", ret, nmsgs);
 		if (ret >= 0)
 			ret = -EIO;
@@ -463,7 +465,7 @@ int lwis_i2c_io_entry_rw(struct lwis_i2c_device *i2c, struct lwis_io_entry *entr
 	}
 
 	parse_i2c_result(entry, &context, msg);
-	release_i2c_msg_context(&context);
+	release_i2c_msg_context(&i2c->base_dev, &context);
 	return 0;
 }
 
@@ -492,15 +494,23 @@ int lwis_i2c_io_entries_rw(struct lwis_i2c_device *i2c, struct lwis_io_entry *en
 
 	nmsgs = get_msg_count(entries, entries_cnt);
 
-	msgs = kcalloc(nmsgs, sizeof(struct i2c_msg), GFP_KERNEL);
+	msgs = lwis_allocator_allocate(&i2c->base_dev, nmsgs * sizeof(struct i2c_msg), GFP_KERNEL);
 	if (!msgs)
 		return -ENOMEM;
+
+	/* It zeroes the members inside the i2c_msg struct */
+	memset(msgs, 0, nmsgs * sizeof(struct i2c_msg));
+
 	/* kcalloc already clear all contexts */
-	contexts = kcalloc(entries_cnt, sizeof(struct i2c_msg_context), GFP_KERNEL);
+	contexts = lwis_allocator_allocate(
+		&i2c->base_dev, entries_cnt * sizeof(struct i2c_msg_context), GFP_KERNEL);
 	if (!contexts) {
-		kfree(msgs);
+		lwis_allocator_free(&i2c->base_dev, msgs);
 		return -ENOMEM;
 	}
+
+	/* It zeroes the members inside the i2c_msg_context struct */
+	memset(contexts, 0, entries_cnt * sizeof(struct i2c_msg_context));
 
 	for (i = 0, msgs_cursor = 0; i < entries_cnt; ++i) {
 		ret = setup_i2c_xfer(i2c, &entries[i], &contexts[i], &msgs[msgs_cursor]);
@@ -531,9 +541,9 @@ int lwis_i2c_io_entries_rw(struct lwis_i2c_device *i2c, struct lwis_io_entry *en
 
 err_release:
 	for (i = 0; i < entries_cnt; ++i)
-		release_i2c_msg_context(&contexts[i]);
+		release_i2c_msg_context(&i2c->base_dev, &contexts[i]);
+	lwis_allocator_free(&i2c->base_dev, msgs);
+	lwis_allocator_free(&i2c->base_dev, contexts);
 
-	kfree(msgs);
-	kfree(contexts);
 	return ret;
 }

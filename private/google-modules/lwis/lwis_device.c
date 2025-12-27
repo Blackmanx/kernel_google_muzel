@@ -305,7 +305,9 @@ static int lwis_release(struct inode *node, struct file *fp)
 					dev_info(lwis_dev->dev, "Need suspend before power down\n");
 				}
 			}
-			rc = lwis_dev_power_down_locked(lwis_dev);
+			rc = lwis_dev_power_down_locked(lwis_dev, /* error_handling= */ false);
+			if (rc)
+				dev_err(lwis_dev->dev, "Power down failed: %d\n", rc);
 			lwis_dev->is_suspended = false;
 		}
 	}
@@ -943,12 +945,12 @@ int lwis_dev_power_up_locked(struct lwis_device *lwis_dev)
 		}
 	}
 
-	lwis_platform_set_device_state(lwis_dev, true);
+	lwis_platform_set_device_state(lwis_dev, /* camera_up= */ true);
 	return 0;
 
 	/* Error handling */
 error_power_up:
-	lwis_dev_power_down_locked(lwis_dev);
+	lwis_dev_power_down_locked(lwis_dev, /* error_handling= */ true);
 	return ret;
 }
 
@@ -956,13 +958,18 @@ error_power_up:
  * Power down a LWIS device, should be called when lwis_dev->enabled become 0
  * lwis_dev->client_lock should be held before this function.
  */
-int lwis_dev_power_down_locked(struct lwis_device *lwis_dev)
+int lwis_dev_power_down_locked(struct lwis_device *lwis_dev, bool error_handling)
 {
 	int ret;
 	int last_error = 0;
 	struct lwis_i2c_device *i2c_dev = NULL;
 
-	lwis_platform_set_device_state(lwis_dev, false);
+	/*
+	 * Device power down triggered by error handling has
+	 * no influence on camera state.
+	 */
+	if (!error_handling)
+		lwis_platform_set_device_state(lwis_dev, /* camera_up= */ false);
 	if (lwis_dev->type == DEVICE_TYPE_I2C) {
 		i2c_dev = container_of(lwis_dev, struct lwis_i2c_device, base_dev);
 		if (i2c_dev->group_i2c_lock == NULL) {

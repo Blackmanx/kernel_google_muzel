@@ -14,6 +14,7 @@
 #include <linux/preempt.h>
 #include <linux/errno.h>
 
+#include "lwis_platform.h"
 #include "lwis_device_i3c_proxy.h"
 #include "lwis_device.h"
 #include "lwis_device_i2c.h"
@@ -49,6 +50,7 @@ static int lwis_i3c_proxy_batch_register_io(struct lwis_device *lwis_dev,
 
 static struct lwis_device_subclass_operations i3c_vops = {
 	.register_io = lwis_i3c_proxy_register_io,
+	.register_io_locked = lwis_i3c_proxy_register_io,
 	.batch_register_io = lwis_i3c_proxy_batch_register_io,
 	.register_io_barrier = NULL,
 	.device_enable = lwis_i3c_proxy_device_enable,
@@ -266,6 +268,10 @@ static int lwis_i3c_proxy_device_probe(struct platform_device *plat_dev)
 
 	i3c_proxy_dev->base_dev.type = DEVICE_TYPE_I2C;
 	i3c_proxy_dev->base_dev.vops = i3c_vops;
+	if (lwis_platform_is_batch_register_io_supported())
+		i3c_proxy_dev->base_dev.vops.batch_register_io = lwis_i3c_proxy_batch_register_io;
+	else
+		i3c_proxy_dev->base_dev.vops.batch_register_io = NULL;
 	i3c_proxy_dev->base_dev.plat_dev = plat_dev;
 	i3c_proxy_dev->base_dev.k_dev = dev;
 

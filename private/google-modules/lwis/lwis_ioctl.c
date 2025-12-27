@@ -632,7 +632,7 @@ static int cmd_device_disable(struct lwis_client *lwis_client, struct lwis_cmd_p
 	lwis_client->is_enabled = false;
 	lwis_dev->is_suspended = false;
 
-	ret = lwis_dev_power_down_locked(lwis_dev);
+	ret = lwis_dev_power_down_locked(lwis_dev, /* error_handling= */ false);
 	if (ret < 0) {
 		dev_err(lwis_dev->dev, "Failed to power down device\n");
 		goto exit_locked;
@@ -1203,6 +1203,7 @@ static int cmd_event_control_set(struct lwis_client *lwis_client, struct lwis_cm
 	int ret = 0;
 	int i;
 	size_t buf_size;
+	char trace_name[LWIS_MAX_NAME_STRING_LEN];
 
 	if (copy_from_user((void *)&k_msg, (void __user *)u_msg, sizeof(k_msg))) {
 		dev_err(lwis_dev->dev, "Failed to copy ioctl message from user\n");
@@ -1227,20 +1228,27 @@ static int cmd_event_control_set(struct lwis_client *lwis_client, struct lwis_cm
 		goto exit;
 	}
 
+	scnprintf(trace_name, LWIS_MAX_NAME_STRING_LEN, "lwis:event_control_set_%s",
+		  lwis_dev->name);
+	LWIS_ATRACE_FUNC_BEGIN(lwis_dev, trace_name);
 	for (i = 0; i < k_msg.list.num_event_controls; i++) {
 		ret = lwis_client_event_control_set(lwis_client, &k_event_controls[i]);
 		if (ret) {
 			dev_err(lwis_dev->dev, "Failed to apply event control 0x%llx\n",
 				k_event_controls[i].event_id);
+			LWIS_ATRACE_FUNC_END(lwis_dev, trace_name);
 			goto exit;
 		}
 	}
 
 	if (lwis_dev->irqs) {
 		ret = lwis_interrupt_write_combined_mask_value(lwis_dev->irqs);
-		if (ret)
+		if (ret) {
+			LWIS_ATRACE_FUNC_END(lwis_dev, trace_name);
 			goto exit;
+		}
 	}
+	LWIS_ATRACE_FUNC_END(lwis_dev, trace_name);
 exit:
 	kfree(k_event_controls);
 	header->ret_code = ret;

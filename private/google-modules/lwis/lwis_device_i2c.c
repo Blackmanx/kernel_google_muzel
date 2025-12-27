@@ -21,6 +21,7 @@
 #include <linux/slab.h>
 #include <uapi/linux/sched/types.h>
 
+#include "lwis_platform.h"
 #include "lwis_device.h"
 #include "lwis_i2c.h"
 #include "lwis_periodic_io.h"
@@ -52,6 +53,7 @@ static int lwis_i2c_batch_register_io(struct lwis_device *lwis_dev, struct lwis_
 
 struct lwis_device_subclass_operations i2c_vops = {
 	.register_io = lwis_i2c_register_io,
+	.register_io_locked = lwis_i2c_register_io,
 	.batch_register_io = lwis_i2c_batch_register_io,
 	.register_io_barrier = NULL,
 	.device_enable = lwis_i2c_device_enable,
@@ -325,6 +327,10 @@ static int lwis_i2c_device_probe(struct platform_device *plat_dev)
 
 	i2c_dev->base_dev.type = DEVICE_TYPE_I2C;
 	i2c_dev->base_dev.vops = i2c_vops;
+	if (lwis_platform_is_batch_register_io_supported())
+		i2c_dev->base_dev.vops.batch_register_io = lwis_i2c_batch_register_io;
+	else
+		i2c_dev->base_dev.vops.batch_register_io = NULL;
 	i2c_dev->base_dev.plat_dev = plat_dev;
 	i2c_dev->base_dev.k_dev = &plat_dev->dev;
 

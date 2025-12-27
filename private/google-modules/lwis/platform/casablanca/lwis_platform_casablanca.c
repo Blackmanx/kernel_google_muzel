@@ -456,3 +456,9 @@ int lwis_platform_update_top_dev(struct lwis_device *top_dev, struct lwis_device
 {
 	return 0;
 }
+
+bool lwis_platform_is_batch_register_io_supported(void)
+{
+	/* This platform device is not supported */
+	return false;
+}
