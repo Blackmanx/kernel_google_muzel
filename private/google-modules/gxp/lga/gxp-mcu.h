@@ -43,7 +43,8 @@ struct gxp_mcu {
 	struct gcip_mem_pool remap_secure_pool;
 	struct gxp_uci uci;
 	struct gxp_kci kci;
-	struct gcip_telemetry_ctx telemetry;
+	struct gcip_telemetry telemetry_log;
+	struct gcip_telemetry telemetry_trace;
 	/* To manage IIF fences. */
 	struct gxp_iif *giif;
 };

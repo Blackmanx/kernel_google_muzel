@@ -781,14 +781,14 @@ static bool gxp_debug_dump_is_core_dump_available_and_valid(struct gxp_dev *gxp,
 }
 
 static int gxp_debug_dump_add_core_dump_segments(struct gxp_dev *gxp, struct gxp_virtual_device *vd,
-						 uint32_t core_id, int *seg_idx)
+						 uint32_t core_id, uint32_t virt_core_id,
+						 int *seg_idx)
 {
 	struct gxp_debug_dump_manager *mgr = gxp->debug_dump_mgr;
 	struct gxp_core_dump *core_dump = mgr->core_dump;
 	struct gxp_core_dump_header *core_dump_header = &core_dump->core_dump_header[core_id];
 	struct gxp_core_header *core_header = &core_dump_header->core_header;
 	int ret = 0;
-	int virt_core;
 	struct gxp_common_dump *common_dump = mgr->common_dump;
 	int i;
 	void *data_addr;
@@ -834,25 +834,20 @@ static int gxp_debug_dump_add_core_dump_segments(struct gxp_dev *gxp, struct gxp
 		data_addr += core_dump_header->seg_header[i].size;
 	}
 
-	if (gxp_is_direct_mode(gxp))
-		virt_core = gxp_vd_phys_core_to_virt_core(vd, core_id);
-	else
-		virt_core = core_header->firmware_id;
-
 	/* FW RO section. */
-	ret = gxp_add_seg(mgr, core_id, seg_idx, gxp->fwbufs[virt_core].vaddr,
-			  gxp->fwbufs[virt_core].size);
+	ret = gxp_add_seg(mgr, core_id, seg_idx, gxp->fwbufs[virt_core_id].vaddr,
+			  gxp->fwbufs[virt_core_id].size);
 	if (ret)
 		return ret;
 
 	/* FW RW section. */
-	ret = gxp_map_ns_image_config_section(gxp, vd, CORE_FIRMWARE_RW_ADDR(virt_core), core_id,
-					      virt_core, seg_idx);
+	ret = gxp_map_ns_image_config_section(gxp, vd, CORE_FIRMWARE_RW_ADDR(virt_core_id), core_id,
+					      virt_core_id, seg_idx);
 	if (ret)
 		return ret;
 
 	/* FW VD section. */
-	ret = gxp_map_ns_image_config_section(gxp, vd, VD_PRIVATE_VIRT_ADDR, core_id, virt_core,
+	ret = gxp_map_ns_image_config_section(gxp, vd, VD_PRIVATE_VIRT_ADDR, core_id, virt_core_id,
 					      seg_idx);
 	if (ret)
 		return ret;
@@ -904,6 +899,7 @@ static int gxp_handle_debug_dump(struct gxp_dev *gxp, struct gxp_virtual_device 
 	int ret = 0;
 	int seg_idx = 0;
 	char sscd_msg[SSCD_MSG_LENGTH];
+	uint32_t virt_core_id;
 
 	/* TODO(b/381009565): Remove logic for early return if core dump not available. */
 	/* Check if the core dump is available and valid. */
@@ -912,8 +908,13 @@ static int gxp_handle_debug_dump(struct gxp_dev *gxp, struct gxp_virtual_device 
 		goto out;
 	}
 
+	if (gxp_is_direct_mode(gxp))
+		virt_core_id = gxp_vd_phys_core_to_virt_core(vd, core_id);
+	else
+		virt_core_id = core_header->firmware_id;
+
 	/* Add the segments dumped from core firmware. */
-	ret = gxp_debug_dump_add_core_dump_segments(gxp, vd, core_id, &seg_idx);
+	ret = gxp_debug_dump_add_core_dump_segments(gxp, vd, core_id, virt_core_id, &seg_idx);
 	if (ret)
 		goto out_add_seg;
 
@@ -926,7 +927,7 @@ static int gxp_handle_debug_dump(struct gxp_dev *gxp, struct gxp_virtual_device 
 
 	dev_dbg(gxp->dev, "Passing dump data to SSCD daemon\n");
 
-	core_cfg = vd->core_cfg.vaddr + (vd->core_cfg.size / GXP_NUM_CORES) * core_id;
+	core_cfg = vd->core_cfg.vaddr + (vd->core_cfg.size / GXP_NUM_CORES) * virt_core_id;
 	snprintf(sscd_msg, SSCD_MSG_LENGTH - 1,
 		 "gxp debug dump (vdid %d)(core %0x)(exccause:0x%x, excvaddr:0x%x, epc1:0x%x)",
 		 vd->vdid, core_id, core_cfg->crash_exccause, core_cfg->crash_excvaddr,

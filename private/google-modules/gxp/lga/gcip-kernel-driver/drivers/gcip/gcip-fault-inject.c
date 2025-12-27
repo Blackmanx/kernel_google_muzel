@@ -7,12 +7,14 @@
 
 #include <linux/debugfs.h>
 #include <linux/fs.h>
+#include <linux/pm_runtime.h>
 #include <linux/slab.h>
 #include <linux/uaccess.h>
 
-#include <gcip/gcip-fault-injection.h>
+#include <gcip/gcip-fault-inject.h>
 #include <gcip/gcip-kci.h>
 #include <gcip/gcip-pm.h>
+#include <gcip/gcip-status-code.h>
 
 static int gcip_fault_inject_send_locked(struct gcip_fault_inject *injection)
 {
@@ -38,7 +40,7 @@ static int gcip_fault_inject_send_locked(struct gcip_fault_inject *injection)
 	ret = injection->send_kci(injection);
 	if (!ret) {
 		injection->fw_support_status = GCIP_FAULT_INJECT_STATUS_SUPPORTED;
-	} else if (ret == GCIP_KCI_ERROR_UNIMPLEMENTED) {
+	} else if (ret == GCIP_STATUS_CODE_UNIMPLEMENTED) {
 		injection->fw_support_status = GCIP_FAULT_INJECT_STATUS_UNSUPPORTED;
 	} else {
 		injection->fw_support_status = GCIP_FAULT_INJECT_STATUS_ERROR;
@@ -56,7 +58,7 @@ static int gcip_fault_inject_send_locked(struct gcip_fault_inject *injection)
 }
 
 /**
- * gcip_fault_injection_set() - Set the fault-injection values received from the DebugFS.
+ * gcip_fault_inject_set() - Set the fault-injection values received from the DebugFS.
  * @filp: The file pointer.
  * @buff: The user buffer holding the data to be written.
  * @count: The size of the requested data transfer.
@@ -64,17 +66,22 @@ static int gcip_fault_inject_send_locked(struct gcip_fault_inject *injection)
  *
  * Return: A non-negative return value represents the number of bytes successfully read.
  */
-static ssize_t gcip_fault_injection_set(struct file *filp, const char __user *buff, size_t count,
-					loff_t *offp)
+static ssize_t gcip_fault_inject_set(struct file *filp, const char __user *buff, size_t count,
+				     loff_t *offp)
 {
 	struct gcip_fault_inject *injection = filp->f_inode->i_private;
-	bool mcu_ready = !gcip_pm_get_if_powered(injection->pm, false);
+	bool mcu_ready;
 	char *input = NULL;
 	int ret;
 	int i;
 	int start = 0;
 	uint32_t val;
 	int consume;
+
+	if (injection->pm)
+		mcu_ready = !gcip_pm_get_if_powered(injection->pm, false);
+	else
+		mcu_ready = (pm_runtime_get_if_in_use(injection->dev) > 0);
 
 	if (*offp || (count + 1 >= FAULT_INJECT_BUF_SIZE)) {
 		ret = -EINVAL;
@@ -121,14 +128,14 @@ out:
 	kfree(input);
 
 	if (mcu_ready)
-		gcip_pm_put(injection->pm);
+		injection->pm ? gcip_pm_put(injection->pm) : pm_runtime_put(injection->dev);
 
 	return ret;
 }
 
 /* Write the fault injection progress rate and content. */
-static void write_injection_content(struct gcip_fault_inject *injection, char *output, loff_t *offp,
-				    const size_t buf_size)
+static void write_inject_content(struct gcip_fault_inject *injection, char *output, loff_t *offp,
+				 const size_t buf_size)
 {
 	int i;
 
@@ -146,7 +153,7 @@ static void write_injection_content(struct gcip_fault_inject *injection, char *o
 }
 
 /**
- * gcip_fault_injection_get() - Get the fault-injection values.
+ * gcip_fault_inject_get() - Get the fault-injection values.
  * @filp: The file pointer.
  * @buff: The empty buffer where the newly read data should be placed.
  * @count: The size of the requested data transfer.
@@ -154,8 +161,8 @@ static void write_injection_content(struct gcip_fault_inject *injection, char *o
  *
  * Return: A non-negative return value represents the number of bytes successfully written.
  */
-static ssize_t gcip_fault_injection_get(struct file *filp, char __user *buff, size_t count,
-					loff_t *offp)
+static ssize_t gcip_fault_inject_get(struct file *filp, char __user *buff, size_t count,
+				     loff_t *offp)
 {
 	struct gcip_fault_inject *injection = filp->f_inode->i_private;
 	const size_t buf_size = min_t(size_t, count, FAULT_INJECT_BUF_SIZE);
@@ -174,7 +181,7 @@ static ssize_t gcip_fault_injection_get(struct file *filp, char __user *buff, si
 	switch (injection->fw_support_status) {
 	case GCIP_FAULT_INJECT_STATUS_UNKNOWN:
 		*offp += scnprintf(output + *offp, buf_size - *offp, "unknown\n");
-		write_injection_content(injection, output, offp, buf_size);
+		write_inject_content(injection, output, offp, buf_size);
 		break;
 	case GCIP_FAULT_INJECT_STATUS_ERROR:
 		*offp += scnprintf(output + *offp, buf_size - *offp, "error\n");
@@ -184,7 +191,7 @@ static ssize_t gcip_fault_injection_get(struct file *filp, char __user *buff, si
 		break;
 	default:
 		*offp += scnprintf(output + *offp, buf_size - *offp, "supported\n");
-		write_injection_content(injection, output, offp, buf_size);
+		write_inject_content(injection, output, offp, buf_size);
 	}
 
 	mutex_unlock(&injection->lock);
@@ -199,8 +206,8 @@ static ssize_t gcip_fault_injection_get(struct file *filp, char __user *buff, si
 	return ret;
 }
 
-static const struct file_operations fault_inject_fops = { .write = gcip_fault_injection_set,
-							  .read = gcip_fault_injection_get };
+static const struct file_operations fault_inject_fops = { .write = gcip_fault_inject_set,
+							  .read = gcip_fault_inject_get };
 
 struct gcip_fault_inject *gcip_fault_inject_create(const struct gcip_fault_inject_args *args)
 {
@@ -218,8 +225,8 @@ struct gcip_fault_inject *gcip_fault_inject_create(const struct gcip_fault_injec
 	injection->fw_support_status = GCIP_FAULT_INJECT_STATUS_UNKNOWN;
 
 	mutex_init(&injection->lock);
-	injection->d_entry = debugfs_create_file(DEBUGFS_FAULT_INJECTION, 0600, args->parent_dentry,
-						 injection, &fault_inject_fops);
+	injection->d_entry = debugfs_create_file(args->name, 0600, args->parent_dentry, injection,
+						 &fault_inject_fops);
 
 	return injection;
 }

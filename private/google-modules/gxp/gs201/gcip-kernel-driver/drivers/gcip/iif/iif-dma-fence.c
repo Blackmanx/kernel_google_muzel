@@ -20,14 +20,17 @@
 #include <iif/iif-dma-fence.h>
 #include <iif/iif-fence.h>
 #include <iif/iif-shared.h>
+#include <iif/iif.h>
 
 /* The callback which will be invoked when the refcount of @iif becomes 0. */
 static void iif_dma_fence_on_release(struct iif_fence *iif)
 {
 	struct iif_dma_fence *iif_dma_fence = to_iif_dma_fence(iif);
 
-	dma_fence_put(iif_dma_fence->dma_fence);
-	put_task_struct(iif_dma_fence->task);
+	if (iif_dma_fence->dma_fence)
+		dma_fence_put(iif_dma_fence->dma_fence);
+	if (iif_dma_fence->task)
+		put_task_struct(iif_dma_fence->task);
 	kfree(iif_dma_fence);
 }
 

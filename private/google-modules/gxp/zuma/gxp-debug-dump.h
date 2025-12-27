@@ -2,25 +2,24 @@
 /*
  * GXP debug dump handler
  *
- * Copyright (C) 2020-2022 Google LLC
+ * Copyright (C) 2020-2025 Google LLC
  */
 
 #ifndef __GXP_DEBUG_DUMP_H__
 #define __GXP_DEBUG_DUMP_H__
 
 #include <linux/bitops.h>
+#include <linux/platform_data/sscoredump.h>
 #include <linux/types.h>
 #include <linux/workqueue.h>
+
+#include <gcip/gcip-firmware.h>
+#include <gcip/gcip-memory.h>
 
 #include "gxp-config.h"
 #include "gxp-dma.h"
 #include "gxp-internal.h"
 
-#define HAS_COREDUMP (IS_GXP_TEST || IS_ENABLED(CONFIG_SUBSYSTEM_COREDUMP))
-
-#if HAS_COREDUMP
-#include <linux/platform_data/sscoredump.h>
-#endif
 
 #if GXP_HAS_MCU
 /* Additional +1 is for the MCU core. */
@@ -59,6 +58,9 @@
  * coredump_<SUBSYSTEM_NAME>_<%Y-%m-%d_%H-%M-%S>.bin.
  */
 #define SSCD_REPORT_WAIT_TIME (1000ULL)
+
+/* Maximum length of the message string sent to SSCD */
+#define SSCD_MSG_LENGTH 128
 
 #define GXP_Q7_ICACHE_SIZE 131072 /* I-cache size in bytes */
 #define GXP_Q7_ICACHE_LINESIZE 64 /* I-cache line size in bytes */
@@ -249,6 +251,31 @@ enum gxp_segment_type {
 	TRAX = 13,
 } __packed;
 
+enum gxp_etf_mode {
+	/*
+	 * In this mode, the trace memory is used as a Circular Buffer. Trace data
+	 * is captured into the Trace memory starting from the location pointed by
+	 * the write pointer register. Even when the trace memory is full,
+	 * incoming trace data continues to be overwritten into the trace memory
+	 * until a stop condition has occurred.
+	 */
+	CIRCULAR_BUFFER_MODE,
+	/*
+	 * In this mode, the trace memory is used as a FIFO that can be read through
+	 * the RRD Register while trace is being captured. Trace data is captured
+	 * into the Trace RAM and when full, the incoming trace stream is stalled.
+	 */
+	SOFTWARE_FIFO_MODE,
+	/*
+	 * In this mode, the trace memory is used as a FIFO that is drained through
+	 * the ATB interface. Trace data is captured into the Trace RAM and
+	 * when full, the incoming trace stream is stalled. When the Trace buffer is
+	 * non-empty, trace data is drained out through the ATB interface.
+	 */
+	HARDWARE_FIFO_MODE,
+	MAX_ETF_MODE,
+};
+
 struct gxp_seg_header {
 	/* Name of data type */
 	enum gxp_segment_type type;
@@ -343,12 +370,25 @@ struct gxp_debug_dump_work {
 	uint core_id;
 };
 
+struct gxp_per_core_sscd_segments {
+	/* SSCD segments which will be passed to SSCD module */
+	struct sscd_segment segments[GXP_NUM_SEGMENTS_PER_CORE];
+	/* Number of segments which have been copied to local memory */
+	u32 num_copied_segments;
+	/* Total number of valid segments */
+	u32 num_segments;
+	/* Indicates that the previous debug dump on this core is still pending. */
+	bool pending;
+	/* Message passed to the SSCD module along with the segments */
+	char sscd_msg[SSCD_MSG_LENGTH];
+};
+
 struct gxp_debug_dump_manager {
 	struct gxp_dev *gxp;
 	/* Buffer holding debug dump data from core firmware. */
 	struct gxp_coherent_buf core_buf;
 	/* Buffer holding debug dump data from MCU firmware. */
-	struct gxp_mapped_resource mcu_buf;
+	struct gcip_memory mcu_buf;
 	struct gxp_debug_dump_work debug_dump_works[GXP_NUM_CORES];
 	/* Start of the core dump */
 	struct gxp_core_dump *core_dump;
@@ -363,9 +403,7 @@ struct gxp_debug_dump_manager {
 	 * time.
 	 */
 	struct mutex debug_dump_lock;
-#if HAS_COREDUMP
-	struct sscd_segment segs[GXP_NUM_DEBUG_DUMP_CORES][GXP_NUM_SEGMENTS_PER_CORE];
-#endif /* HAS_COREDUMP */
+	struct gxp_per_core_sscd_segments sscd_segments[GXP_NUM_DEBUG_DUMP_CORES];
 };
 
 int gxp_debug_dump_init(struct gxp_dev *gxp, void *sscd_dev, void *sscd_pdata);
@@ -375,16 +413,16 @@ struct work_struct *gxp_debug_dump_get_notification_handler(struct gxp_dev *gxp,
 bool gxp_debug_dump_is_enabled(void);
 
 /**
- * gxp_debug_dump_invalidate_segments() - Invalidate debug dump segments to enable
- *                                        firmware to populate them on next debug
- *                                        dump trigger.
+ * gxp_debug_dump_invalidate_core_segments() - Invalidate core dump segments to enable core
+ *                                             firmware to populate them on next debug dump
+ *                                             trigger.
  *
  * This function is not thread safe. Caller should take the necessary precautions.
  *
  * @gxp: The GXP device to obtain the handler for
- * @core_id: physical id of core whose dump segments need to be invalidated.
+ * @core_id: physical id of the DSP core whose dump segments need to be invalidated.
  */
-void gxp_debug_dump_invalidate_segments(struct gxp_dev *gxp, uint32_t core_id);
+void gxp_debug_dump_invalidate_core_segments(struct gxp_dev *gxp, uint32_t core_id);
 
 /**
  * gxp_debug_dump_send_forced_debug_dump_request() - Sends the forced debug dump request to the
@@ -403,26 +441,36 @@ void gxp_debug_dump_send_forced_debug_dump_request(struct gxp_dev *gxp,
 						   struct gxp_virtual_device *vd);
 
 /**
- * gxp_debug_dump_process_dump_mcu_mode() - Checks and process the debug dump
- *                                          for cores from core_list.
+ * gxp_debug_dump_prepare_dump_mcu_mode() - Prepares the debug dump by copying the segments to a
+ *                                          local buffer so that the VD can be unblocked early.
  * @gxp: The GXP device to obtain the handler for
- * @core_list: A bitfield enumerating the physical cores on which crash is
- *             reported from firmware.
+ * @core_list: Pointer to a bitfield enumerating the physical cores on which crash is
+ *             reported from firmware. The value will be updated to exclude any core which has not
+ *             marked that a dump is available.
  * @crashed_vd: vd that has crashed.
  *
  * The caller must hold @crashed_vd->debug_dump_lock.
  *
- * Return:
- * * 0       - Success.
- * * -EINVAL - If vd state is not GXP_VD_UNAVAILABLE.
  */
-int gxp_debug_dump_process_dump_mcu_mode(struct gxp_dev *gxp, uint core_list,
-					 struct gxp_virtual_device *crashed_vd);
+void gxp_debug_dump_prepare_dump_mcu_mode(struct gxp_dev *gxp, uint *core_list,
+					  struct gxp_virtual_device *crashed_vd);
+
+/**
+ * gxp_debug_dump_process_dump_mcu_mode() - Checks and process the debug dump
+ *                                          for cores from core_list.
+ * @gxp: The GXP device to obtain the handler for
+ * @core_list: Pointer to a bitfield enumerating the physical cores on which crash is
+ *             reported. This should be the same as the one used in
+ *             gxp_debug_dump_prepare_dump_mcu_mode().
+ *
+ */
+void gxp_debug_dump_process_dump_mcu_mode(struct gxp_dev *gxp, uint *core_list);
 
 /**
  * gxp_debug_dump_report_mcu_crash() - Reports the SSCD module about the MCU crash.
  * @gxp: The GXP device to obtain the handler for
+ * @crash_type: The crash type of the MCU firmware
  */
-void gxp_debug_dump_report_mcu_crash(struct gxp_dev *gxp);
+void gxp_debug_dump_report_mcu_crash(struct gxp_dev *gxp, enum gcip_fw_crash_type crash_type);
 
 #endif /* __GXP_DEBUG_DUMP_H__ */

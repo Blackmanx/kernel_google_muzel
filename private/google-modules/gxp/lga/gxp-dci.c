@@ -220,13 +220,6 @@ static u64 gxp_dci_get_cmd_elem_seq(struct gcip_mailbox *mailbox, void *cmd)
 	return elem->seq;
 }
 
-static u32 gxp_dci_get_cmd_elem_code(struct gcip_mailbox *mailbox, void *cmd)
-{
-	struct gxp_dci_command *elem = cmd;
-
-	return elem->code;
-}
-
 static void gxp_dci_set_cmd_elem_seq(struct gcip_mailbox *mailbox, void *cmd,
 				     u64 seq)
 {
@@ -352,23 +345,21 @@ static void gxp_dci_release_awaiter_data(void *data)
 }
 
 static const struct gcip_mailbox_ops gxp_dci_gcip_mbx_ops = {
-	.get_cmd_queue_tail = gxp_mailbox_gcip_ops_get_cmd_queue_tail,
-	.inc_cmd_queue_tail = gxp_mailbox_gcip_ops_inc_cmd_queue_tail,
-	.acquire_cmd_queue_lock = gxp_mailbox_gcip_ops_acquire_cmd_queue_lock,
-	.release_cmd_queue_lock = gxp_mailbox_gcip_ops_release_cmd_queue_lock,
+	.get_tx_queue_tail = gxp_mailbox_gcip_ops_get_tx_queue_tail,
+	.inc_tx_queue_tail = gxp_mailbox_gcip_ops_inc_tx_queue_tail,
+	.acquire_tx_queue_lock = gxp_mailbox_gcip_ops_acquire_tx_queue_lock,
+	.release_tx_queue_lock = gxp_mailbox_gcip_ops_release_tx_queue_lock,
 	.get_cmd_elem_seq = gxp_dci_get_cmd_elem_seq,
 	.set_cmd_elem_seq = gxp_dci_set_cmd_elem_seq,
-	.get_cmd_elem_code = gxp_dci_get_cmd_elem_code,
-	.get_resp_queue_size = gxp_mailbox_gcip_ops_get_resp_queue_size,
-	.get_resp_queue_head = gxp_mailbox_gcip_ops_get_resp_queue_head,
-	.get_resp_queue_tail = gxp_mailbox_gcip_ops_get_resp_queue_tail,
-	.inc_resp_queue_head = gxp_mailbox_gcip_ops_inc_resp_queue_head,
-	.acquire_resp_queue_lock = gxp_mailbox_gcip_ops_acquire_resp_queue_lock,
-	.release_resp_queue_lock = gxp_mailbox_gcip_ops_release_resp_queue_lock,
+	.get_rx_queue_size = gxp_mailbox_gcip_ops_get_rx_queue_size,
+	.get_rx_queue_head = gxp_mailbox_gcip_ops_get_rx_queue_head,
+	.get_rx_queue_tail = gxp_mailbox_gcip_ops_get_rx_queue_tail,
+	.inc_rx_queue_head = gxp_mailbox_gcip_ops_inc_rx_queue_head,
+	.acquire_rx_queue_lock = gxp_mailbox_gcip_ops_acquire_rx_queue_lock,
+	.release_rx_queue_lock = gxp_mailbox_gcip_ops_release_rx_queue_lock,
 	.get_resp_elem_seq = gxp_dci_get_resp_elem_seq,
 	.set_resp_elem_seq = gxp_dci_set_resp_elem_seq,
-	.wait_for_cmd_queue_not_full =
-		gxp_mailbox_gcip_ops_wait_for_cmd_queue_not_full,
+	.wait_for_tx_queue_not_full = gxp_mailbox_gcip_ops_wait_for_tx_queue_not_full,
 	.after_enqueue_cmd = gxp_mailbox_gcip_ops_after_enqueue_cmd,
 	.after_fetch_resps = gxp_mailbox_gcip_ops_after_fetch_resps,
 	.handle_awaiter_arrived = gxp_dci_handle_awaiter_arrived,
@@ -467,6 +458,7 @@ struct gxp_mailbox *gxp_dci_alloc(struct gxp_mailbox_manager *mgr,
 	struct gxp_dci *dci;
 	struct gxp_mailbox_args mbx_args = {
 		.type = GXP_MBOX_TYPE_GENERAL,
+		.mode = GXP_MBOX_FULL_DUPLEX,
 		.ops = &gxp_dci_gxp_mbx_ops,
 		.queue_wrap_bit = DCI_CIRCULAR_QUEUE_WRAP_BIT,
 		.cmd_elem_size = sizeof(struct gxp_dci_command),

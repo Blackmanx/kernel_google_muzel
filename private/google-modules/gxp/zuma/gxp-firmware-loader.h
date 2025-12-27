@@ -13,6 +13,9 @@
 #include "gxp-config.h"
 #include "gxp-internal.h"
 
+/* Value of Magic field in the common header "DSPF' as a 32-bit LE int */
+#define GXP_FW_MAGIC 0x46505344
+
 struct gxp_firmware_loader_manager {
 	const struct firmware *core_firmware[GXP_NUM_CORES];
 	char *core_firmware_name;
@@ -28,6 +31,13 @@ struct gxp_firmware_loader_manager {
 	char *mcu_firmware_name;
 #endif
 	bool is_loaded;
+	/* Flags to track if fw is copied to DRAM. */
+	/*
+	 * Note: if firmware load attempt fails due to corrupted firmware
+	 * binary, there is no way to update the binary until driver is re-inserted.
+	 */
+	bool is_core_copied;
+	bool is_mcu_copied;
 	/* Protects above fields */
 	struct mutex lock;
 };

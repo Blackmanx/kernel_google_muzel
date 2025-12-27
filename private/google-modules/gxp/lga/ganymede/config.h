@@ -52,7 +52,7 @@
  * Indicates that RFW access policies have been enabled which makes access to certain registers
  * NS non accessible.
  */
-#define GXP_RFW_AC_POLICY_ENABLED
+#define GXP_RFW_AC_POLICY_ENABLED 1
 
 /* 15 because the last slice is reserved for system config region. */
 #define GXP_NUM_SHARED_SLICES 15
@@ -66,6 +66,11 @@
  */
 #define GXP_IS_DMA_COHERENT
 
+/* TODO(b/407813326): Remove this temporary WA once the correct flow is implemented. */
+#define GXP_CLEAR_CARVEOUT_IIF_SIGNAL_REGION 1
+#define GXP_CARVEOUT_IIF_SIGNAL_REGION_ADDRESS 0xA2140000
+#define GXP_CARVEOUT_IIF_SIGNAL_REGION_SIZE 0x30000
+
 /* HW watchdog */
 #define GXP_WDG_DT_IRQ_INDEX 5
 #define GXP_WDG_ENABLE_BIT 0
@@ -74,6 +79,9 @@
 
 /* arm-smmu-v3 requires domain finalization to do iommu map. */
 #define GXP_MMU_REQUIRE_ATTACH 1
+
+/* SMMU granularity depends on PAGE_SIZE. */
+#define GXP_MMU_GRANULARITY_IS_PAGE 1
 
 #define GXP_HAS_GSA 1
 

@@ -199,8 +199,6 @@ struct gxp_mailbox {
 	spinlock_t resp_queue_lock; /* protects resp_queue */
 	unsigned long resp_queue_lock_flags; /* to store IRQ flags */
 
-	/* commands which need to wait for responses will be added to the wait_list */
-	spinlock_t wait_list_lock; /* protects wait_list */
 	/* to create our own realtime worker for handling responses */
 	struct kthread_worker response_worker;
 	struct task_struct *response_thread;

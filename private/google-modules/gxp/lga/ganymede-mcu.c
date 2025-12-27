@@ -72,7 +72,7 @@ recovery:
 		dev_warn(gxp->dev, "MCU recovery shutdown by GSA failed (ret=%d)", ret);
 		return false;
 	}
-	dev_warn(gxp->dev, "MCU PSM transition to PS3 via recovery mode fails, current state: %u",
+	dev_warn(gxp->dev, "MCU PSM transition to PG via recovery mode failed, current state: %u",
 			gxp_lpm_get_state(gxp, CORE_TO_PSM(GXP_REG_MCU_ID)));
 	return false;
 }

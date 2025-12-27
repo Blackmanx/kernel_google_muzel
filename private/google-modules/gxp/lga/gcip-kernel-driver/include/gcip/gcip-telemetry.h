@@ -14,7 +14,6 @@
 #include <linux/mutex.h>
 #include <linux/refcount.h>
 #include <linux/rwlock_types.h>
-#include <linux/spinlock.h>
 #include <linux/types.h>
 #include <linux/workqueue.h>
 
@@ -22,6 +21,7 @@
 
 #define GCIP_TELEMETRY_NAME_LOG "telemetry_log"
 #define GCIP_TELEMETRY_NAME_TRACE "telemetry_trace"
+#define GCIP_TELEMETRY_NAME_OPAQUE "telemetry_opaque"
 
 /* Log level codes used by gcip firmware. */
 #define GCIP_FW_LOG_LEVEL_VERBOSE (2)
@@ -44,9 +44,10 @@ enum gcip_telemetry_state {
 
 /* To specify the target of operation. */
 enum gcip_telemetry_type {
-	GCIP_TELEMETRY_TYPE_LOG = 0,
-	GCIP_TELEMETRY_TYPE_TRACE = 1,
-	GCIP_TELEMETRY_TYPE_COUNT = 2,
+	GCIP_TELEMETRY_TYPE_LOG,
+	GCIP_TELEMETRY_TYPE_TRACE,
+	GCIP_TELEMETRY_TYPE_OPAQUE,
+	GCIP_TELEMETRY_TYPE_COUNT,
 };
 
 struct gcip_telemetry_header {
@@ -69,38 +70,26 @@ struct gcip_telemetry {
 	/* Device used for logging and memory allocation. */
 	struct device *dev;
 
+	enum gcip_telemetry_type type;
+	struct gcip_memory memory;
+
 	/*
 	 * State transitioning is to prevent racing in IRQ handlers. e.g. the interrupt comes when
 	 * the kernel is releasing buffers.
 	 */
 	enum gcip_telemetry_state state;
-	spinlock_t state_lock; /* protects state */
 
 	struct gcip_telemetry_header *header;
 
 	struct eventfd_ctx *ctx; /* signal this to notify the runtime */
-	rwlock_t ctx_lock; /* protects ctx */
+	struct mutex state_ctx_lock; /* protects ctx and state */
 	const char *name; /* for debugging */
 
 	struct work_struct work; /* worker for handling data */
-	/* Fallback function to call for default log/trace handling. */
+	/* Fallback function to call for default log/trace/opaque handling. */
 	void (*fallback_fn)(const struct gcip_telemetry *tel);
 	struct mutex mmap_lock; /* protects mmapped_count */
 	long mmapped_count; /* number of VMAs that are mapped to this telemetry buffer */
-};
-
-/**
- * struct gcip_telemetry_ctx - The object containing the telemetry contex.
- * @log: The gcip_telemetry for logging.
- * @trace: The gcip_telemetry for tracing.
- * @log_mem: The gcip_memory for logging.
- * @trace_mem: The gcip_memory for tracing.
- */
-struct gcip_telemetry_ctx {
-	struct gcip_telemetry log;
-	struct gcip_telemetry trace;
-	struct gcip_memory log_mem;
-	struct gcip_memory trace_mem;
 };
 
 struct gcip_kci;
@@ -113,8 +102,7 @@ struct gcip_telemetry_kci_args {
 
 /**
  * gcip_telemetry_kci() -  Sends telemetry KCI through send kci callback.
- * @tel_ctx: The object holds the info of the telemetry buffer.
- * @type: The type of telemetry.
+ * @tel: The object holds the info of the telemetry buffer.
  * @send_kci: The callback function to send the KCI, which receives gcip_telemetry_kci_args and
  *            returns:
  *            0 - Success
@@ -124,58 +112,52 @@ struct gcip_telemetry_kci_args {
  *
  * Return: 0 on success, or a negative errno otherwise.
  */
-int gcip_telemetry_kci(struct gcip_telemetry_ctx *tel_ctx, enum gcip_telemetry_type type,
+int gcip_telemetry_kci(struct gcip_telemetry *tel,
 		       int (*send_kci)(const struct gcip_telemetry_kci_args *),
 		       struct gcip_kci *kci);
 
 /**
  * gcip_telemetry_set_event() - Sets the eventfd for the given array of telemetries.
- * @tel_ctx: The gcip_telemetry_ctx to be set.
- * @type: The telemetry type to be set.
+ * @tel: The gcip_telemetry to be set.
  * @eventfd: The evenfd to be set.
  *
  * Return: 0 on success, or a negative errno otherwise.
  */
-int gcip_telemetry_set_event(struct gcip_telemetry_ctx *tel_ctx, enum gcip_telemetry_type type,
-			     u32 eventfd);
+int gcip_telemetry_set_event(struct gcip_telemetry *tel, u32 eventfd);
 
 /**
  * gcip_telemetry_unset_event() - Unsets the eventfd for the given array of telemetries.
- * @tel_ctx: The gcip_telemetry_ctx to be unset.
- * @type: The telemetry type to be set.
+ * @tel: The gcip_telemetry to be unset.
  */
-void gcip_telemetry_unset_event(struct gcip_telemetry_ctx *tel_ctx, enum gcip_telemetry_type type);
+void gcip_telemetry_unset_event(struct gcip_telemetry *tel);
 
 /**
  * gcip_telemetry_irq_handler() - The interrupt handler to schedule the worker when irq arrives.
- * @tel_ctx: The object holds the info of the telemetry buffer.
- * @type: The type of telemetry to be handled.
+ * @tel: The object holds the info of the telemetry buffer.
  */
-void gcip_telemetry_irq_handler(struct gcip_telemetry_ctx *tel_ctx, enum gcip_telemetry_type type);
+void gcip_telemetry_irq_handler(struct gcip_telemetry *tel);
 
 /**
  * gcip_telemetry_mmap() - Mmaps the telemetry buffer.
- * @tel_ctx: The object holds the info of the telemetry buffer.
- * @type: The type of telemetry to be mmaped.
+ * @tel: The object holds the info of the telemetry buffer.
  * @vma: The struct holds the data to communicate with mm APIs.
  *
  * Return: 0 on success, or a negative errno otherwise.
  */
-int gcip_telemetry_mmap(struct gcip_telemetry_ctx *tel_ctx, enum gcip_telemetry_type type,
-			struct vm_area_struct *vma);
+int gcip_telemetry_mmap(struct gcip_telemetry *tel, struct vm_area_struct *vma);
 
-/*
- * Initializes struct gcip_telemetry.
+/**
+ * gcip_telemetry_init() - Initializes struct gcip_telemetry.
+ * @tel: The telemetry object to be initialized.
+ * @type: The type of telemetry.
+ * @dev: The device this telemetry object bound to.
  *
- * @vaddr: Virtual address of the queue buffer.
- * @size: Size of the queue buffer. Must be power of 2 and greater than the size of struct
- * gcip_telemetry_header.
- * @fallback_fn: Fallback function to call for default log/trace handling.
+ * Return: 0 on success, or a negative errno otherwise.
  */
-int gcip_telemetry_init(struct gcip_telemetry_ctx *tel_ctx, enum gcip_telemetry_type type,
+int gcip_telemetry_init(struct gcip_telemetry *tel, enum gcip_telemetry_type type,
 			struct device *dev);
 
 /* Exits and sets the telemetry state to GCIP_TELEMETRY_INVALID. */
-void gcip_telemetry_exit(struct gcip_telemetry_ctx *tel_ctx, enum gcip_telemetry_type type);
+void gcip_telemetry_exit(struct gcip_telemetry *tel);
 
 #endif /* __GCIP_TELEMETRY_H__ */

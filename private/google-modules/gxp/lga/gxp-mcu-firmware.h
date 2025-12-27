@@ -17,6 +17,9 @@
 
 #include "gxp-internal.h"
 
+/* The name of the fault injection debugfs node. */
+#define GXP_FAULT_INJECT_NAME "fault_inject"
+
 struct gxp_mcu_firmware_ns_buffer {
 	/* SG table for NS firmware buffer mappings. */
 	struct sg_table *sgt;

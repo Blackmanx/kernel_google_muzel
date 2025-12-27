@@ -45,17 +45,16 @@ struct gcip_kci_command_element {
 struct gcip_kci_response_element {
 	u64 seq;
 	u16 code;
+	/* RKCI may provide response-type-specific data in this field (not used in KCI). */
+	u16 rkci_value1;
 	/*
-	 * Firmware can set some data according to the type of the response.
-	 * TODO(b/279386960): as we don't manage the status of responses using this field anymore,
-	 *                    rename this field to more reasonable name.
+	 * KCI field retval may return a value depending on the command type.
+	 * Firmware calls this field value2 for RKCI.
 	 */
-	u16 status;
-	/*
-	 * Return value is used by some KCI command responses.
-	 * For reverse KCI commands this is set as value2.
-	 */
-	u32 retval;
+	union {
+		u32 rkci_value2;
+		u32 retval;
+	};
 } __packed;
 
 /*
@@ -267,8 +266,6 @@ struct gcip_kci {
 	unsigned long resp_queue_lock_flags;
 	/* Queue for waiting for the response doorbell to be rung. */
 	wait_queue_head_t resp_doorbell_waitq;
-	/* Protects wait_list. */
-	spinlock_t wait_list_lock;
 	/* Worker of consuming responses. */
 	struct work_struct work;
 	/* Handler for reverse (firmware -> kernel) requests. */

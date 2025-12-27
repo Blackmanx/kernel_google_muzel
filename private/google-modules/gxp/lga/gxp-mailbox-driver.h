@@ -158,24 +158,21 @@ int gxp_mailbox_inc_resp_queue_head_locked(struct gxp_mailbox *mailbox, u32 inc,
  * Following functions are used when setting the operators of `struct gcip_mailbox_ops`.
  * To use these functions, @mailbox->data should be set as an instance of `struct gxp_mailbox`.
  */
-u32 gxp_mailbox_gcip_ops_get_cmd_queue_tail(struct gcip_mailbox *mailbox);
-void gxp_mailbox_gcip_ops_inc_cmd_queue_tail(struct gcip_mailbox *mailbox,
-					     u32 inc);
-int gxp_mailbox_gcip_ops_acquire_cmd_queue_lock(struct gcip_mailbox *mailbox,
-						bool try, bool *atomic);
-void gxp_mailbox_gcip_ops_release_cmd_queue_lock(struct gcip_mailbox *mailbox);
+u32 gxp_mailbox_gcip_ops_get_tx_queue_tail(struct gcip_mailbox *mailbox);
+void gxp_mailbox_gcip_ops_inc_tx_queue_tail(struct gcip_mailbox *mailbox, u32 inc);
+int gxp_mailbox_gcip_ops_acquire_tx_queue_lock(struct gcip_mailbox *mailbox, bool try,
+					       bool *atomic);
+void gxp_mailbox_gcip_ops_release_tx_queue_lock(struct gcip_mailbox *mailbox);
 
-u32 gxp_mailbox_gcip_ops_get_resp_queue_size(struct gcip_mailbox *mailbox);
-u32 gxp_mailbox_gcip_ops_get_resp_queue_head(struct gcip_mailbox *mailbox);
-u32 gxp_mailbox_gcip_ops_get_resp_queue_tail(struct gcip_mailbox *mailbox);
-void gxp_mailbox_gcip_ops_inc_resp_queue_head(struct gcip_mailbox *mailbox,
-					      u32 inc);
-int gxp_mailbox_gcip_ops_acquire_resp_queue_lock(struct gcip_mailbox *mailbox,
-						 bool try, bool *atomic);
-void gxp_mailbox_gcip_ops_release_resp_queue_lock(struct gcip_mailbox *mailbox);
+u32 gxp_mailbox_gcip_ops_get_rx_queue_size(struct gcip_mailbox *mailbox);
+u32 gxp_mailbox_gcip_ops_get_rx_queue_head(struct gcip_mailbox *mailbox);
+u32 gxp_mailbox_gcip_ops_get_rx_queue_tail(struct gcip_mailbox *mailbox);
+void gxp_mailbox_gcip_ops_inc_rx_queue_head(struct gcip_mailbox *mailbox, u32 inc);
+int gxp_mailbox_gcip_ops_acquire_rx_queue_lock(struct gcip_mailbox *mailbox, bool try,
+					       bool *atomic);
+void gxp_mailbox_gcip_ops_release_rx_queue_lock(struct gcip_mailbox *mailbox);
 
-int gxp_mailbox_gcip_ops_wait_for_cmd_queue_not_full(
-	struct gcip_mailbox *mailbox);
+int gxp_mailbox_gcip_ops_wait_for_tx_queue_not_full(struct gcip_mailbox *mailbox);
 int gxp_mailbox_gcip_ops_after_enqueue_cmd(struct gcip_mailbox *mailbox,
 					   void *cmd);
 void gxp_mailbox_gcip_ops_after_fetch_resps(struct gcip_mailbox *mailbox,

@@ -110,7 +110,7 @@ static void gxp_common_platform_reg_sscd(void)
 	/* Registers SSCD platform device */
 	if (gxp_debug_dump_is_enabled()) {
 		if (platform_device_register(&gxp_sscd_dev))
-			pr_err("Unable to register SSCD platform device\n");
+			pr_err(GXP_NAME " Unable to register SSCD platform device\n");
 	}
 }
 
@@ -1725,13 +1725,15 @@ static int gxp_set_reg_resources(struct platform_device *pdev, struct gxp_dev *g
 #endif
 
 	gxp->num_mailboxes_compat = GXP_NUM_MAILBOXES;
-#if GXP_HAS_MCU
-	r = platform_get_resource_byname(pdev, IORESOURCE_MEM, "iif_mailbox");
-	if (IS_ERR_OR_NULL(r))
-		/* Compensate for @IIF_MAILBOX_ID since it's not available in device tree yet. */
-		gxp->num_mailboxes_compat = GXP_NUM_MAILBOXES - 1;
-#endif /* GXP_HAS_MCU */
-
+	if (GXP_HAS_MCU) {
+		r = platform_get_resource_byname(pdev, IORESOURCE_MEM, "iif_mailbox");
+		if (IS_ERR_OR_NULL(r))
+			/*
+			 * Compensate for @IIF_MAILBOX_ID since it's not available in device tree
+			 * yet.
+			 */
+			gxp->num_mailboxes_compat = GXP_NUM_MAILBOXES - 1;
+	}
 	for (i = 0; i < gxp->num_mailboxes_compat; i++) {
 		r = platform_get_resource(pdev, IORESOURCE_MEM, i + 1);
 		if (IS_ERR_OR_NULL(r)) {
@@ -2106,12 +2108,17 @@ err_remove_debugdir:
 static void gxp_common_platform_remove(struct platform_device *pdev)
 {
 	struct gxp_dev *gxp = platform_get_drvdata(pdev);
+	int power_down_retry = 5;
 
 	/*
-	 * This may power off the BLK, so should do it first before releasing
-	 * any resource.
+	 * This may power off the BLK, so should do it first before releasing any resource. Note
+	 * that if the power down request fails even after retry, gcip-pm will give up the request
+	 * and the block might be in a bad state. This case ideally won't happen in the real
+	 * production, but could happen at the development phase. It is inevitable if the kernel
+	 * driver cannot properly power block down, otherwise, any unpredictable error such as
+	 * kernel panic can occur.
 	 */
-	gcip_pm_flush_put_work(gxp->power_mgr->pm);
+	gcip_pm_flush_work(gxp->power_mgr->pm, power_down_retry);
 	gxp_device_remove(gxp);
 	gxp_debug_dump_exit(gxp);
 	if (gxp->before_remove)

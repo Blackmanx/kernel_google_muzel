@@ -13,6 +13,8 @@
 #include <linux/of.h>
 #include <linux/platform_device.h>
 
+#include <gcip/gcip-status-code.h>
+
 #include "gxp-config.h"
 #include "gxp-devfreq.h"
 #include "gxp-internal.h"
@@ -54,7 +56,7 @@ static int allocate_vmbox(struct gxp_dev *gxp, struct gxp_virtual_device *vd)
 		if (ret > 0) {
 			dev_err(gxp->dev, "Received GCIP_KCI_CODE_ALLOCATE_VMBOX error code: %u.",
 				ret);
-			ret = gcip_kci_error_to_errno(gxp->dev, ret);
+			ret = gcip_status_code_convert_to_errno(ret);
 		}
 		dev_err(gxp->dev, "Failed to allocate VMBox for client %d, TPU client %d: %d.",
 			client_id, vd->tpu_client_id, ret);
@@ -250,8 +252,7 @@ static int gxp_mcu_register_wdg_irq(struct gxp_dev *gxp)
 		return 0;
 	}
 	ret = devm_request_threaded_irq(dev, wdg_virq, mcu_wdg_irq_handler,
-					mcu_wdg_threaded_handler,
-					/*flags=*/0, "aurora_mcu_wdg",
+					mcu_wdg_threaded_handler, /*flags=*/0, "gxp_aurora_mcu_wdg",
 					(void *)gxp);
 	if (ret)
 		dev_err(dev, "Unable to register MCU WDG IRQ: %d\n", ret);

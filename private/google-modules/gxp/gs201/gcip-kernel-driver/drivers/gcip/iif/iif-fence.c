@@ -29,6 +29,7 @@
 #include <iif/iif-manager.h>
 #include <iif/iif-shared.h>
 #include <iif/iif-sync-file.h>
+#include <iif/iif.h>
 
 /* A compare function to sort fences by their ID. */
 static int compare_iif_fence_by_id(const void *lhs, const void *rhs)
@@ -313,7 +314,8 @@ static void iif_fence_notify_poll_cb(struct iif_fence *fence)
 
 	list_for_each_entry_safe(cur, tmp, &fence->poll_cb_list, node) {
 		list_del_init(&cur->node);
-		cur->func(fence, cur);
+		if (likely(!(fence->flags & IIF_FLAGS_DISABLE_POLL)))
+			cur->func(fence, cur);
 	}
 }
 
@@ -434,6 +436,8 @@ static void iif_fence_do_destroy(struct iif_fence *fence)
 	lockdep_unregister_key(&fence->fence_lock_key);
 #endif /* IS_ENABLED(CONFIG_DEBUG_SPINLOCK) */
 
+	iif_manager_put(fence->mgr);
+
 	if (fence->ops && fence->ops->on_release)
 		fence->ops->on_release(fence);
 }
@@ -536,7 +540,7 @@ int iif_fence_init(struct iif_manager *mgr, struct iif_fence *fence,
 	if (fence->id < 0)
 		return fence->id;
 
-	fence->mgr = mgr;
+	fence->mgr = iif_manager_get(mgr);
 	fence->signaler_ip = signaler_ip;
 	fence->total_signalers = total_signalers;
 	fence->submitted_signalers = 0;

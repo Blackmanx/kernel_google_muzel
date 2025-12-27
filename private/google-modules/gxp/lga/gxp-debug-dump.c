@@ -88,44 +88,28 @@ static void gxp_debug_dump_cache_flush(struct gxp_dev *gxp)
 	/* Debug dump carveout is currently coherent. NO-OP. */
 }
 
-__maybe_unused static u32 gxp_read_sync_barrier_shadow(struct gxp_dev *gxp, uint index)
+static u32 gxp_read_sync_barrier_shadow(struct gxp_dev *gxp, uint index)
 {
 	return gxp_read_32(gxp, GXP_REG_SYNC_BARRIER_SHADOW(index));
 }
 
-static void gxp_get_common_registers(struct gxp_dev *gxp,
-				     struct gxp_seg_header *seg_header,
-				     struct gxp_common_registers *common_regs)
+static void gxp_get_ac_disabled_common_reg(struct gxp_dev *gxp,
+					   struct gxp_common_registers *common_regs)
 {
-	__maybe_unused int i;
+	int i;
 
-	dev_dbg(gxp->dev, "Getting common registers\n");
-
-	seg_header->type = COMMON_REGISTERS;
-	seg_header->valid = 1;
-	seg_header->size = sizeof(*common_regs);
-
-	/* Get Aurora Top registers */
-	common_regs->aurora_revision =
-		gxp_read_32(gxp, GXP_REG_AURORA_REVISION);
-#ifndef GXP_RFW_AC_POLICY_ENABLED
 #if GXP_DUMP_INTERRUPT_POLARITY_REGISTER
-	common_regs->common_int_pol_0 =
-		gxp_read_32(gxp, GXP_REG_COMMON_INT_POL_0);
-	common_regs->common_int_pol_1 =
-		gxp_read_32(gxp, GXP_REG_COMMON_INT_POL_1);
-	common_regs->dedicated_int_pol =
-		gxp_read_32(gxp, GXP_REG_DEDICATED_INT_POL);
+	common_regs->common_int_pol_0 = gxp_read_32(gxp, GXP_REG_COMMON_INT_POL_0);
+	common_regs->common_int_pol_1 = gxp_read_32(gxp, GXP_REG_COMMON_INT_POL_1);
+	common_regs->dedicated_int_pol = gxp_read_32(gxp, GXP_REG_DEDICATED_INT_POL);
 #endif /* GXP_DUMP_INTERRUPT_POLARITY_REGISTER */
 	common_regs->raw_ext_int = gxp_read_32(gxp, GXP_REG_RAW_EXT_INT);
 
 	for (i = 0; i < GXP_NUM_CORES; i++)
 		common_regs->core_pd[i] = gxp_read_32(gxp, GXP_REG_CORE_PD(i));
 
-	common_regs->global_counter_low =
-		gxp_read_32(gxp, GXP_REG_GLOBAL_COUNTER_LOW);
-	common_regs->global_counter_high =
-		gxp_read_32(gxp, GXP_REG_GLOBAL_COUNTER_HIGH);
+	common_regs->global_counter_low = gxp_read_32(gxp, GXP_REG_GLOBAL_COUNTER_LOW);
+	common_regs->global_counter_high = gxp_read_32(gxp, GXP_REG_GLOBAL_COUNTER_HIGH);
 	common_regs->wdog_control = gxp_read_32(gxp, GXP_REG_WDOG_CONTROL);
 	common_regs->wdog_value = gxp_read_32(gxp, GXP_REG_WDOG_VALUE);
 
@@ -141,10 +125,24 @@ static void gxp_get_common_registers(struct gxp_dev *gxp,
 
 	/* Get Sync Barrier registers */
 	for (i = 0; i < SYNC_BARRIER_COUNT; i++)
-		common_regs->sync_barrier[i] =
-			gxp_read_sync_barrier_shadow(gxp, i);
-#endif /* GXP_RFW_AC_POLICY_ENABLED */
+		common_regs->sync_barrier[i] = gxp_read_sync_barrier_shadow(gxp, i);
+}
 
+static void gxp_get_common_registers(struct gxp_dev *gxp,
+				     struct gxp_seg_header *seg_header,
+				     struct gxp_common_registers *common_regs)
+{
+	dev_dbg(gxp->dev, "Getting common registers\n");
+
+	seg_header->type = COMMON_REGISTERS;
+	seg_header->valid = 1;
+	seg_header->size = sizeof(*common_regs);
+
+	/* Get Aurora Top registers */
+	common_regs->aurora_revision =
+		gxp_read_32(gxp, GXP_REG_AURORA_REVISION);
+	if (!GXP_RFW_AC_POLICY_ENABLED)
+		gxp_get_ac_disabled_common_reg(gxp, common_regs);
 	dev_dbg(gxp->dev, "Done getting common registers\n");
 }
 
@@ -1456,11 +1454,143 @@ static int gxp_add_mailbox_details_to_segments(struct gxp_dev *gxp, struct gxp_m
 	return 0;
 }
 
-void gxp_debug_dump_report_mcu_crash(struct gxp_dev *gxp)
+/*
+ * Prints the ETF Buffer.
+ *
+ * When the dump_memory is either not initialized or the size is less than the number of valid
+ * values we have in ETF buffer we log the buffer into the kernel logs.
+ * @gxp: The GXP device to obtain the handler for
+ * @valid_trace_words: Number of valid words in FIFO
+ *
+ */
+static void gxp_debug_dump_log_etf_buffer(struct gxp_dev *gxp, u32 valid_trace_words)
+{
+	u32 addr;
+	u32 remain;
+	u32 vals[4];
+	u32 i;
+
+	dev_info(gxp->dev,
+		 "Start dumping ETF contents with size: %u words",
+		 valid_trace_words);
+
+	/* Perform modulo 4 operation to get remaining words. */
+	remain = valid_trace_words % 4;
+
+	for (addr = 0; addr < (valid_trace_words / 4); ++addr) {
+
+		for (i = 0; i < 4; ++i)
+			vals[i] = gxp_read_32(gxp, GXP_REG_ETF_RRD);
+
+		dev_info(gxp->dev,
+			 "ETF[%#04x]: %#08x %#08x %#08x %#08x",
+			 addr, vals[0], vals[1], vals[2], vals[3]);
+	}
+	if (remain != 0) {
+		/*
+		 * Fill the last 4 values with 0xFFFFFFFF as all 4 might not be occupied, ie will
+		 * indicate invalid value.
+		 */
+		memset(vals, 0xFFFFFFFF, sizeof(vals));
+
+		for (i = 0; i < remain; ++i)
+			vals[i] = gxp_read_32(gxp, GXP_REG_ETF_RRD);
+
+		dev_info(gxp->dev, "ETF[%#04x]: %#08x %#08x %#08x %#08x", addr, vals[0],
+			 vals[1], vals[2], vals[3]);
+	}
+}
+
+/*
+ * Prints the ETF CSR for following registers:
+ *
+ * RSZ, STS, RRD, RRP, RWP, CTL, MODE, CBUFLEVEL
+ * @gxp: The GXP device to obtain the handler for
+ *
+ */
+static void gxp_debug_dump_etf_dump_csr(struct gxp_dev *gxp)
+{
+	dev_info(gxp->dev, "Starting to dump ETF CSRs");
+	dev_info(gxp->dev, "rsz = %#08x", gxp_read_32(gxp, GXP_REG_ETF_RSZ));
+	dev_info(gxp->dev, "mode = %#08x", gxp_read_32(gxp, GXP_REG_ETF_MODE));
+	dev_info(gxp->dev, "rwp = %#08x", gxp_read_32(gxp, GXP_REG_ETF_RWP));
+	dev_info(gxp->dev, "ffcr = %#08x", gxp_read_32(gxp, GXP_REG_ETF_FFCR));
+	dev_info(gxp->dev, "rrp = %#08x", gxp_read_32(gxp, GXP_REG_ETF_RRP));
+	dev_info(gxp->dev, "rwp = %#08x", gxp_read_32(gxp, GXP_REG_ETF_RWP));
+	dev_info(gxp->dev, "ctl = %#08x", gxp_read_32(gxp, GXP_REG_ETF_CTL));
+	dev_info(gxp->dev, "sts = %#08x", gxp_read_32(gxp, GXP_REG_ETF_STS));
+	dev_info(gxp->dev, "cbuflevel = %#08x", gxp_read_32(gxp, GXP_REG_ETF_CBUFLEVEL));
+}
+
+/*
+ * Dumps the ETF hardware traces in MCU dump memory.
+ *
+ * If the memory is available and allocated dump the traces, else print the traces in kernel logs.
+ * @gxp: The GXP device to obtain the handler for
+ *
+ */
+static void gxp_debug_dump_etf_dump_buffer(struct gxp_dev *gxp)
+{
+	u32 cumulative_segment_size = 0;
+	u32 dump_memory_size = 0;
+	u32 *dump_memory;
+	u32 valid_trace_words;
+	bool trace_ram_full;
+	struct gxp_mcu_dump_descriptor *dump_descriptor;
+	u32 i;
+
+	/* Disable ETF trace capturing. */
+	gxp_write_32(gxp, GXP_REG_ETF_CTL, 0x0);
+	gxp_debug_dump_etf_dump_csr(gxp);
+
+	if (gxp_read_32(gxp, GXP_REG_ETF_MODE) != CIRCULAR_BUFFER_MODE) {
+		dev_info(gxp->dev,
+			 "Skip dumping ETF buffer since ETF is not in CircularBuffer mode.");
+		return;
+	}
+
+	trace_ram_full = ((gxp_read_32(gxp, GXP_REG_ETF_MODE) & 0x1) == 0x1);
+	valid_trace_words = (trace_ram_full) ? gxp_read_32(gxp, GXP_REG_ETF_RSZ) :
+					       gxp_read_32(gxp, GXP_REG_ETF_RWP) / sizeof(u32);
+
+	dump_descriptor =
+		&(gxp->debug_dump_mgr->mcu_dump->dump_metadata.dump_descriptors[GXP_REG_MCU_ID]);
+
+	for (i = 0; i < dump_descriptor->num_segment_dumped; ++i) {
+		if (dump_descriptor->segment_headers[i].type != ETF)
+			cumulative_segment_size += dump_descriptor->segment_headers[i].size;
+		else {
+			dump_memory_size = dump_descriptor->segment_headers[i].size;
+			break;
+		}
+	}
+	dump_memory = (u32 *)((gxp->debug_dump_mgr->mcu_buf.virt_addr) + cumulative_segment_size +
+			      dump_descriptor->offset);
+	dev_info(gxp->dev, "Dumping the buffer address: %#lx, size: %#x words",
+		 (uintptr_t)(dump_memory), dump_memory_size);
+
+	/* If dump memory is available, dump the ETF buffer to the dump memory. */
+	if (dump_memory_size >= valid_trace_words * sizeof(u32)) {
+		/*
+		 * Reset the memory since dump memory provided by GXP kernel driver is not
+		 * guaranteed to be zero-initialized.
+		 */
+		memset(dump_memory, 0, dump_memory_size);
+		for (i = 0; i < valid_trace_words; ++i)
+			dump_memory[i] = gxp_read_32(gxp, GXP_REG_ETF_RRD);
+
+	} else {
+		dev_warn(gxp->dev, "ETF dump memory size is not sufficient, size : %#08x",
+			 dump_memory_size);
+		gxp_debug_dump_log_etf_buffer(gxp, valid_trace_words);
+	}
+}
+
+void gxp_debug_dump_report_mcu_crash(struct gxp_dev *gxp, enum gcip_fw_crash_type crash_type)
 {
 	struct gxp_debug_dump_manager *mgr = gxp->debug_dump_mgr;
 	struct gxp_mcu *mcu = gxp_mcu_of(gxp);
-	struct gcip_telemetry_ctx *tel = &mcu->telemetry;
+	struct gcip_telemetry *tel = &mcu->telemetry_log;
 	struct gxp_mailbox_queue_desc kci_mailbox_queue_desc, uci_mailbox_queue_desc;
 	int seg_idx = 0;
 	char sscd_msg[SSCD_MSG_LENGTH];
@@ -1468,8 +1598,13 @@ void gxp_debug_dump_report_mcu_crash(struct gxp_dev *gxp)
 	scnprintf(sscd_msg, SSCD_MSG_LENGTH - 1, "MCU crashed.");
 	mutex_lock(&mgr->debug_dump_lock);
 
+#ifdef GXP_REG_ETF_RRD
+	if (crash_type == GCIP_FW_CRASH_HW_WDG_TIMEOUT)
+		gxp_debug_dump_etf_dump_buffer(gxp);
+#endif
+
 	/* Add MCU telemetry buffer details to be dumped. */
-	if (gxp_add_seg(mgr, GXP_REG_MCU_ID, &seg_idx, tel->log_mem.virt_addr, tel->log_mem.size))
+	if (gxp_add_seg(mgr, GXP_REG_MCU_ID, &seg_idx, tel->memory.virt_addr, tel->memory.size))
 		dev_warn(gxp->dev, "Failed to dump telemetry.\n");
 
 	/* Add KCI mailbox details to be dumped. */

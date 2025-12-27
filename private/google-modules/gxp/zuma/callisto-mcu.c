@@ -20,6 +20,11 @@
 #define GPIN_LO_MCU_PACCEPT (1u << 2)
 #define GPIN_LO_MCU_PDENY (1u << 3)
 
+bool gxp_mcu_need_lpm_init(struct gxp_mcu_firmware *mcu_fw)
+{
+	return true;
+}
+
 int gxp_mcu_reset(struct gxp_dev *gxp, bool release_reset)
 {
 	struct gxp_mcu *mcu = &to_mcu_dev(gxp)->mcu;

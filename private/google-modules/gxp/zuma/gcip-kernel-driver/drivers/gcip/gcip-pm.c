@@ -5,6 +5,8 @@
  * Copyright (C) 2023 Google LLC
  */
 
+#include <linux/atomic.h>
+#include <linux/delay.h>
 #include <linux/device.h>
 #include <linux/mutex.h>
 #include <linux/slab.h>
@@ -57,7 +59,8 @@ static void gcip_pm_async_put_work(struct work_struct *work)
 {
 	struct gcip_pm *pm = container_of(work, struct gcip_pm, put_async_work);
 
-	gcip_pm_put(pm);
+	while (atomic_dec_if_positive(&pm->put_async_count) >= 0)
+		gcip_pm_put(pm);
 }
 
 struct gcip_pm *gcip_pm_create(const struct gcip_pm_args *args)
@@ -82,6 +85,7 @@ struct gcip_pm *gcip_pm_create(const struct gcip_pm_args *args)
 	mutex_init(&pm->lock);
 	INIT_DELAYED_WORK(&pm->power_down_work, gcip_pm_async_power_down_work);
 	INIT_WORK(&pm->put_async_work, gcip_pm_async_put_work);
+	atomic_set(&pm->put_async_count, 0);
 
 	if (pm->after_create) {
 		ret = pm->after_create(pm->data);
@@ -96,9 +100,6 @@ struct gcip_pm *gcip_pm_create(const struct gcip_pm_args *args)
 
 void gcip_pm_destroy(struct gcip_pm *pm)
 {
-	if (!pm)
-		return;
-
 	gcip_pm_flush_put_work(pm);
 
 	pm->power_down_pending = false;
@@ -117,7 +118,7 @@ void gcip_pm_destroy(struct gcip_pm *pm)
  *
  * Caller holds pm->lock.
  */
-static int gcip_pm_get_locked(struct gcip_pm *pm)
+static int gcip_pm_get_locked(struct gcip_pm *pm, enum gcip_pm_flags flags)
 {
 	int ret = 0;
 
@@ -130,8 +131,16 @@ static int gcip_pm_get_locked(struct gcip_pm *pm)
 			ret = pm->power_up(pm->data);
 	}
 
-	if (!ret)
+	if (!ret) {
 		pm->count++;
+
+		if (flags & GCIP_PM_SUSPENDABLE) {
+			pm->suspendable_count++;
+
+			if (WARN_ON(pm->suspendable_count > pm->count))
+				pm->suspendable_count = pm->count;
+		}
+	}
 
 	dev_dbg(pm->dev, "%s: %d\n", __func__, pm->count);
 
@@ -141,9 +150,6 @@ static int gcip_pm_get_locked(struct gcip_pm *pm)
 int gcip_pm_get_if_powered(struct gcip_pm *pm, bool blocking)
 {
 	int ret = -EAGAIN;
-
-	if (!pm)
-		return 0;
 
 	/* Fast fails without holding the lock. */
 	if (!pm->count)
@@ -155,7 +161,7 @@ int gcip_pm_get_if_powered(struct gcip_pm *pm, bool blocking)
 		return ret;
 
 	if (pm->count)
-		ret = gcip_pm_get_locked(pm);
+		ret = gcip_pm_get_locked(pm, 0);
 
 	mutex_unlock(&pm->lock);
 
@@ -166,21 +172,26 @@ int gcip_pm_get(struct gcip_pm *pm)
 {
 	int ret;
 
-	if (!pm)
-		return 0;
-
 	mutex_lock(&pm->lock);
-	ret = gcip_pm_get_locked(pm);
+	ret = gcip_pm_get_locked(pm, 0);
 	mutex_unlock(&pm->lock);
 
 	return ret;
 }
 
-void gcip_pm_put(struct gcip_pm *pm)
+int gcip_pm_get_flags(struct gcip_pm *pm, enum gcip_pm_flags flags)
 {
-	if (!pm)
-		return;
+	int ret;
 
+	mutex_lock(&pm->lock);
+	ret = gcip_pm_get_locked(pm, flags);
+	mutex_unlock(&pm->lock);
+
+	return ret;
+}
+
+static void __gcip_pm_put_flags(struct gcip_pm *pm, enum gcip_pm_flags flags)
+{
 	mutex_lock(&pm->lock);
 
 	if (WARN_ON(!pm->count))
@@ -191,15 +202,38 @@ void gcip_pm_put(struct gcip_pm *pm)
 		gcip_pm_try_power_down(pm);
 	}
 
+	if (flags & GCIP_PM_SUSPENDABLE) {
+		--pm->suspendable_count;
+		if (WARN_ON(pm->suspendable_count > pm->count))
+			pm->suspendable_count = pm->count;
+	}
+
 	dev_dbg(pm->dev, "%s: %d\n", __func__, pm->count);
 
 unlock:
 	mutex_unlock(&pm->lock);
 }
 
+void gcip_pm_put(struct gcip_pm *pm)
+{
+	__gcip_pm_put_flags(pm, 0);
+}
+
+void gcip_pm_put_flags(struct gcip_pm *pm, enum gcip_pm_flags flags)
+{
+	__gcip_pm_put_flags(pm, flags);
+}
+
 void gcip_pm_put_async(struct gcip_pm *pm)
 {
+	atomic_inc(&pm->put_async_count);
 	schedule_work(&pm->put_async_work);
+	/*
+	 * We do not need to check the return value of schedule_work because if the value is:
+	 *   true - A new put_async_work is pushed into the queue and wait for being processed.
+	 *   false - The put_async_work is already in the queue but not processed yet.
+	 * Either way the put_async_count will be correctly read in the gcip_pm_async_put_work().
+	 */
 }
 
 void gcip_pm_flush_put_work(struct gcip_pm *pm)
@@ -207,12 +241,54 @@ void gcip_pm_flush_put_work(struct gcip_pm *pm)
 	flush_work(&pm->put_async_work);
 }
 
+void gcip_pm_flush_delayed_power_down_work(struct gcip_pm *pm, int retry)
+{
+	mutex_lock(&pm->lock);
+
+	do {
+		mutex_unlock(&pm->lock);
+
+		/*
+		 * As the `flush_delayed_work()` function cancels the delayed timer and schedules
+		 * the work immediately, give enough break time before the work retries the power
+		 * down.
+		 */
+		msleep(GCIP_ASYNC_POWER_DOWN_RETRY_DELAY);
+		flush_delayed_work(&pm->power_down_work);
+
+		mutex_lock(&pm->lock);
+	} while (pm->power_down_pending && retry--);
+
+	/* If the power_down work keeps failing even after retry, cancel the work. */
+	if (pm->power_down_pending) {
+		dev_warn(pm->dev,
+			 "Cancel the power down request, the block might be in the bad state");
+		pm->power_down_pending = false;
+	}
+
+	mutex_unlock(&pm->lock);
+}
+
 int gcip_pm_get_count(struct gcip_pm *pm)
 {
-	if (!pm)
-		return 0;
-
 	return pm->count;
+}
+
+bool gcip_pm_suspendable_locked(struct gcip_pm *pm, int *count)
+{
+	gcip_pm_lockdep_assert_held(pm);
+
+	*count = gcip_pm_get_count(pm);
+
+	if (*count > pm->suspendable_count)
+		return false;
+
+	if (pm->power_down_pending) {
+		dev_warn_ratelimited(pm->dev, "Pending power down");
+		return false;
+	}
+
+	return true;
 }
 
 bool gcip_pm_is_powered(struct gcip_pm *pm)
@@ -223,9 +299,6 @@ bool gcip_pm_is_powered(struct gcip_pm *pm)
 
 void gcip_pm_shutdown(struct gcip_pm *pm, bool force)
 {
-	if (!pm)
-		return;
-
 	mutex_lock(&pm->lock);
 
 	if (pm->count) {

@@ -15,64 +15,16 @@
 #include <linux/mutex.h>
 #include <linux/refcount.h>
 #include <linux/slab.h>
-#include <linux/spinlock.h>
 #include <linux/workqueue.h>
 
 #include <gcip/gcip-memory.h>
 #include <gcip/gcip-telemetry.h>
 
-/**
- * gcip_telemetry_select() - Get the gcip_telemetry of the specified type.
- * @tel_ctx: The gcip_telemetry_ctx object to retrieve the desired gcip_telemetry.
- * @type: The type of the telemetry desired.
- *
- * Return: The pointer to the gcip_telemetry of the desired type, or the pointer to a negative errno
- *         otherwise.
- */
-static struct gcip_telemetry *gcip_telemetry_select(struct gcip_telemetry_ctx *tel_ctx,
-						    enum gcip_telemetry_type type)
-{
-	switch (type) {
-	case GCIP_TELEMETRY_TYPE_LOG:
-		return &tel_ctx->log;
-	case GCIP_TELEMETRY_TYPE_TRACE:
-		return &tel_ctx->trace;
-	default:
-		WARN_ONCE(true, "Unrecognized GCIP telemetry type: %d", type);
-		/* return a valid object, don't crash the kernel */
-		return &tel_ctx->log;
-	}
-}
-
-/**
- * gcip_telemetry_select_mem() - Get the gcip_memory of the specified type.
- * @tel_ctx: The gcip_telemetry_ctx object to retrieve the desired gcip_memory.
- * @type: The type of the telemetry desired.
- *
- * Return: The pointer to the gcip_memory of the desired type, or the pointer to a
- *         negative errno otherwise.
- */
-static struct gcip_memory *gcip_telemetry_select_mem(struct gcip_telemetry_ctx *tel_ctx,
-						     enum gcip_telemetry_type type)
-{
-	switch (type) {
-	case GCIP_TELEMETRY_TYPE_LOG:
-		return &tel_ctx->log_mem;
-	case GCIP_TELEMETRY_TYPE_TRACE:
-		return &tel_ctx->trace_mem;
-	default:
-		WARN_ONCE(true, "Unrecognized GCIP telemetry type: %d", type);
-		/* return a valid object, don't crash the kernel */
-		return &tel_ctx->log_mem;
-	}
-}
-
-int gcip_telemetry_kci(struct gcip_telemetry_ctx *tel_ctx, enum gcip_telemetry_type type,
+int gcip_telemetry_kci(struct gcip_telemetry *tel,
 		       int (*send_kci)(const struct gcip_telemetry_kci_args *),
 		       struct gcip_kci *kci)
 {
-	const struct gcip_telemetry *tel = gcip_telemetry_select(tel_ctx, type);
-	const struct gcip_memory *mem = gcip_telemetry_select_mem(tel_ctx, type);
+	struct gcip_memory *mem = &tel->memory;
 	const struct gcip_telemetry_kci_args args = {
 		.kci = kci,
 		.addr = mem->dma_addr,
@@ -98,21 +50,18 @@ int gcip_telemetry_kci(struct gcip_telemetry_ctx *tel_ctx, enum gcip_telemetry_t
 	return 0;
 }
 
-int gcip_telemetry_set_event(struct gcip_telemetry_ctx *tel_ctx, enum gcip_telemetry_type type,
-			     u32 eventfd)
+int gcip_telemetry_set_event(struct gcip_telemetry *tel, u32 eventfd)
 {
-	struct gcip_telemetry *tel = gcip_telemetry_select(tel_ctx, type);
 	struct eventfd_ctx *ctx, *prev_ctx;
-	ulong flags;
 
 	ctx = eventfd_ctx_fdget(eventfd);
 	if (IS_ERR(ctx))
 		return PTR_ERR(ctx);
 
-	write_lock_irqsave(&tel->ctx_lock, flags);
+	mutex_lock(&tel->state_ctx_lock);
 	prev_ctx = tel->ctx;
 	tel->ctx = ctx;
-	write_unlock_irqrestore(&tel->ctx_lock, flags);
+	mutex_unlock(&tel->state_ctx_lock);
 
 	if (prev_ctx)
 		eventfd_ctx_put(prev_ctx);
@@ -120,16 +69,14 @@ int gcip_telemetry_set_event(struct gcip_telemetry_ctx *tel_ctx, enum gcip_telem
 	return 0;
 }
 
-void gcip_telemetry_unset_event(struct gcip_telemetry_ctx *tel_ctx, enum gcip_telemetry_type type)
+void gcip_telemetry_unset_event(struct gcip_telemetry *tel)
 {
-	struct gcip_telemetry *tel = gcip_telemetry_select(tel_ctx, type);
 	struct eventfd_ctx *prev_ctx;
-	ulong flags;
 
-	write_lock_irqsave(&tel->ctx_lock, flags);
+	mutex_lock(&tel->state_ctx_lock);
 	prev_ctx = tel->ctx;
 	tel->ctx = NULL;
-	write_unlock_irqrestore(&tel->ctx_lock, flags);
+	mutex_unlock(&tel->state_ctx_lock);
 
 	if (prev_ctx)
 		eventfd_ctx_put(prev_ctx);
@@ -162,7 +109,7 @@ static void copy_with_wrap(struct gcip_telemetry_header *header, void *dest, u32
 	}
 }
 
-/*＊
+/**
  * gcip_telemetry_fw_log() - The fallback function to consume the log buffer.
  * @log: The log telemetry object.
  *
@@ -177,7 +124,7 @@ static void gcip_telemetry_fw_log(const struct gcip_telemetry *log)
 	u8 *start;
 	const size_t queue_size = header->size - sizeof(*header);
 	const size_t max_length = queue_size - sizeof(entry);
-	char *buffer = kmalloc(max_length + 1, GFP_ATOMIC);
+	char *buffer = kvmalloc(max_length + 1, GFP_KERNEL);
 
 	if (!buffer) {
 		header->head = header->tail;
@@ -216,10 +163,10 @@ static void gcip_telemetry_fw_log(const struct gcip_telemetry *log)
 			break;
 		}
 	}
-	kfree(buffer);
+	kvfree(buffer);
 }
 
-/*＊
+/**
  * gcip_telemetry_fw_trace() - The fallback function to consume the trace buffer.
  * @trace: The trace telemetry object.
  *
@@ -232,31 +179,23 @@ static void gcip_telemetry_fw_trace(const struct gcip_telemetry *trace)
 	header->head = header->tail;
 }
 
-void gcip_telemetry_irq_handler(struct gcip_telemetry_ctx *tel_ctx, enum gcip_telemetry_type type)
+void gcip_telemetry_irq_handler(struct gcip_telemetry *tel)
 {
-	struct gcip_telemetry *tel = gcip_telemetry_select(tel_ctx, type);
-	unsigned long flags;
-
 	/*
-	 * If the lock is held by other threads - it means either
-	 *   1. The worker gcip_telemetry_worker is working, or
-	 *   2. The telemetry object is being released
-	 * Either way we don't need to schedule another job.
+	 * Safe to access tel->state without state_ctx_lock because it would just schedule a
+	 * redundant worker which is fine.
 	 */
-	if (!spin_trylock_irqsave(&tel->state_lock, flags))
+	if (tel->state != GCIP_TELEMETRY_ENABLED)
 		return;
 
-	if (tel->state == GCIP_TELEMETRY_ENABLED && tel->header->head != tel->header->tail)
-		/*
-		 * The telemetry work consumes the buffer until head equals tail, no need to check
-		 * whether a pending work exists.
-		 */
-		schedule_work(&tel->work);
+	/* Early return if we know there is no pending data. */
+	if (tel->header && (tel->header->head == tel->header->tail))
+		return;
 
-	spin_unlock_irqrestore(&tel->state_lock, flags);
+	schedule_work(&tel->work);
 }
 
-/*＊
+/**
  * gcip_telemetry_inc_mmap_count() - Increases the telemetry mmap count.
  * @tel: The telemetry to add the mmapped_count.
  * @dif: The number to add the mmapped_count.
@@ -299,11 +238,9 @@ static const struct vm_operations_struct gcip_telemetry_vma_ops = {
 	.close = gcip_telemetry_vma_ops_close,
 };
 
-int gcip_telemetry_mmap(struct gcip_telemetry_ctx *tel_ctx, enum gcip_telemetry_type type,
-			struct vm_area_struct *vma)
+int gcip_telemetry_mmap(struct gcip_telemetry *tel, struct vm_area_struct *vma)
 {
-	struct gcip_telemetry *tel = gcip_telemetry_select(tel_ctx, type);
-	struct gcip_memory *mem = gcip_telemetry_select_mem(tel_ctx, type);
+	struct gcip_memory *mem = &tel->memory;
 	unsigned long size = vma->vm_end - vma->vm_start;
 	unsigned long orig_pgoff = vma->vm_pgoff;
 	int ret;
@@ -356,65 +293,54 @@ err_unlock:
 static void gcip_telemetry_worker(struct work_struct *work)
 {
 	struct gcip_telemetry *tel = container_of(work, struct gcip_telemetry, work);
+	struct gcip_telemetry_header *header = tel->header;
 	u32 prev_head;
-	ulong state_lock_flags, ctx_lock_flags;
 
 	/*
-	 * Loops while telemetry enabled, there is data to be consumed, and the previous iteration
-	 * made progress. If another IRQ arrives just after the last head != tail check we should
-	 * get another worker schedule.
+	 * Loops while following conditions are all true:
+	 * 1. The telemetry is enabled.
+	 * 2. The header is visible(not NULL).
+	 * 3. There is data to be consumed, and the previous iteration made progress.
 	 */
 	do {
-		spin_lock_irqsave(&tel->state_lock, state_lock_flags);
+		mutex_lock(&tel->state_ctx_lock);
 		if (tel->state != GCIP_TELEMETRY_ENABLED) {
-			spin_unlock_irqrestore(&tel->state_lock, state_lock_flags);
+			mutex_unlock(&tel->state_ctx_lock);
 			return;
 		}
 
-		prev_head = tel->header->head;
-		if (tel->header->head != tel->header->tail) {
-			read_lock_irqsave(&tel->ctx_lock, ctx_lock_flags);
-			if (tel->ctx)
-				eventfd_signal(tel->ctx, 1);
-			else
-				tel->fallback_fn(tel);
-			read_unlock_irqrestore(&tel->ctx_lock, ctx_lock_flags);
-		}
+		if (header)
+			prev_head = header->head;
 
-		spin_unlock_irqrestore(&tel->state_lock, state_lock_flags);
+		/*
+		 * The runtime side handler and the fallback function should consider the case that
+		 * head != tail.
+		 */
+		if (tel->ctx)
+			eventfd_signal(tel->ctx, 1);
+		else if (tel->fallback_fn)
+			tel->fallback_fn(tel);
+		else
+			dev_warn(tel->dev, "Failed to consume the telemetry buffer");
+
+		mutex_unlock(&tel->state_ctx_lock);
 		msleep(GCIP_TELEMETRY_TYPE_LOG_RECHECK_DELAY);
-	} while (tel->header->head != tel->header->tail && tel->header->head != prev_head);
+	} while (header && (header->head != header->tail) && (header->head != prev_head));
+
+	/* If another IRQ arrives after the header check, we should schedule another worker. */
 }
 
-int gcip_telemetry_init(struct gcip_telemetry_ctx *tel_ctx, enum gcip_telemetry_type type,
+int gcip_telemetry_init(struct gcip_telemetry *tel, enum gcip_telemetry_type type,
 			struct device *dev)
 {
-	struct gcip_telemetry *tel;
+	struct gcip_memory *mem = &tel->memory;
 	const char *name;
-	struct gcip_memory *mem;
 	void (*fallback_fn)(const struct gcip_telemetry *tel);
+	struct gcip_telemetry_header *header;
 
-	switch (type) {
-	case GCIP_TELEMETRY_TYPE_LOG:
-		tel = &tel_ctx->log;
-		mem = &tel_ctx->log_mem;
-		name = GCIP_TELEMETRY_NAME_LOG;
-		fallback_fn = gcip_telemetry_fw_log;
-		break;
-	case GCIP_TELEMETRY_TYPE_TRACE:
-		tel = &tel_ctx->trace;
-		mem = &tel_ctx->trace_mem;
-		name = GCIP_TELEMETRY_NAME_TRACE;
-		fallback_fn = gcip_telemetry_fw_trace;
-		break;
-	default:
-		dev_err(dev, "Unrecognized GCIP telemetry type: %d", type);
-		return -EINVAL;
-	}
-
-	/* The log_mem and trace_mem have to be set before telemetry init. */
+	/* The memory have to be set before telemetry init. */
 	if (!mem->virt_addr || !mem->size) {
-		dev_err(dev, "The telemetry memory should be set before initializing: %s", name);
+		dev_err(dev, "The telemetry memory should be set before initializing");
 		return -EINVAL;
 	}
 
@@ -425,40 +351,59 @@ int gcip_telemetry_init(struct gcip_telemetry_ctx *tel_ctx, enum gcip_telemetry_
 		return -EINVAL;
 	}
 
-	rwlock_init(&tel->ctx_lock);
+	switch (type) {
+	case GCIP_TELEMETRY_TYPE_LOG:
+		name = GCIP_TELEMETRY_NAME_LOG;
+		fallback_fn = gcip_telemetry_fw_log;
+		header = mem->virt_addr;
+		break;
+	case GCIP_TELEMETRY_TYPE_TRACE:
+		name = GCIP_TELEMETRY_NAME_TRACE;
+		fallback_fn = gcip_telemetry_fw_trace;
+		header = mem->virt_addr;
+		break;
+	case GCIP_TELEMETRY_TYPE_OPAQUE:
+		name = GCIP_TELEMETRY_NAME_OPAQUE;
+		fallback_fn = NULL;
+		header = NULL;
+		break;
+	default:
+		dev_err(dev, "Unrecognized GCIP telemetry type: %d", type);
+		return -EINVAL;
+	}
+
 	tel->name = name;
 	tel->dev = dev;
-
-	tel->header = mem->virt_addr;
-	tel->header->head = 0;
-	tel->header->tail = 0;
-	tel->header->size = mem->size;
-	tel->header->entries_dropped = 0;
-
-	tel->ctx = NULL;
-
-	spin_lock_init(&tel->state_lock);
-	INIT_WORK(&tel->work, gcip_telemetry_worker);
+	tel->type = type;
 	tel->fallback_fn = fallback_fn;
+	tel->header = header;
+	tel->ctx = NULL;
 	tel->state = GCIP_TELEMETRY_ENABLED;
-	mutex_init(&tel->mmap_lock);
 	tel->mmapped_count = 0;
+
+	if (tel->header) {
+		tel->header->head = 0;
+		tel->header->tail = 0;
+		tel->header->size = mem->size;
+		tel->header->entries_dropped = 0;
+	}
+
+	INIT_WORK(&tel->work, gcip_telemetry_worker);
+	mutex_init(&tel->mmap_lock);
+	mutex_init(&tel->state_ctx_lock);
 
 	return 0;
 }
 
-void gcip_telemetry_exit(struct gcip_telemetry_ctx *tel_ctx, enum gcip_telemetry_type type)
+void gcip_telemetry_exit(struct gcip_telemetry *tel)
 {
-	struct gcip_telemetry *tel = gcip_telemetry_select(tel_ctx, type);
-	ulong flags;
-
-	spin_lock_irqsave(&tel->state_lock, flags);
-	/* Prevents racing with the IRQ handler or worker. */
-	tel->state = GCIP_TELEMETRY_INVALID;
-	spin_unlock_irqrestore(&tel->state_lock, flags);
-	cancel_work_sync(&tel->work);
-
+	mutex_lock(&tel->state_ctx_lock);
 	if (tel->ctx)
 		eventfd_ctx_put(tel->ctx);
 	tel->ctx = NULL;
+	/* Prevents racing with the worker. */
+	tel->state = GCIP_TELEMETRY_INVALID;
+	mutex_unlock(&tel->state_ctx_lock);
+
+	cancel_work_sync(&tel->work);
 }

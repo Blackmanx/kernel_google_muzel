@@ -246,6 +246,7 @@ struct gcip_resource_accessor *gcip_resource_accessor_create(struct device *dev,
 							     struct dentry *parent_dentry)
 {
 	struct gcip_resource_accessor *accessor = devm_kzalloc(dev, sizeof(*accessor), GFP_KERNEL);
+	struct dentry *dentry;
 
 	if (!accessor)
 		return ERR_PTR(-ENOMEM);
@@ -254,14 +255,17 @@ struct gcip_resource_accessor *gcip_resource_accessor_create(struct device *dev,
 	spin_lock_init(&accessor->resource_list_lock);
 	accessor->dev = dev;
 
-	accessor->dentry = debugfs_create_file(RESOURCE_ACCESSOR, 0600, parent_dentry, accessor,
-					       &fops_gcip_resource_accessor);
+	dentry = debugfs_create_file(RESOURCE_ACCESSOR, 0600, parent_dentry, accessor,
+				     &fops_gcip_resource_accessor);
 
-	if (IS_ERR(accessor->dentry)) {
+	if (IS_ERR(dentry)) {
 		dev_warn(dev, "Failed to create debugfs for resource accessor (ret=%ld)\n",
-			 PTR_ERR(accessor->dentry));
-		return ERR_CAST(accessor->dentry);
+			 PTR_ERR(dentry));
+		devm_kfree(dev, accessor);
+		return ERR_CAST(dentry);
 	}
+
+	accessor->dentry = dentry;
 
 	return accessor;
 }
@@ -269,7 +273,7 @@ struct gcip_resource_accessor *gcip_resource_accessor_create(struct device *dev,
 /* No need to release resource lists since those memories are device managed. */
 void gcip_resource_accessor_destroy(struct gcip_resource_accessor *accessor)
 {
-	debugfs_remove(debugfs_lookup(RESOURCE_ACCESSOR, accessor->dentry));
+	debugfs_remove(accessor->dentry);
 }
 
 int gcip_register_accessible_resource(struct gcip_resource_accessor *accessor,

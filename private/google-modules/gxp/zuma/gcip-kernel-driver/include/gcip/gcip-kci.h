@@ -45,17 +45,16 @@ struct gcip_kci_command_element {
 struct gcip_kci_response_element {
 	u64 seq;
 	u16 code;
+	/* RKCI may provide response-type-specific data in this field (not used in KCI). */
+	u16 rkci_value1;
 	/*
-	 * Firmware can set some data according to the type of the response.
-	 * TODO(b/279386960): as we don't manage the status of responses using this field anymore,
-	 *                    rename this field to more reasonable name.
+	 * KCI field retval may return a value depending on the command type.
+	 * Firmware calls this field value2 for RKCI.
 	 */
-	u16 status;
-	/*
-	 * Return value is used by some KCI command responses.
-	 * For reverse KCI commands this is set as value2.
-	 */
-	u32 retval;
+	union {
+		u32 rkci_value2;
+		u32 retval;
+	};
 } __packed;
 
 /*
@@ -69,15 +68,13 @@ enum gcip_kci_code {
 	GCIP_KCI_CODE_JOIN_GROUP = 3,
 	GCIP_KCI_CODE_LEAVE_GROUP = 4,
 	GCIP_KCI_CODE_MAP_TRACE_BUFFER = 5,
+	GCIP_KCI_CODE_BCL_MITIGATION = 6,
 	GCIP_KCI_CODE_SHUTDOWN = 7,
 	GCIP_KCI_CODE_GET_DEBUG_DUMP = 8,
 	GCIP_KCI_CODE_OPEN_DEVICE = 9,
 	GCIP_KCI_CODE_CLOSE_DEVICE = 10,
 	GCIP_KCI_CODE_EXCHANGE_INFO = 11,
-	/* TODO(b/271372136): remove v1 when v1 firmware no longer in use. */
-	GCIP_KCI_CODE_GET_USAGE_V1 = 12,
-	/* Backward compatible define, also update when v1 firmware no longer in use. */
-	GCIP_KCI_CODE_GET_USAGE = 12,
+	/* 12 still defined as GET_USAGE in firmware but no longer used by drivers */
 	GCIP_KCI_CODE_NOTIFY_THROTTLING = 13,
 	GCIP_KCI_CODE_BLOCK_BUS_SPEED_CONTROL = 14,
 	GCIP_KCI_CODE_ALLOCATE_VMBOX = 15,
@@ -88,7 +85,7 @@ enum gcip_kci_code {
 	GCIP_KCI_CODE_THERMAL_CONTROL = 20,
 	GCIP_KCI_CODE_GET_USAGE_V2 = 21,
 	GCIP_KCI_CODE_SET_DEVICE_PROPERTIES = 22,
-	GCIP_KCI_CODE_FAULT_INJECTION = 23,
+	GCIP_KCI_CODE_FAULT_INJECT = 23,
 	GCIP_KCI_CODE_SET_FREQ_LIMITS = 24,
 	GCIP_KCI_CODE_DEBUG_CMD = 25,
 	GCIP_KCI_CODE_DEBUG_RESET = 26,
@@ -96,8 +93,6 @@ enum gcip_kci_code {
 
 	GCIP_KCI_CODE_RKCI_ACK = 256,
 };
-/* TODO(308903519) Remove once clients have adopted the new name. */
-#define GCIP_KCI_CODE_SET_POWER_LIMITS GCIP_KCI_CODE_SET_FREQ_LIMITS
 
 /*
  * Definition of reverse KCI request code ranges.
@@ -106,43 +101,25 @@ enum gcip_kci_code {
  * second half.
  */
 enum gcip_reverse_kci_code {
-	GCIP_RKCI_CHIP_CODE_FIRST = 0,
-	GCIP_RKCI_PM_QOS_REQUEST,
+	GCIP_RKCI_PM_QOS_REQUEST = 1,
 	GCIP_RKCI_CHANGE_BTS_SCENARIO,
 	GCIP_RKCI_PM_QOS_BTS_REQUEST,
-	GCIP_RKCI_DSP_CORE_TELEMETRY_TRY_READ,
+	GCIP_RKCI_TELEMETRY,
 	GCIP_RKCI_CLIENT_FATAL_ERROR_NOTIFY,
 	GCIP_RKCI_COHERENT_FABRIC_QOS_REQUEST,
-	GCIP_RKCI_CHIP_CODE_LAST = 0x7FFF,
-	GCIP_RKCI_GENERIC_CODE_FIRST = 0x8000,
-	GCIP_RKCI_FIRMWARE_CRASH = GCIP_RKCI_GENERIC_CODE_FIRST + 0,
-	GCIP_RKCI_JOB_LOCKUP = GCIP_RKCI_GENERIC_CODE_FIRST + 1,
-	GCIP_RKCI_DEBUG_ASYNC_RESP = GCIP_RKCI_GENERIC_CODE_FIRST + 2,
-	GCIP_RKCI_GENERIC_CODE_LAST = 0xFFFF,
-};
+	GCIP_RKCI_FIRMWARE_CRASH,
+	GCIP_RKCI_JOB_LOCKUP,
+	GCIP_RKCI_DEBUG_ASYNC_RESP,
+	GCIP_RKCI_CLIENT_INACTIVITY_TIMEOUT,
 
-/*
- * Definition of code in response elements.
- * It is a 16-bit unsigned integer.
- */
-enum gcip_kci_error {
-	GCIP_KCI_ERROR_OK = 0, /* Not an error; returned on success. */
-	GCIP_KCI_ERROR_CANCELLED = 1,
-	GCIP_KCI_ERROR_UNKNOWN = 2,
-	GCIP_KCI_ERROR_INVALID_ARGUMENT = 3,
-	GCIP_KCI_ERROR_DEADLINE_EXCEEDED = 4,
-	GCIP_KCI_ERROR_NOT_FOUND = 5,
-	GCIP_KCI_ERROR_ALREADY_EXISTS = 6,
-	GCIP_KCI_ERROR_PERMISSION_DENIED = 7,
-	GCIP_KCI_ERROR_RESOURCE_EXHAUSTED = 8,
-	GCIP_KCI_ERROR_FAILED_PRECONDITION = 9,
-	GCIP_KCI_ERROR_ABORTED = 10,
-	GCIP_KCI_ERROR_OUT_OF_RANGE = 11,
-	GCIP_KCI_ERROR_UNIMPLEMENTED = 12,
-	GCIP_KCI_ERROR_INTERNAL = 13,
-	GCIP_KCI_ERROR_UNAVAILABLE = 14,
-	GCIP_KCI_ERROR_DATA_LOSS = 15,
-	GCIP_KCI_ERROR_UNAUTHENTICATED = 16,
+	/* TODO(b/433387269): Deprecated following fields once firmware adopt the new ones. */
+	GCIP_RKCI_GENERIC_CODE_FIRST = 0x8000,
+	GCIP_RKCI_FIRMWARE_CRASH_LEGACY = GCIP_RKCI_GENERIC_CODE_FIRST + 0,
+	GCIP_RKCI_JOB_LOCKUP_LEGACY = GCIP_RKCI_GENERIC_CODE_FIRST + 1,
+	GCIP_RKCI_DEBUG_ASYNC_RESP_LEGACY = GCIP_RKCI_GENERIC_CODE_FIRST + 2,
+	GCIP_RKCI_CLIENT_INACTIVITY_TIMEOUT_LEGACY = GCIP_RKCI_GENERIC_CODE_FIRST + 3,
+	GCIP_RKCI_TELEMETRY_LEGACY = GCIP_RKCI_GENERIC_CODE_FIRST + 4,
+	GCIP_RKCI_GENERIC_CODE_LAST = 0xFFFF,
 };
 
 /* Type of the chip of the offload vmbox to be linked. */
@@ -267,8 +244,6 @@ struct gcip_kci {
 	unsigned long resp_queue_lock_flags;
 	/* Queue for waiting for the response doorbell to be rung. */
 	wait_queue_head_t resp_doorbell_waitq;
-	/* Protects wait_list. */
-	spinlock_t wait_list_lock;
 	/* Worker of consuming responses. */
 	struct work_struct work;
 	/* Handler for reverse (firmware -> kernel) requests. */
@@ -349,20 +324,6 @@ void gcip_kci_handle_irq(struct gcip_kci *kci);
  */
 void gcip_kci_update_usage_async(struct gcip_kci *kci);
 
-/**
- * gcip_kci_error_to_errno() - Converts the firmware returned kci error code to the kernel
- *                             equivalent error code.
- *
- * IP driver should use this function internally to convert KCI errors received from the
- * firmware to the kernel error to be propagated as a IOCTL or any other system call error.
- *
- * @dev: Reference to the device struct.
- * @code: GCIP KCI error code.
- *
- * Return: Negative error code.
- */
-int gcip_kci_error_to_errno(struct device *dev, enum gcip_kci_error code);
-
 /* Gets the KCI private data. */
 static inline void *gcip_kci_get_data(struct gcip_kci *kci)
 {
@@ -385,12 +346,12 @@ static inline u64 gcip_kci_get_cur_seq(struct gcip_kci *kci)
 
 static inline struct gcip_kci_command_element *gcip_kci_get_cmd_queue(struct gcip_kci *kci)
 {
-	return (struct gcip_kci_command_element *)gcip_mailbox_get_cmd_queue(&kci->mailbox);
+	return (struct gcip_kci_command_element *)gcip_mailbox_get_tx_queue(&kci->mailbox);
 }
 
 static inline struct gcip_kci_response_element *gcip_kci_get_resp_queue(struct gcip_kci *kci)
 {
-	return (struct gcip_kci_response_element *)gcip_mailbox_get_resp_queue(&kci->mailbox);
+	return (struct gcip_kci_response_element *)gcip_mailbox_get_rx_queue(&kci->mailbox);
 }
 
 static inline u64 gcip_kci_get_queue_wrap_bit(struct gcip_kci *kci)

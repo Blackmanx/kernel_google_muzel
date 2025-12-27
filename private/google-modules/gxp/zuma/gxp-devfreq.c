@@ -5,7 +5,11 @@
  * Copyright (C) 2024 Google LLC
  */
 
+#include <linux/container_of.h>
+#include <linux/device.h>
+#include <linux/mutex.h>
 #include <linux/units.h>
+#include <linux/workqueue.h>
 
 #include "gxp-config.h"
 #include "gxp-devfreq.h"
@@ -51,12 +55,26 @@ static u32 gxp_devfreq_get_freq_table(void *data, u32 *dvfs_table, u32 max_size)
 static void gxp_devfreq_update_min_max_freq_range(void *data, u32 min_freq_khz, u32 max_freq_khz)
 {
 	struct gxp_dev *gxp = (struct gxp_dev *)data;
-	int ret;
+	struct gxp_devfreq_freq_limit_work_data *work_data = &gxp->devfreq->freq_limit_work_data;
 
-	ret = gxp_pm_set_min_max_freq_limit(gxp, min_freq_khz, max_freq_khz);
-	if (ret)
-		dev_warn(gxp->dev, "Failed to set [%u, %u] kHz range with error %d.", min_freq_khz,
-			 max_freq_khz, ret);
+	/*
+	 * This function executes inside the global linux devfreq framework lock that ensures that
+	 * at a given time only a single devfreq request is processed.
+	 *
+	 * In scenario when the worker is already in the worker queue and new devfreq request comes
+	 * then simply the latest {min,max}_freq_khz would get updated and be acted upon by the
+	 * worker thread whenever it is scheduled next.
+	 *
+	 * In race condition when the work is already getting executed and the new devfreq request
+	 * comes then mutex lock ensures the consistent update of the {min,max}_freq_khz followed
+	 * by the rescheduling of the work to act upon the latest {min,max}_freq_khz request.
+	 */
+	mutex_lock(&work_data->freq_limit_work_data_mutex);
+	work_data->min_freq_khz = min_freq_khz;
+	work_data->max_freq_khz = max_freq_khz;
+	mutex_unlock(&work_data->freq_limit_work_data_mutex);
+
+	schedule_work(&work_data->work);
 }
 
 static int gxp_devfreq_get_cur_freq(struct device *dev, unsigned long *freq_hz)
@@ -73,6 +91,24 @@ static int gxp_devfreq_get_cur_freq(struct device *dev, unsigned long *freq_hz)
 	return 0;
 }
 
+static void gxp_freq_limit_aync_work(struct work_struct *work)
+{
+	struct gxp_devfreq_freq_limit_work_data *data =
+		container_of(work, struct gxp_devfreq_freq_limit_work_data, work);
+	struct gxp_dev *gxp = data->gxp;
+	int min_freq_khz, max_freq_khz, ret;
+
+	mutex_lock(&data->freq_limit_work_data_mutex);
+	min_freq_khz = data->min_freq_khz;
+	max_freq_khz = data->max_freq_khz;
+	mutex_unlock(&data->freq_limit_work_data_mutex);
+
+	ret = gxp_pm_set_min_max_freq_limit(gxp, min_freq_khz, max_freq_khz);
+	if (ret)
+		dev_warn(gxp->dev, "Failed to set [%u, %u] kHz range with error %d.", min_freq_khz,
+			 max_freq_khz, ret);
+}
+
 static const struct gcip_devfreq_ops devfreq_ops = {
 	.get_freq_table = gxp_devfreq_get_freq_table,
 	.update_min_max_freq_range = gxp_devfreq_update_min_max_freq_range,
@@ -81,7 +117,9 @@ static const struct gcip_devfreq_ops devfreq_ops = {
 
 int gxp_devfreq_init(struct gxp_dev *gxp)
 {
-	struct gcip_devfreq *devfreq;
+	struct gxp_devfreq *gdevfreq;
+	int ret;
+
 	const struct gcip_devfreq_args args = {
 		.dev = gxp->dev,
 		.data = gxp,
@@ -91,21 +129,37 @@ int gxp_devfreq_init(struct gxp_dev *gxp)
 	if (gxp->devfreq)
 		return -EEXIST;
 
-	devfreq = gcip_devfreq_create(&args);
+	gdevfreq = devm_kzalloc(gxp->dev, sizeof(*gdevfreq), GFP_KERNEL);
+	if (!gdevfreq)
+		return -ENOMEM;
 
-	if (IS_ERR(devfreq)) {
-		dev_err(gxp->dev, "Failed to initialize devfreq:%ld.", PTR_ERR(devfreq));
-		return PTR_ERR(devfreq);
+	gdevfreq->devfreq = gcip_devfreq_create(&args);
+
+	if (IS_ERR(gdevfreq->devfreq)) {
+		ret = PTR_ERR(gdevfreq->devfreq);
+		dev_err(gxp->dev, "Failed to initialize devfreq:%d.", ret);
+		goto err;
 	}
 
-	gxp->devfreq = devfreq;
+	gdevfreq->freq_limit_work_data.gxp = gxp;
+	gdevfreq->freq_limit_work_data.min_freq_khz = 0;
+	gdevfreq->freq_limit_work_data.max_freq_khz = 0;
+	INIT_WORK(&gdevfreq->freq_limit_work_data.work, gxp_freq_limit_aync_work);
+	mutex_init(&gdevfreq->freq_limit_work_data.freq_limit_work_data_mutex);
+
+	gxp->devfreq = gdevfreq;
 	return 0;
+err:
+	devm_kfree(gxp->dev, gdevfreq);
+	return ret;
 }
 
 void gxp_devfreq_exit(struct gxp_dev *gxp)
 {
 	if (!gxp->devfreq)
 		return;
-	gcip_devfreq_destroy(gxp->devfreq);
+	cancel_work_sync(&gxp->devfreq->freq_limit_work_data.work);
+	gcip_devfreq_destroy(gxp->devfreq->devfreq);
+	devm_kfree(gxp->dev, gxp->devfreq);
 	gxp->devfreq = NULL;
 }

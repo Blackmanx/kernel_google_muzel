@@ -39,27 +39,6 @@
 #include <iif/iif-manager.h>
 #include <iif/iif-shared.h>
 
-/*
- * By default, the fence will retire if there are no outstanding signalers, waiters and FDs. Its
- * purpose is to return the fence ID to the pool in early stage before the fence releases so that we
- * can minimize the possibility of the lack of fence ID. Therefore, the retirement condition will be
- * checked for each `signal()`, `waited()` and `close(fd)` call. However, when the user sets this
- * flag to a fence, the fence will retire only when it releases.
- *
- * If there is a possibility of a race condition between the signaler and waiters, this flag can be
- * considered to prevent the early fence retirement. For example, if the signaler signals a fence
- * before any waiter starts waiting on the fence, the IIF driver will think there are no outstanding
- * signalers and waiters, so it will let the fence retire. That means upcoming waiters may try to
- * wait on the retired fence which is invalid.
- *
- * Normally, that race condition doesn't have to be considered since the runtime will always hold
- * FDs while drivers/firmwares manipulating a fence and the fence won't retired in any case until
- * the runtime closes FDs. However, if there is an use case that utilizing a fence which won't be
- * exposed to the runtime (i.e., no FD is installed to the fence), this flag will be required to
- * prevent the race condition.
- */
-#define IIF_FLAGS_RETIRE_ON_RELEASE BIT(0)
-
 struct iif_fence;
 struct iif_fence_ops;
 struct iif_fence_poll_cb;
@@ -212,6 +191,12 @@ int iif_fence_init(struct iif_manager *mgr, struct iif_fence *fence,
 static inline void iif_fence_set_flags(struct iif_fence *fence, unsigned long flags)
 {
 	fence->flags = flags;
+}
+
+/* Gets the flags of @fence. */
+static inline unsigned long iif_fence_get_flags(struct iif_fence *fence)
+{
+	return fence->flags;
 }
 
 /*

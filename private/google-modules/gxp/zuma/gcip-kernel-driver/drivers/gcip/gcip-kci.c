@@ -51,13 +51,6 @@ static u64 gcip_kci_get_cmd_elem_seq(struct gcip_mailbox *mailbox, void *cmd)
 	return elem->seq;
 }
 
-static u32 gcip_kci_get_cmd_elem_code(struct gcip_mailbox *mailbox, void *cmd)
-{
-	struct gcip_kci_command_element *elem = cmd;
-
-	return elem->code;
-}
-
 static void gcip_kci_set_cmd_elem_seq(struct gcip_mailbox *mailbox, void *cmd, u64 seq)
 {
 	struct gcip_kci_command_element *elem = cmd;
@@ -97,14 +90,22 @@ static void gcip_kci_inc_resp_queue_head(struct gcip_mailbox *mailbox, u32 inc)
 static int gcip_kci_acquire_resp_queue_lock(struct gcip_mailbox *mailbox, bool try, bool *atomic)
 {
 	struct gcip_kci *kci = gcip_mailbox_get_data(mailbox);
+	unsigned long flags;
+	int ret;
 
 	*atomic = true;
 
-	if (try)
-		return spin_trylock_irqsave(&kci->resp_queue_lock, kci->resp_queue_lock_flags);
+	if (try) {
+		ret = spin_trylock_irqsave(&kci->resp_queue_lock, flags);
+	} else {
+		spin_lock_irqsave(&kci->resp_queue_lock, flags);
+		ret = 1;
+	}
 
-	spin_lock_irqsave(&kci->resp_queue_lock, kci->resp_queue_lock_flags);
-	return 1;
+	if (ret)
+		kci->resp_queue_lock_flags = flags;
+
+	return ret;
 }
 
 static void gcip_kci_release_resp_queue_lock(struct gcip_mailbox *mailbox)
@@ -126,22 +127,6 @@ static void gcip_kci_set_resp_elem_seq(struct gcip_mailbox *mailbox, void *resp,
 	struct gcip_kci_response_element *elem = resp;
 
 	elem->seq = seq;
-}
-
-static void gcip_kci_acquire_wait_list_lock(struct gcip_mailbox *mailbox, bool irqsave,
-					    unsigned long *flags)
-{
-	struct gcip_kci *kci = gcip_mailbox_get_data(mailbox);
-
-	spin_lock_irqsave(&kci->wait_list_lock, *flags);
-}
-
-static void gcip_kci_release_wait_list_lock(struct gcip_mailbox *mailbox, bool irqrestore,
-					    unsigned long flags)
-{
-	struct gcip_kci *kci = gcip_mailbox_get_data(mailbox);
-
-	spin_unlock_irqrestore(&kci->wait_list_lock, flags);
 }
 
 static int gcip_kci_wait_for_cmd_queue_not_full(struct gcip_mailbox *mailbox)
@@ -198,7 +183,12 @@ static int gcip_reverse_kci_add_resp(struct gcip_kci *kci,
 	tail = READ_ONCE(rkci->tail);
 	if (CIRC_SPACE(head, tail, rkci->buffer_size) >= 1) {
 		rkci->buffer[head] = *resp;
+		/* queue data needs to be updated before bump queue pointer */
 		smp_store_release(&rkci->head, (head + 1) & (rkci->buffer_size - 1));
+		/*
+		 * The handler work would consume all responses in buffer, no need to check
+		 * whether a pending work exists.
+		 */
 		schedule_work(&rkci->work);
 	} else {
 		ret = -ENOSPC;
@@ -208,22 +198,25 @@ static int gcip_reverse_kci_add_resp(struct gcip_kci *kci,
 	return ret;
 }
 
-static bool gcip_kci_before_handle_resp(struct gcip_mailbox *mailbox, const void *resp)
+static bool gcip_kci_is_rx_elem_reversed(struct gcip_mailbox *mailbox, const void *rx_elem)
+{
+	const struct gcip_kci_response_element *elem = rx_elem;
+
+	return elem->seq & GCIP_KCI_REVERSE_FLAG;
+}
+
+static int gcip_kci_handle_reversed_command(struct gcip_mailbox *mailbox, const void *reversed_cmd)
 {
 	struct gcip_kci *kci = gcip_mailbox_get_data(mailbox);
-	const struct gcip_kci_response_element *elem = resp;
+	const struct gcip_kci_response_element *elem = reversed_cmd;
+	int ret;
 
-	if (elem->seq & GCIP_KCI_REVERSE_FLAG) {
-		int ret = gcip_reverse_kci_add_resp(kci, elem);
+	ret = gcip_reverse_kci_add_resp(kci, elem);
+	if (ret)
+		dev_warn_ratelimited(kci->dev, "Failed to handle reverse KCI code %u (%d)\n",
+				     elem->code, ret);
 
-		if (ret)
-			dev_warn_ratelimited(kci->dev,
-					     "Failed to handle reverse KCI code %u (%d)\n",
-					     elem->code, ret);
-		return false;
-	}
-
-	return true;
+	return ret;
 }
 
 static inline bool gcip_kci_is_block_off(struct gcip_mailbox *mailbox)
@@ -242,27 +235,25 @@ static void gcip_kci_on_error(struct gcip_mailbox *mailbox, int err)
 }
 
 static const struct gcip_mailbox_ops gcip_mailbox_ops = {
-	.get_cmd_queue_tail = gcip_kci_get_cmd_queue_tail,
-	.inc_cmd_queue_tail = gcip_kci_inc_cmd_queue_tail,
-	.acquire_cmd_queue_lock = gcip_kci_acquire_cmd_queue_lock,
-	.release_cmd_queue_lock = gcip_kci_release_cmd_queue_lock,
+	.get_tx_queue_tail = gcip_kci_get_cmd_queue_tail,
+	.inc_tx_queue_tail = gcip_kci_inc_cmd_queue_tail,
+	.acquire_tx_queue_lock = gcip_kci_acquire_cmd_queue_lock,
+	.release_tx_queue_lock = gcip_kci_release_cmd_queue_lock,
 	.get_cmd_elem_seq = gcip_kci_get_cmd_elem_seq,
 	.set_cmd_elem_seq = gcip_kci_set_cmd_elem_seq,
-	.get_cmd_elem_code = gcip_kci_get_cmd_elem_code,
-	.get_resp_queue_size = gcip_kci_get_resp_queue_size,
-	.get_resp_queue_head = gcip_kci_get_resp_queue_head,
-	.get_resp_queue_tail = gcip_kci_get_resp_queue_tail,
-	.inc_resp_queue_head = gcip_kci_inc_resp_queue_head,
-	.acquire_resp_queue_lock = gcip_kci_acquire_resp_queue_lock,
-	.release_resp_queue_lock = gcip_kci_release_resp_queue_lock,
+	.get_rx_queue_size = gcip_kci_get_resp_queue_size,
+	.get_rx_queue_head = gcip_kci_get_resp_queue_head,
+	.get_rx_queue_tail = gcip_kci_get_resp_queue_tail,
+	.inc_rx_queue_head = gcip_kci_inc_resp_queue_head,
+	.acquire_rx_queue_lock = gcip_kci_acquire_resp_queue_lock,
+	.release_rx_queue_lock = gcip_kci_release_resp_queue_lock,
 	.get_resp_elem_seq = gcip_kci_get_resp_elem_seq,
 	.set_resp_elem_seq = gcip_kci_set_resp_elem_seq,
-	.acquire_wait_list_lock = gcip_kci_acquire_wait_list_lock,
-	.release_wait_list_lock = gcip_kci_release_wait_list_lock,
-	.wait_for_cmd_queue_not_full = gcip_kci_wait_for_cmd_queue_not_full,
+	.wait_for_tx_queue_not_full = gcip_kci_wait_for_cmd_queue_not_full,
+	.is_rx_elem_reversed = gcip_kci_is_rx_elem_reversed,
+	.handle_reversed_command = gcip_kci_handle_reversed_command,
 	.after_enqueue_cmd = gcip_kci_after_enqueue_cmd,
 	.after_fetch_resps = gcip_kci_after_fetch_resps,
-	.before_handle_resp = gcip_kci_before_handle_resp,
 	.is_block_off = gcip_kci_is_block_off,
 	.on_error = gcip_kci_on_error,
 };
@@ -284,10 +275,12 @@ int gcip_kci_send_cmd_return_resp(struct gcip_kci *kci, struct gcip_kci_command_
 		flags |= GCIP_MAILBOX_CMD_FLAGS_SKIP_ASSIGN_SEQ;
 
 	ret = gcip_mailbox_send_cmd(&kci->mailbox, cmd, resp, flags);
-	if (ret || !resp)
+	if (ret) {
+		dev_err(kci->dev, "Sending KCI command %d returned error: %d", cmd->code, ret);
 		return ret;
+	}
 
-	return resp->code;
+	return resp ? resp->code : 0;
 }
 
 int gcip_kci_send_cmd(struct gcip_kci *kci, struct gcip_kci_command_element *cmd)
@@ -333,6 +326,7 @@ void gcip_kci_handle_irq(struct gcip_kci *kci)
 	 */
 	gcip_mailbox_consume_one_response(&kci->mailbox, &resp);
 
+	/* The work would consume all responses, no need to check whether a pending work exists. */
 	schedule_work(&kci->work);
 }
 
@@ -345,6 +339,7 @@ static void gcip_kci_update_usage_work(struct work_struct *work)
 
 void gcip_kci_update_usage_async(struct gcip_kci *kci)
 {
+	/* We only need at most one work, no need to check whether a pending work exists.*/
 	schedule_work(&kci->usage_work);
 }
 
@@ -369,6 +364,7 @@ static int gcip_reverse_kci_remove_resp(struct gcip_reverse_kci *rkci,
 		*resp = rkci->buffer[tail];
 		tail = (tail + 1) & (rkci->buffer_size - 1);
 		ret = 1;
+		/* queue data needs to be updated before bump queue pointer */
 		smp_store_release(&rkci->tail, tail);
 	}
 	spin_unlock(&rkci->consumer_lock);
@@ -467,11 +463,12 @@ int gcip_kci_init(struct gcip_kci *kci, const struct gcip_kci_args *args)
 		goto err_unset_ops;
 
 	mailbox_args.dev = args->dev;
+	mailbox_args.mode = GCIP_MAILBOX_MODE_ALL;
 	mailbox_args.queue_wrap_bit = args->queue_wrap_bit;
-	mailbox_args.cmd_queue = args->cmd_queue;
-	mailbox_args.cmd_elem_size = sizeof(struct gcip_kci_command_element);
-	mailbox_args.resp_queue = args->resp_queue;
-	mailbox_args.resp_elem_size = sizeof(struct gcip_kci_response_element);
+	mailbox_args.tx_queue = args->cmd_queue;
+	mailbox_args.tx_elem_size = sizeof(struct gcip_kci_command_element);
+	mailbox_args.rx_queue = args->resp_queue;
+	mailbox_args.rx_elem_size = sizeof(struct gcip_kci_response_element);
 	mailbox_args.timeout = args->timeout;
 	mailbox_args.ops = &gcip_mailbox_ops;
 	mailbox_args.data = kci;
@@ -482,7 +479,6 @@ int gcip_kci_init(struct gcip_kci *kci, const struct gcip_kci_args *args)
 
 	mutex_init(&kci->cmd_queue_lock);
 	spin_lock_init(&kci->resp_queue_lock);
-	spin_lock_init(&kci->wait_list_lock);
 	init_waitqueue_head(&kci->resp_doorbell_waitq);
 	INIT_WORK(&kci->work, gcip_kci_consume_responses_work);
 	INIT_WORK(&kci->usage_work, gcip_kci_update_usage_work);
@@ -524,47 +520,4 @@ void gcip_kci_release(struct gcip_kci *kci)
 	if (!list_empty(gcip_kci_get_wait_list(kci)))
 		dev_warn(kci->dev, "KCI commands still pending.\n");
 	gcip_mailbox_release(&kci->mailbox);
-}
-
-int gcip_kci_error_to_errno(struct device *dev, enum gcip_kci_error code)
-{
-	switch (code) {
-	case GCIP_KCI_ERROR_OK:
-		return 0;
-	case GCIP_KCI_ERROR_CANCELLED:
-		return -ECANCELED;
-	case GCIP_KCI_ERROR_UNKNOWN:
-		return -EINVAL;
-	case GCIP_KCI_ERROR_INVALID_ARGUMENT:
-		return -EINVAL;
-	case GCIP_KCI_ERROR_DEADLINE_EXCEEDED:
-		return -ETIMEDOUT;
-	case GCIP_KCI_ERROR_NOT_FOUND:
-		return -EIO;
-	case GCIP_KCI_ERROR_ALREADY_EXISTS:
-		return -EALREADY;
-	case GCIP_KCI_ERROR_PERMISSION_DENIED:
-		return -EPERM;
-	case GCIP_KCI_ERROR_RESOURCE_EXHAUSTED:
-		return -ENOSPC;
-	case GCIP_KCI_ERROR_FAILED_PRECONDITION:
-		return -EFAULT;
-	case GCIP_KCI_ERROR_ABORTED:
-		return -EACCES;
-	case GCIP_KCI_ERROR_OUT_OF_RANGE:
-		return -ERANGE;
-	case GCIP_KCI_ERROR_UNIMPLEMENTED:
-		return -EOPNOTSUPP;
-	case GCIP_KCI_ERROR_INTERNAL:
-		return -EBADRQC;
-	case GCIP_KCI_ERROR_UNAVAILABLE:
-		return -EAGAIN;
-	case GCIP_KCI_ERROR_DATA_LOSS:
-		return -EIO;
-	case GCIP_KCI_ERROR_UNAUTHENTICATED:
-		return -EPERM;
-	default:
-		dev_warn(dev, "Unknown KCI firmware error code: %d.\n", code);
-		return -EBADRQC;
-	}
 }

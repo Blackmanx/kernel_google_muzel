@@ -49,9 +49,14 @@ struct gxp_client *gxp_client_create(struct gxp_dev *gxp)
 void gxp_client_destroy(struct gxp_client *client)
 {
 	struct gxp_dev *gxp = client->gxp;
+	int client_id = -1;
 	int core;
 
 	down_write(&client->semaphore);
+
+	/* Backup @vd->client_id since it will be set to -1 after `RELEASE_VMBOX` KCI. */
+	if (client->vd)
+		client_id = client->vd->client_id;
 
 	if (client->vd && client->vd->state != GXP_VD_OFF) {
 		gxp_vd_check_and_wait_for_debug_dump(client->vd);
@@ -75,7 +80,7 @@ void gxp_client_destroy(struct gxp_client *client)
 	 * by the race condition.
 	 */
 	if (client->vd)
-		gxp_vd_release_unconsumed_async_resps(gxp, client->vd);
+		gxp_vd_release_unconsumed_async_resps(gxp, client->vd, client_id);
 
 	for (core = 0; core < GXP_NUM_CORES; core++) {
 		if (client->mb_eventfds[core])

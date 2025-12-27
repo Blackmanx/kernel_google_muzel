@@ -12,6 +12,8 @@
 #include <linux/spinlock.h>
 #include <linux/workqueue.h>
 
+#include <trace/events/gxp.h>
+
 #include <gcip/gcip-memory.h>
 
 #include <iif/iif-fence.h>
@@ -49,6 +51,8 @@ static void gxp_iif_unblocked_handler(struct iif_fence *fence, void *data)
 	struct gxp_dev *gxp = data;
 	struct gxp_iif *giif = gxp_mcu_of(gxp)->giif;
 	struct gxp_iif_unblocked *unblocked;
+
+	trace_gxp_iif_unblocked_start(fence->id, fence->signal_error);
 
 	if (fence->signal_error)
 		dev_warn(gxp->dev, "IIF has been unblocked with an error, id=%d, error=%d",
@@ -108,6 +112,7 @@ static void gxp_iif_unblocked_work_func(struct work_struct *work)
 			gxp_iif_send_unblock_notification(giif, cur->fence_id);
 		else
 			gxp_uci_send_iif_unblock_noti(&giif->mcu->uci, cur->fence_id);
+		trace_gxp_iif_unblocked_end(cur->fence_id);
 		kfree(cur);
 	}
 }
@@ -141,7 +146,7 @@ static void gxp_cancel_unblocked_work(struct gxp_mcu *mcu)
 
 /* IIF manager and device. */
 
-static void gxp_get_embedded_iif_mgr(struct gxp_dev *gxp)
+static int gxp_get_embedded_iif_mgr(struct gxp_dev *gxp)
 {
 	struct iif_manager *mgr;
 	struct gxp_iif *giif = gxp_mcu_of(gxp)->giif;
@@ -155,7 +160,7 @@ static void gxp_get_embedded_iif_mgr(struct gxp_dev *gxp)
 			dev_info(gxp->dev, "Use the IIF manager of TPU driver");
 			/* Note that we shouldn't call `iif_manager_get` here. */
 			giif->iif_mgr = mgr;
-			return;
+			return 0;
 		}
 	}
 #endif /* HAS_TPU_EXT */
@@ -165,18 +170,21 @@ static void gxp_get_embedded_iif_mgr(struct gxp_dev *gxp)
 	mgr = iif_manager_init(gxp->dev->of_node);
 	if (IS_ERR(mgr)) {
 		dev_warn(gxp->dev, "Failed to init an embedded IIF manager: %ld", PTR_ERR(mgr));
-		return;
+		return PTR_ERR(mgr);
 	}
 
 	giif->iif_mgr = mgr;
+
+	return 0;
 }
 
-static void gxp_get_iif_mgr(struct gxp_mcu *mcu)
+static int gxp_get_iif_mgr(struct gxp_mcu *mcu)
 {
 	struct gxp_dev *gxp = mcu->gxp;
 	struct platform_device *pdev;
 	struct device_node *node;
 	struct iif_manager *mgr;
+	int ret;
 
 	node = of_parse_phandle(gxp->dev->of_node, "iif-device", 0);
 	if (IS_ERR_OR_NULL(node)) {
@@ -191,9 +199,10 @@ static void gxp_get_iif_mgr(struct gxp_mcu *mcu)
 		goto get_embed;
 	}
 
-	mgr = platform_get_drvdata(pdev);
-	if (!mgr) {
-		dev_warn(gxp->dev, "Failed to get a manager from IIF device");
+	mgr = iif_manager_get_from_pdev(pdev);
+	if (IS_ERR(mgr)) {
+		ret = PTR_ERR(mgr);
+		dev_warn(gxp->dev, "Failed to get a manager from IIF device, ret=%d", ret);
 		goto put_device;
 	}
 
@@ -201,24 +210,24 @@ static void gxp_get_iif_mgr(struct gxp_mcu *mcu)
 
 	/* We don't need to call `get_device` since `of_find_device_by_node` takes a refcount. */
 	mcu->giif->iif_dev = &pdev->dev;
-	mcu->giif->iif_mgr = iif_manager_get(mgr);
+	mcu->giif->iif_mgr = mgr;
 
-	return;
+	return 0;
 
 put_device:
 	put_device(&pdev->dev);
+	if (ret == -EPROBE_DEFER)
+		return -EPROBE_DEFER;
 get_embed:
-	gxp_get_embedded_iif_mgr(gxp);
+	return gxp_get_embedded_iif_mgr(gxp);
 }
 
 static void gxp_put_iif_mgr(struct gxp_mcu *mcu)
 {
 	struct gxp_iif *giif = mcu->giif;
 
-	if (giif->iif_mgr) {
-		iif_manager_put(giif->iif_mgr);
-		giif->iif_mgr = NULL;
-	}
+	iif_manager_put(giif->iif_mgr);
+	giif->iif_mgr = NULL;
 	/* No-op if `giif->iif_dev` is NULL. */
 	put_device(giif->iif_dev);
 }
@@ -229,9 +238,6 @@ static int gxp_register_iif_mgr_ops(struct gxp_mcu *mcu)
 	struct gxp_dev *gxp = mcu->gxp;
 	struct gxp_iif *giif = mcu->giif;
 
-	if (!giif->iif_mgr)
-		return -ENODEV;
-
 	return iif_manager_register_ops(giif->iif_mgr, IIF_IP_DSP, &iif_mgr_ops, gxp);
 }
 
@@ -240,14 +246,12 @@ static void gxp_unregister_iif_mgr_ops(struct gxp_mcu *mcu)
 {
 	struct gxp_iif *giif = mcu->giif;
 
-	if (!giif->iif_mgr)
-		return;
 	iif_manager_unregister_ops(giif->iif_mgr, IIF_IP_DSP);
 }
 
 /* IIF Mailbox Ops. */
 
-static int gxp_iif_acquire_resp_queue_lock(struct gcip_mailbox *mailbox, bool try, bool *atomic)
+static int gxp_iif_acquire_rx_queue_lock(struct gcip_mailbox *mailbox, bool try, bool *atomic)
 {
 	/*
 	 * Since the IIF mailbox has no response queue this function should never be called.
@@ -257,7 +261,7 @@ static int gxp_iif_acquire_resp_queue_lock(struct gcip_mailbox *mailbox, bool tr
 	return 0;
 }
 
-static int gxp_iif_wait_for_cmd_queue_not_full(struct gcip_mailbox *mailbox)
+static int gxp_iif_wait_for_tx_queue_not_full(struct gcip_mailbox *mailbox)
 {
 	struct gxp_mailbox *gxp_mbx = mailbox->data;
 	struct gxp_iif *giif = gxp_mbx->data;
@@ -278,7 +282,7 @@ static int gxp_iif_wait_for_cmd_queue_not_full(struct gcip_mailbox *mailbox)
 	while (cnt--) {
 		spin_lock(&giif->enable_iif_mbox_lock);
 		ret = giif->enable_iif_mbox ?
-			      gxp_mailbox_gcip_ops_wait_for_cmd_queue_not_full(mailbox) :
+			      gxp_mailbox_gcip_ops_wait_for_tx_queue_not_full(mailbox) :
 			      -ESHUTDOWN;
 		spin_unlock(&giif->enable_iif_mbox_lock);
 
@@ -303,29 +307,25 @@ static void gxp_iif_set_cmd_elem_seq(struct gcip_mailbox *mb, void *cmd, u64 seq
 {
 	/* Not Implemented */
 }
-static u32 gxp_iif_get_cmd_elem_code(struct gcip_mailbox *mb, void *cmd)
-{
-	return 0;
-}
 
 /* IIF signal commands have no responses. */
-static u32 gxp_iif_get_resp_queue_size(struct gcip_mailbox *mb)
+static u32 gxp_iif_get_rx_queue_size(struct gcip_mailbox *mb)
 {
 	return 0;
 }
-static u32 gxp_iif_get_resp_queue_head(struct gcip_mailbox *mb)
+static u32 gxp_iif_get_rx_queue_head(struct gcip_mailbox *mb)
 {
 	return 0;
 }
-static u32 gxp_iif_get_resp_queue_tail(struct gcip_mailbox *mb)
+static u32 gxp_iif_get_rx_queue_tail(struct gcip_mailbox *mb)
 {
 	return 0;
 }
-static void gxp_iif_inc_resp_queue_head(struct gcip_mailbox *mb, u32 inc)
+static void gxp_iif_inc_rx_queue_head(struct gcip_mailbox *mb, u32 inc)
 {
 	/* Not Implemented */
 }
-static void gxp_iif_release_resp_queue_lock(struct gcip_mailbox *mb)
+static void gxp_iif_release_rx_queue_lock(struct gcip_mailbox *mb)
 {
 	/* Not Implemented */
 }
@@ -339,22 +339,21 @@ static void gxp_iif_set_resp_elem_seq(struct gcip_mailbox *mb, void *resp, u64 s
 }
 
 const struct gcip_mailbox_ops gxp_iif_gcip_mbx_ops = {
-	.get_cmd_queue_tail = gxp_mailbox_gcip_ops_get_cmd_queue_tail,
-	.inc_cmd_queue_tail = gxp_mailbox_gcip_ops_inc_cmd_queue_tail,
-	.acquire_cmd_queue_lock = gxp_mailbox_gcip_ops_acquire_cmd_queue_lock,
-	.release_cmd_queue_lock = gxp_mailbox_gcip_ops_release_cmd_queue_lock,
+	.get_tx_queue_tail = gxp_mailbox_gcip_ops_get_tx_queue_tail,
+	.inc_tx_queue_tail = gxp_mailbox_gcip_ops_inc_tx_queue_tail,
+	.acquire_tx_queue_lock = gxp_mailbox_gcip_ops_acquire_tx_queue_lock,
+	.release_tx_queue_lock = gxp_mailbox_gcip_ops_release_tx_queue_lock,
 	.get_cmd_elem_seq = gxp_iif_get_cmd_elem_seq,
 	.set_cmd_elem_seq = gxp_iif_set_cmd_elem_seq,
-	.get_cmd_elem_code = gxp_iif_get_cmd_elem_code,
-	.get_resp_queue_size = gxp_iif_get_resp_queue_size,
-	.get_resp_queue_head = gxp_iif_get_resp_queue_head,
-	.get_resp_queue_tail = gxp_iif_get_resp_queue_tail,
-	.inc_resp_queue_head = gxp_iif_inc_resp_queue_head,
-	.acquire_resp_queue_lock = gxp_iif_acquire_resp_queue_lock,
-	.release_resp_queue_lock = gxp_iif_release_resp_queue_lock,
+	.get_rx_queue_size = gxp_iif_get_rx_queue_size,
+	.get_rx_queue_head = gxp_iif_get_rx_queue_head,
+	.get_rx_queue_tail = gxp_iif_get_rx_queue_tail,
+	.inc_rx_queue_head = gxp_iif_inc_rx_queue_head,
+	.acquire_rx_queue_lock = gxp_iif_acquire_rx_queue_lock,
+	.release_rx_queue_lock = gxp_iif_release_rx_queue_lock,
 	.get_resp_elem_seq = gxp_iif_get_resp_elem_seq,
 	.set_resp_elem_seq = gxp_iif_set_resp_elem_seq,
-	.wait_for_cmd_queue_not_full = gxp_iif_wait_for_cmd_queue_not_full,
+	.wait_for_tx_queue_not_full = gxp_iif_wait_for_tx_queue_not_full,
 	.after_enqueue_cmd = gxp_mailbox_gcip_ops_after_enqueue_cmd,
 };
 
@@ -422,6 +421,7 @@ static int gxp_iif_mailbox_init(struct gxp_iif *giif)
 {
 	struct gxp_mailbox_args mbx_args = {
 		.type = GXP_MBOX_TYPE_GENERAL,
+		.mode = GXP_MBOX_TX_SIMPLEX,
 		.ops = &gxp_iif_mbx_ops,
 		.queue_wrap_bit = IIF_CIRCULAR_QUEUE_WRAP_BIT,
 		.cmd_elem_size = sizeof(struct gxp_uci_command),
@@ -439,6 +439,21 @@ static int gxp_iif_mailbox_init(struct gxp_iif *giif)
 		return PTR_ERR(giif->mbx);
 
 	return 0;
+}
+
+static void gxp_clear_carveout_iif_signal_region(struct gxp_dev *gxp)
+{
+	void *buffer_vaddr;
+
+	buffer_vaddr = memremap(GXP_CARVEOUT_IIF_SIGNAL_REGION_ADDRESS,
+				GXP_CARVEOUT_IIF_SIGNAL_REGION_SIZE, MEMREMAP_WC);
+	if (!buffer_vaddr) {
+		dev_err(gxp->dev, "memmap failed for iif signal region.");
+		return;
+	}
+
+	memset(buffer_vaddr, 0x0, GXP_CARVEOUT_IIF_SIGNAL_REGION_SIZE);
+	memunmap(buffer_vaddr);
 }
 
 int gxp_iif_init(struct gxp_mcu *mcu)
@@ -461,7 +476,10 @@ int gxp_iif_init(struct gxp_mcu *mcu)
 			goto out;
 	}
 
-	gxp_get_iif_mgr(mcu);
+	ret = gxp_get_iif_mgr(mcu);
+	if (ret)
+		goto err_release_mbx;
+
 	gxp_init_iif_unblocked_work(mcu);
 
 	ret = gxp_register_iif_mgr_ops(mcu);
@@ -470,11 +488,15 @@ int gxp_iif_init(struct gxp_mcu *mcu)
 		goto cancel_unblocked_work;
 	}
 
+	if (GXP_CLEAR_CARVEOUT_IIF_SIGNAL_REGION && !IS_GXP_TEST)
+		gxp_clear_carveout_iif_signal_region(gxp);
+
 	return 0;
 
 cancel_unblocked_work:
 	gxp_cancel_unblocked_work(mcu);
 	gxp_put_iif_mgr(mcu);
+err_release_mbx:
 	if (giif->use_iif_mbox)
 		gxp_mailbox_release(mcu->gxp->mailbox_mgr, NULL, 0, giif->mbx);
 out:

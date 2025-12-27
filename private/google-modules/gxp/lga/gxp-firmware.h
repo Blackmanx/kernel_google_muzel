@@ -19,7 +19,7 @@
 #define Q7_ALIVE_MAGIC	0x55555555
 
 #define CORE_CFG_REGION_SIZE (SZ_8K * GXP_NUM_CORES)
-#define VD_CFG_REGION_SIZE (SZ_4K)
+#define VD_CFG_REGION_SIZE (SZ_8K)
 
 /*
  * Enum for specifying what information needs to be fetched from the image_config.IommuMapping

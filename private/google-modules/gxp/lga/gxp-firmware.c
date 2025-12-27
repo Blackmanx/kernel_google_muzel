@@ -47,7 +47,6 @@
 #include "unittests/factory/fake-gxp-firmware.h"
 #endif
 
-#define FW_HEADER_SIZE		GCIP_FW_HEADER_SIZE
 #define DEBUGFS_FIRMWARE_RUN "firmware_run"
 
 static int gxp_dsp_fw_auth_disable;
@@ -103,7 +102,7 @@ static bool check_firmware_config_version(struct gxp_dev *gxp,
 {
 	const struct gcip_image_config *cfg;
 
-	if (unlikely(core_firmware[0]->size < GCIP_FW_HEADER_SIZE))
+	if (unlikely(core_firmware[0]->size < GCIP_FW_MAX_HEADER_SIZE))
 		return false;
 	cfg = gcip_common_image_get_config_from_hdr(core_firmware[0]->data, GXP_FW_MAGIC);
 	if (!cfg) {
@@ -205,17 +204,15 @@ static int elf_load_segments(struct gxp_dev *gxp, const u8 *elf_data, size_t siz
 	return ret;
 }
 
-static int
-gxp_firmware_authenticate(struct gxp_dev *gxp,
-			  const struct firmware *firmwares[GXP_NUM_CORES])
+static int gxp_firmware_authenticate(struct gxp_dev *gxp,
+				     const struct firmware *firmwares[GXP_NUM_CORES])
 {
 	const u8 *data;
-	size_t size;
+	size_t size, fw_header_size;
 	void *header_vaddr;
 	struct gcip_memory *buffer;
 	dma_addr_t header_dma_addr;
-	int core;
-	int ret;
+	int core, ret;
 
 	if (gxp_dsp_fw_auth_disable) {
 		dev_warn(gxp->dev,
@@ -236,11 +233,13 @@ gxp_firmware_authenticate(struct gxp_dev *gxp,
 	for (core = 0; core < GXP_NUM_CORES; core++) {
 		data = firmwares[core]->data;
 		size = firmwares[core]->size;
+		fw_header_size =
+			gcip_common_get_fw_header_size(firmwares[core]->data, GXP_FW_MAGIC);
 		buffer = &gxp->fwbufs[core];
 
-		if ((size - FW_HEADER_SIZE) > buffer->size) {
+		if ((size - fw_header_size) > buffer->size) {
 			dev_err(gxp->dev, "Firmware image does not fit (%zu > %lu)\n",
-				size - FW_HEADER_SIZE, buffer->size);
+				size - fw_header_size, buffer->size);
 			ret = -EINVAL;
 			goto error;
 		}
@@ -248,26 +247,25 @@ gxp_firmware_authenticate(struct gxp_dev *gxp,
 		dev_dbg(gxp->dev, "Authenticating firmware of core%u\n", core);
 
 		/* Allocate coherent memory for the image header */
-		header_vaddr = dma_alloc_coherent(gxp->gsa_dev, FW_HEADER_SIZE,
-						  &header_dma_addr, GFP_KERNEL);
+		header_vaddr = dma_alloc_coherent(gxp->gsa_dev, fw_header_size, &header_dma_addr,
+						  GFP_KERNEL);
 		if (!header_vaddr) {
 			ret = -ENOMEM;
 			goto error;
 		}
 
 		/* Copy the header to GSA coherent memory */
-		memcpy(header_vaddr, data, FW_HEADER_SIZE);
+		memcpy(header_vaddr, data, fw_header_size);
 
 		/* Copy the firmware image to the carveout location, skipping the header */
-		memcpy_toio(buffer->virt_addr, data + FW_HEADER_SIZE, size - FW_HEADER_SIZE);
+		memcpy_toio(buffer->virt_addr, data + fw_header_size, size - fw_header_size);
 
 		dev_dbg(gxp->dev, "Requesting GSA authentication. meta = %pad payload = %pap",
 			&header_dma_addr, &buffer->phys_addr);
 
 		ret = gsa_authenticate_image(gxp->gsa_dev, header_dma_addr, buffer->phys_addr);
 
-		dma_free_coherent(gxp->gsa_dev, FW_HEADER_SIZE, header_vaddr,
-				  header_dma_addr);
+		dma_free_coherent(gxp->gsa_dev, fw_header_size, header_vaddr, header_dma_addr);
 
 		if (ret) {
 			dev_err(gxp->dev, "GSA authentication failed: %d\n",
@@ -418,28 +416,28 @@ static int
 gxp_firmware_load_into_memories(struct gxp_dev *gxp,
 				const struct firmware *firmwares[GXP_NUM_CORES])
 {
-	int core;
-	int ret;
+	int core, ret;
+	size_t fw_header_size;
 
 	for (core = 0; core < GXP_NUM_CORES; core++) {
 		/* Load firmware to System RAM */
-		if (firmwares[core]->size < FW_HEADER_SIZE) {
-			dev_err(gxp->dev,
-				"Invalid Core %u firmware Image size (%d > %zu)\n",
-				core, FW_HEADER_SIZE, firmwares[core]->size);
+		fw_header_size =
+			gcip_common_get_fw_header_size(firmwares[core]->data, GXP_FW_MAGIC);
+		if (firmwares[core]->size < fw_header_size) {
+			dev_err(gxp->dev, "Invalid Core %u firmware Image size (%zu > %zu)\n", core,
+				fw_header_size, firmwares[core]->size);
 			ret = -EINVAL;
 			goto error;
 		}
 
-		if ((firmwares[core]->size - FW_HEADER_SIZE) >
-		    gxp->fwbufs[core].size) {
+		if ((firmwares[core]->size - fw_header_size) > gxp->fwbufs[core].size) {
 			dev_err(gxp->dev, "Core %u firmware image does not fit (%zu > %lu)\n", core,
-				firmwares[core]->size - FW_HEADER_SIZE, gxp->fwbufs[core].size);
+				firmwares[core]->size - fw_header_size, gxp->fwbufs[core].size);
 			ret = -EINVAL;
 			goto error;
 		}
-		memcpy_toio(gxp->fwbufs[core].virt_addr, firmwares[core]->data + FW_HEADER_SIZE,
-			    firmwares[core]->size - FW_HEADER_SIZE);
+		memcpy_toio(gxp->fwbufs[core].virt_addr, firmwares[core]->data + fw_header_size,
+			    firmwares[core]->size - fw_header_size);
 	}
 	return 0;
 error:
@@ -453,14 +451,15 @@ int gxp_firmware_rearrange_elf(struct gxp_dev *gxp,
 			       const struct firmware *firmwares[GXP_NUM_CORES])
 {
 	int ret = 0;
+	size_t fw_header_size;
 	uint core;
 
 	for (core = 0; core < GXP_NUM_CORES; core++) {
 		/* Re-arrange ELF firmware in System RAM */
-		ret = elf_load_segments(gxp,
-					firmwares[core]->data + FW_HEADER_SIZE,
-					firmwares[core]->size - FW_HEADER_SIZE,
-					&gxp->fwbufs[core]);
+		fw_header_size =
+			gcip_common_get_fw_header_size(firmwares[core]->data, GXP_FW_MAGIC);
+		ret = elf_load_segments(gxp, firmwares[core]->data + fw_header_size,
+					firmwares[core]->size - fw_header_size, &gxp->fwbufs[core]);
 		if (ret) {
 			dev_err(gxp->dev,
 				"Failed to parse ELF firmware on core %u\n",
@@ -1052,11 +1051,15 @@ static int gxp_firmware_get_cfg_resource_v3(struct gxp_dev *gxp,
 
 	/* The MCU shared region covers both core_cfg and the VD cfg region. */
 	assign_resource(&tmp, img_cfg, MCU_SHARED_REGION_IDX);
-	if (tmp.size < CORE_CFG_REGION_SIZE + VD_CFG_REGION_SIZE) {
-		dev_err(gxp->dev, "Invalid shared region size, at least %#x, got %#lx",
+	/*
+	 * For compatibility with older firmwares, fine to map extra memory size. We already check
+	 * CORE_CFG_REGION_SIZE + VD_CFG_REGION_SIZE together should not exceed
+	 * GXP_SHARED_SLICE_SIZE. Older firmware has lesser size for VD_CFG and its fine to map more
+	 * size till we are not exceeding GXP_SHARED_SLICE_SIZE.
+	 */
+	if (tmp.size < CORE_CFG_REGION_SIZE + VD_CFG_REGION_SIZE)
+		dev_warn(gxp->dev, "Invalid shared region size, at least %#x, got %#lx",
 			CORE_CFG_REGION_SIZE + VD_CFG_REGION_SIZE, tmp.size);
-		return -EINVAL;
-	}
 	if (type == IMAGE_CONFIG_CORE_CFG_REGION) {
 		res->size = CORE_CFG_REGION_SIZE;
 		res->dma_addr = tmp.dma_addr;

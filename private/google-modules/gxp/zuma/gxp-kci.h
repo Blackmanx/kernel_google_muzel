@@ -14,8 +14,9 @@
 #include <linux/types.h>
 #include <linux/workqueue.h>
 
-#include <gcip/gcip-fault-injection.h>
+#include <gcip/gcip-fault-inject.h>
 #include <gcip/gcip-kci.h>
+#include <gcip/gcip-memory.h>
 #include <gcip/gcip-telemetry.h>
 
 #include "gxp-internal.h"
@@ -57,14 +58,6 @@
 
 #define KCI_CIRCULAR_QUEUE_WRAP_BIT BIT(15)
 
-/*
- * Chip specific reverse KCI request codes.
- */
-enum gxp_reverse_rkci_code {
-	GXP_RKCI_CODE_PM_QOS_BTS = GCIP_RKCI_CHIP_CODE_FIRST + 3,
-	GXP_RKCI_CODE_CORE_TELEMETRY_READ = GCIP_RKCI_CHIP_CODE_FIRST + 4,
-};
-
 struct gxp_mcu;
 
 struct gxp_kci {
@@ -72,9 +65,9 @@ struct gxp_kci {
 	struct gxp_mcu *mcu;
 	struct gxp_mailbox *mbx;
 
-	struct gxp_mapped_resource cmd_queue_mem;
-	struct gxp_mapped_resource resp_queue_mem;
-	struct gxp_mapped_resource descriptor_mem;
+	struct gcip_memory cmd_queue_mem;
+	struct gcip_memory resp_queue_mem;
+	struct gcip_memory descriptor_mem;
 
 	/* If false, the kernel driver won't send RKCI ACK responses. */
 	bool enable_rkci_ack;
@@ -135,6 +128,8 @@ struct gxp_kci_link_unlink_offload_vmbox_detail {
 struct gxp_rkci_client_fatal_error_notify {
 	struct list_head node;
 	int client_id;
+	uint core_list;
+	struct gcip_kci_response_element resp;
 };
 
 /*
@@ -224,14 +219,14 @@ int gxp_kci_update_usage_locked(struct gxp_kci *gkci);
  *
  * Returns the code of response, or a negative errno on error.
  */
-int gxp_kci_map_mcu_log_buffer(struct gcip_telemetry_kci_args *args);
+int gxp_kci_map_mcu_log_buffer(const struct gcip_telemetry_kci_args *args);
 
 /*
  * Sends the "Map Trace Buffer" command and waits for remote response.
  *
  * Returns the code of response, or a negative errno on error.
  */
-int gxp_kci_map_mcu_trace_buffer(struct gcip_telemetry_kci_args *args);
+int gxp_kci_map_mcu_trace_buffer(const struct gcip_telemetry_kci_args *args);
 
 /* Send shutdown request to firmware */
 int gxp_kci_shutdown(struct gxp_kci *gkci);
@@ -295,12 +290,12 @@ int gxp_kci_set_device_properties(struct gxp_kci *gkci,
 				  struct gxp_dev_prop *device_prop);
 
 /**
- * gxp_kci_fault_injection() - Sends the fault injection KCI command to the firmware.
+ * gxp_kci_fault_inject() - Sends the fault injection KCI command to the firmware.
  * @injection: The container of fault injection data.
  *
  * Return: 0 if the command is sent successfully.
  */
-int gxp_kci_fault_injection(struct gcip_fault_inject *injection);
+int gxp_kci_fault_inject(struct gcip_fault_inject *injection);
 
 /**
  * gxp_kci_set_freq_limits() - Sends the frequency limits to be honoured to the firmware.

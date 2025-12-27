@@ -12,6 +12,7 @@
 
 #include <gcip/gcip-iommu.h>
 
+#include "gxp-config.h"
 #include "gxp-dma.h"
 #include "gxp-domain-pool.h"
 
@@ -26,11 +27,18 @@ module_param_named(gcip_iommu_domain_type, gxp_gcip_iommu_domain_type, int,
 int gxp_domain_pool_init(struct gxp_dev *gxp,
 			 struct gcip_iommu_domain_pool *pool, unsigned int size)
 {
-	int ret = gcip_iommu_domain_pool_init(pool, gxp->dev, 0, 0, SZ_4K, size,
-					      gxp_gcip_iommu_domain_type);
 	u32 num_bits, num_pasids;
 	__maybe_unused int i;
+	size_t granularity;
+	int ret;
 
+	if (GXP_MMU_GRANULARITY_IS_PAGE)
+		granularity = PAGE_SIZE;
+	else
+		granularity = SZ_4K;
+
+	ret = gcip_iommu_domain_pool_init(pool, gxp->dev, 0, 0, granularity, size,
+					  gxp_gcip_iommu_domain_type);
 	if (ret)
 		return ret;
 

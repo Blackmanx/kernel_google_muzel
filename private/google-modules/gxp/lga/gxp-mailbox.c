@@ -16,6 +16,7 @@
 #include <uapi/linux/sched/types.h>
 
 #include <gcip/gcip-mailbox.h>
+#include <trace/events/gxp.h>
 
 #include "gxp-config.h"
 #include "gxp-dma.h"
@@ -73,6 +74,8 @@ static void gxp_mailbox_irq_handler(struct gxp_mailbox *mailbox)
 		gcip_kci_handle_irq(mailbox->mbx_impl.gcip_kci);
 		kthread_queue_work(&mailbox->response_worker, &mailbox->response_work);
 	} else if (mailbox->type == GXP_MBOX_TYPE_GENERAL) {
+		/* Pass an unused variable as placeholder because it is requested by the macro */
+		trace_gxp_uci_rsp_start(0);
 		gcip_mailbox_consume_responses_work(mailbox->mbx_impl.gcip_mbx);
 	}
 #endif /* GXP_HAS_MCU */
@@ -145,6 +148,7 @@ static struct gxp_mailbox *create_mailbox(struct gxp_mailbox_manager *mgr,
 	mailbox->csr_reg_base = mgr->get_mailbox_csr_base(mgr->gxp, core_id);
 	mailbox->data_reg_base = mgr->get_mailbox_data_base(mgr->gxp, core_id);
 	mailbox->type = args->type;
+	mailbox->mode = args->mode;
 	mailbox->queue_wrap_bit = args->queue_wrap_bit;
 	mailbox->cmd_elem_size = args->cmd_elem_size;
 	mailbox->resp_elem_size = args->resp_elem_size;
@@ -199,11 +203,12 @@ static int init_gcip_mailbox(struct gxp_mailbox *mailbox)
 {
 	const struct gcip_mailbox_args args = {
 		.dev = mailbox->gxp->dev,
+		.mode = GCIP_MAILBOX_MODE_FORWARD,
 		.queue_wrap_bit = mailbox->queue_wrap_bit,
-		.cmd_queue = mailbox->cmd_queue_buf.vaddr,
-		.cmd_elem_size = mailbox->cmd_elem_size,
-		.resp_queue = mailbox->resp_queue_buf.vaddr,
-		.resp_elem_size = mailbox->resp_elem_size,
+		.tx_queue = mailbox->cmd_queue_buf.vaddr,
+		.tx_elem_size = mailbox->cmd_elem_size,
+		.rx_queue = mailbox->resp_queue_buf.vaddr,
+		.rx_elem_size = mailbox->resp_elem_size,
 		.timeout = MAILBOX_TIMEOUT,
 		.ops = mailbox->ops->gcip_ops.mbx,
 		.data = mailbox,
@@ -329,7 +334,10 @@ static int enable_mailbox(struct gxp_mailbox *mailbox)
 	kthread_init_work(&mailbox->response_work,
 			  gxp_mailbox_consume_responses_work);
 
-	gxp_mailbox_driver_register_interrupts(mailbox);
+	/* Skip registering the client->AP interrupt for Tx simplex communication. */
+	if (mailbox->mode != GXP_MBOX_TX_SIMPLEX)
+		gxp_mailbox_driver_register_interrupts(mailbox);
+
 	return 0;
 }
 

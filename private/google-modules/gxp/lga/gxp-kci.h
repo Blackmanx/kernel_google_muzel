@@ -14,7 +14,7 @@
 #include <linux/types.h>
 #include <linux/workqueue.h>
 
-#include <gcip/gcip-fault-injection.h>
+#include <gcip/gcip-fault-inject.h>
 #include <gcip/gcip-kci.h>
 #include <gcip/gcip-memory.h>
 #include <gcip/gcip-telemetry.h>
@@ -57,14 +57,6 @@
 #define KCI_ALLOCATE_VMBOX_OFFLOAD_TYPE_TPU 0
 
 #define KCI_CIRCULAR_QUEUE_WRAP_BIT BIT(15)
-
-/*
- * Chip specific reverse KCI request codes.
- */
-enum gxp_reverse_rkci_code {
-	GXP_RKCI_CODE_PM_QOS_BTS = GCIP_RKCI_CHIP_CODE_FIRST + 3,
-	GXP_RKCI_CODE_CORE_TELEMETRY_READ = GCIP_RKCI_CHIP_CODE_FIRST + 4,
-};
 
 struct gxp_mcu;
 
@@ -298,12 +290,12 @@ int gxp_kci_set_device_properties(struct gxp_kci *gkci,
 				  struct gxp_dev_prop *device_prop);
 
 /**
- * gxp_kci_fault_injection() - Sends the fault injection KCI command to the firmware.
+ * gxp_kci_fault_inject() - Sends the fault injection KCI command to the firmware.
  * @injection: The container of fault injection data.
  *
  * Return: 0 if the command is sent successfully.
  */
-int gxp_kci_fault_injection(struct gcip_fault_inject *injection);
+int gxp_kci_fault_inject(struct gcip_fault_inject *injection);
 
 /**
  * gxp_kci_set_freq_limits() - Sends the frequency limits to be honoured to the firmware.

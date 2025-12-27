@@ -99,7 +99,7 @@ struct gxp_virtual_device {
 	 * The config regions specified in image config.
 	 * core_cfg's size should be a multiple of GXP_NUM_CORES.
 	 */
-	struct gcip_memory core_cfg, vd_cfg, sys_cfg, lpm;
+	struct gcip_memory core_cfg, vd_cfg, sys_cfg, lpm, mcu_shared_cfg;
 	uint core_list;
 	/*
 	 * The ID of DSP client. -1 if it is not allocated.

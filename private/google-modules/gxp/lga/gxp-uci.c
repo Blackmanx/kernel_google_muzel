@@ -178,13 +178,6 @@ static u64 gxp_uci_get_cmd_elem_seq(struct gcip_mailbox *mailbox, void *cmd)
 	return elem->seq;
 }
 
-static u32 gxp_uci_get_cmd_elem_code(struct gcip_mailbox *mailbox, void *cmd)
-{
-	struct gxp_uci_command *elem = cmd;
-
-	return (u32)elem->type;
-}
-
 static void gxp_uci_set_cmd_elem_seq(struct gcip_mailbox *mailbox, void *cmd,
 				     u64 seq)
 {
@@ -346,6 +339,8 @@ static void gxp_uci_push_async_response(struct gxp_uci_async_response *async_res
 		errno = -EIO;
 	}
 
+	trace_gxp_uci_signal_outfence_before(resp_seq);
+
 	gcip_fence_array_signal_async(out_fences, errno);
 	gcip_fence_array_put_async(out_fences);
 
@@ -400,10 +395,8 @@ static void gxp_uci_release_awaiter_data(void *data)
 	 * Note that it is safe to call this function even after @async_resp->iif_ikf is signaled
 	 * and its thread already terminated.
 	 */
-	if (async_resp->iif_ikf) {
-		iif_dma_fence_stop(async_resp->iif_ikf);
-		iif_fence_put(async_resp->iif_ikf);
-	}
+	if (async_resp->iif_ikf)
+		iif_dma_fence_stop_and_put_async(async_resp->iif_ikf);
 
 	gcip_fence_array_put_async(async_resp->out_fences);
 	gcip_fence_array_put_async(async_resp->in_fences);
@@ -434,22 +427,21 @@ static u32 gxp_uci_get_cmd_timeout(struct gcip_mailbox *mailbox, void *cmd, void
 }
 
 static const struct gcip_mailbox_ops gxp_uci_gcip_mbx_ops = {
-	.get_cmd_queue_tail = gxp_mailbox_gcip_ops_get_cmd_queue_tail,
-	.inc_cmd_queue_tail = gxp_mailbox_gcip_ops_inc_cmd_queue_tail,
-	.acquire_cmd_queue_lock = gxp_mailbox_gcip_ops_acquire_cmd_queue_lock,
-	.release_cmd_queue_lock = gxp_mailbox_gcip_ops_release_cmd_queue_lock,
+	.get_tx_queue_tail = gxp_mailbox_gcip_ops_get_tx_queue_tail,
+	.inc_tx_queue_tail = gxp_mailbox_gcip_ops_inc_tx_queue_tail,
+	.acquire_tx_queue_lock = gxp_mailbox_gcip_ops_acquire_tx_queue_lock,
+	.release_tx_queue_lock = gxp_mailbox_gcip_ops_release_tx_queue_lock,
 	.get_cmd_elem_seq = gxp_uci_get_cmd_elem_seq,
 	.set_cmd_elem_seq = gxp_uci_set_cmd_elem_seq,
-	.get_cmd_elem_code = gxp_uci_get_cmd_elem_code,
-	.get_resp_queue_size = gxp_mailbox_gcip_ops_get_resp_queue_size,
-	.get_resp_queue_head = gxp_mailbox_gcip_ops_get_resp_queue_head,
-	.get_resp_queue_tail = gxp_mailbox_gcip_ops_get_resp_queue_tail,
-	.inc_resp_queue_head = gxp_mailbox_gcip_ops_inc_resp_queue_head,
-	.acquire_resp_queue_lock = gxp_mailbox_gcip_ops_acquire_resp_queue_lock,
-	.release_resp_queue_lock = gxp_mailbox_gcip_ops_release_resp_queue_lock,
+	.get_rx_queue_size = gxp_mailbox_gcip_ops_get_rx_queue_size,
+	.get_rx_queue_head = gxp_mailbox_gcip_ops_get_rx_queue_head,
+	.get_rx_queue_tail = gxp_mailbox_gcip_ops_get_rx_queue_tail,
+	.inc_rx_queue_head = gxp_mailbox_gcip_ops_inc_rx_queue_head,
+	.acquire_rx_queue_lock = gxp_mailbox_gcip_ops_acquire_rx_queue_lock,
+	.release_rx_queue_lock = gxp_mailbox_gcip_ops_release_rx_queue_lock,
 	.get_resp_elem_seq = gxp_uci_get_resp_elem_seq,
 	.set_resp_elem_seq = gxp_uci_set_resp_elem_seq,
-	.wait_for_cmd_queue_not_full = gxp_mailbox_gcip_ops_wait_for_cmd_queue_not_full,
+	.wait_for_tx_queue_not_full = gxp_mailbox_gcip_ops_wait_for_tx_queue_not_full,
 	.before_enqueue_wait_list = gxp_uci_before_enqueue_wait_list,
 	.after_enqueue_cmd = gxp_mailbox_gcip_ops_after_enqueue_cmd,
 	.after_fetch_resps = gxp_mailbox_gcip_ops_after_fetch_resps,
@@ -639,6 +631,7 @@ int gxp_uci_init(struct gxp_mcu *mcu)
 	struct gxp_uci *uci = &mcu->uci;
 	struct gxp_mailbox_args mbx_args = {
 		.type = GXP_MBOX_TYPE_GENERAL,
+		.mode = GXP_MBOX_FULL_DUPLEX,
 		.ops = &gxp_uci_gxp_mbx_ops,
 		.queue_wrap_bit = UCI_CIRCULAR_QUEUE_WRAP_BIT,
 		.cmd_elem_size = sizeof(struct gxp_uci_command),
@@ -677,31 +670,26 @@ void gxp_uci_exit(struct gxp_uci *uci)
 /**
  * gxp_uci_push_cmd() - Pushes @cmd to the UCI mailbox.
  * @uci: The UCI mailbox.
- * @vd: The virtual device sending the command.
+ * @client: The client that sends the command.
  * @cmd: The command to send.
  * @additional_info: The additional information to be serialized and passed to the command.
  * @in_fences: The fences which the command is waiting on to be unblocked.
  * @out_fences: The fences which the command will signal.
  * @iif_ikf: The inter-IP fence which will be signaled once in-kernel fences in @in_fences are
  *           signaled.
- * @wait_queue: The queue where the command will be located before a response arrives.
- * @resp_queue: The queue where the command will be moved after it is processed.
- * @queue_lock: The lock protecting @wait_queue and @dest_queue.
- * @queue_waitq: The wait queue which will be notified when the command is processed.
- * @eventfd: The eventfd which will be notified when the command is processed.
  * @flags: The GCIP mailbox flags.
  *
  * Returns 0 on success or errno on failure.
  */
-static int gxp_uci_push_cmd(struct gxp_uci *uci, struct gxp_virtual_device *vd,
+static int gxp_uci_push_cmd(struct gxp_uci *uci, struct gxp_client *client,
 			    struct gxp_uci_command *cmd,
 			    struct gxp_uci_additional_info *additional_info,
 			    struct gcip_fence_array *in_fences, struct gcip_fence_array *out_fences,
-			    struct iif_fence *iif_ikf, struct list_head *wait_queue,
-			    struct list_head *resp_queue, spinlock_t *queue_lock,
-			    wait_queue_head_t *queue_waitq, struct gxp_eventfd *eventfd,
-			    gcip_mailbox_cmd_flags_t flags)
+			    struct iif_fence *iif_ikf, gcip_mailbox_cmd_flags_t flags)
 {
+	struct gxp_virtual_device *vd = client->vd;
+	struct mailbox_resp_queue *mbox_rsp_queue = &vd->mailbox_resp_queues[UCI_RESOURCE_ID];
+	struct gxp_eventfd *eventfd = client->mb_eventfds[UCI_RESOURCE_ID];
 	struct gxp_uci_async_response *async_resp;
 	struct gcip_mailbox_resp_awaiter *awaiter;
 	uint32_t additional_info_address = 0;
@@ -710,6 +698,7 @@ static int gxp_uci_push_cmd(struct gxp_uci *uci, struct gxp_virtual_device *vd,
 
 	if (!gxp_vd_has_and_use_credit(vd))
 		return -EBUSY;
+
 	async_resp = kzalloc(sizeof(*async_resp), GFP_KERNEL);
 	if (!async_resp) {
 		ret = -ENOMEM;
@@ -718,10 +707,10 @@ static int gxp_uci_push_cmd(struct gxp_uci *uci, struct gxp_virtual_device *vd,
 
 	async_resp->uci = uci;
 	async_resp->vd = gxp_vd_get(vd);
-	async_resp->wait_queue = wait_queue;
-	async_resp->dest_queue = resp_queue;
-	async_resp->queue_lock = queue_lock;
-	async_resp->dest_queue_waitq = queue_waitq;
+	async_resp->wait_queue = &mbox_rsp_queue->wait_queue;
+	async_resp->dest_queue = &mbox_rsp_queue->dest_queue;
+	async_resp->queue_lock = &mbox_rsp_queue->lock;
+	async_resp->dest_queue_waitq = &mbox_rsp_queue->waitq;
 	if (eventfd && gxp_eventfd_get(eventfd))
 		async_resp->eventfd = eventfd;
 	else
@@ -831,14 +820,8 @@ static int gxp_uci_create_and_push_cmd(struct gxp_client *client, u64 cmd_seq, u
 	gxp_uci_fill_additional_info(&additional_info, in_iif_fences, in_iif_fences_size,
 				     out_iif_fences, out_iif_fences_size, timeout_ms, NULL, 0);
 
-	ret = gxp_uci_push_cmd(&mcu->uci, client->vd, &cmd, &additional_info, in_fences, out_fences,
-			       iif_ikf,
-			       &client->vd->mailbox_resp_queues[UCI_RESOURCE_ID].wait_queue,
-			       &client->vd->mailbox_resp_queues[UCI_RESOURCE_ID].dest_queue,
-			       &client->vd->mailbox_resp_queues[UCI_RESOURCE_ID].lock,
-			       &client->vd->mailbox_resp_queues[UCI_RESOURCE_ID].waitq,
-			       client->mb_eventfds[UCI_RESOURCE_ID],
-			       GCIP_MAILBOX_CMD_FLAGS_SKIP_ASSIGN_SEQ);
+	ret = gxp_uci_push_cmd(&mcu->uci, client, &cmd, &additional_info, in_fences, out_fences,
+			       iif_ikf, GCIP_MAILBOX_CMD_FLAGS_SKIP_ASSIGN_SEQ);
 	if (ret)
 		dev_err(gxp->dev, "Failed to enqueue mailbox command (ret=%d)\n", ret);
 

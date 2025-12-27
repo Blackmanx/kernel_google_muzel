@@ -51,6 +51,9 @@ static __poll_t iif_sync_file_poll(struct file *file, poll_table *wait)
 	struct iif_sync_file *sync_file = file->private_data;
 	int ret;
 
+	if (unlikely(sync_file->fence->flags & IIF_FLAGS_DISABLE_POLL))
+		return 0;
+
 	poll_wait(file, &sync_file->wq, wait);
 
 	if (list_empty(&sync_file->poll_cb.node) &&
@@ -124,6 +127,29 @@ static int iif_sync_file_ioctl_signal(struct iif_sync_file *sync_file,
 	return 0;
 }
 
+static int iif_sync_file_ioctl_set_flags(struct iif_sync_file *sync_file, u32 __user *argp)
+{
+	struct iif_fence *fence = sync_file->fence;
+	u32 flags;
+
+	if (copy_from_user(&flags, argp, sizeof(flags)))
+		return -EFAULT;
+
+	iif_fence_set_flags(fence, flags);
+
+	return 0;
+}
+
+static int iif_sync_file_ioctl_get_flags(struct iif_sync_file *sync_file, u32 __user *argp)
+{
+	struct iif_fence *fence = sync_file->fence;
+
+	if (copy_to_user(argp, &fence->flags, sizeof(fence->flags)))
+		return -EFAULT;
+
+	return 0;
+}
+
 static long iif_sync_file_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 {
 	struct iif_sync_file *sync_file = file->private_data;
@@ -136,6 +162,10 @@ static long iif_sync_file_ioctl(struct file *file, unsigned int cmd, unsigned lo
 		return iif_sync_file_ioctl_submit_signaler(sync_file);
 	case IIF_FENCE_SIGNAL:
 		return iif_sync_file_ioctl_signal(sync_file, argp);
+	case IIF_FENCE_SET_FLAGS:
+		return iif_sync_file_ioctl_set_flags(sync_file, argp);
+	case IIF_FENCE_GET_FLAGS:
+		return iif_sync_file_ioctl_get_flags(sync_file, argp);
 	default:
 		return -ENOTTY;
 	}

@@ -1713,7 +1713,7 @@ void gxp_vd_release_vmbox(struct gxp_dev *gxp, struct gxp_virtual_device *vd)
 		 * driver should take care of canceling all pending commands and signaling
 		 * out-fences of them with an error.
 		 */
-		gxp_uci_cancel(vd);
+		gxp_uci_cancel(vd, vd->client_id, GXP_INVALIDATED_VMBOX_RELEASE_FAILED);
 		dev_err(gxp->dev, "Failed to request releasing VMBox for client %d: %d",
 			vd->client_id, ret);
 	}

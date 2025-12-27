@@ -86,21 +86,19 @@ void gxp_client_destroy(struct gxp_client *client)
 		if (client->mb_eventfds[core])
 			gxp_eventfd_put(client->mb_eventfds[core]);
 	}
-
-#if HAS_TPU_EXT
-	if (client->tpu_file) {
-		if (client->vd) {
-			if (gxp->before_unmap_tpu_mbx_queue)
-				gxp->before_unmap_tpu_mbx_queue(gxp, client);
-			if (gxp_is_direct_mode(gxp))
-				gxp_dma_unmap_tpu_buffer(gxp,
-							 client->vd->domain,
-							 client->mbx_desc);
+	if (HAS_TPU_EXT) {
+		if (client->tpu_file) {
+			if (client->vd) {
+				if (gxp->before_unmap_tpu_mbx_queue)
+					gxp->before_unmap_tpu_mbx_queue(gxp, client);
+				if (gxp_is_direct_mode(gxp))
+					gxp_dma_unmap_tpu_buffer(gxp, client->vd->domain,
+								 client->mbx_desc);
+			}
+			fput(client->tpu_file);
+			client->tpu_file = NULL;
 		}
-		fput(client->tpu_file);
-		client->tpu_file = NULL;
 	}
-#endif /* HAS_TPU_EXT */
 
 	if (client->vd) {
 		down_write(&gxp->vd_semaphore);

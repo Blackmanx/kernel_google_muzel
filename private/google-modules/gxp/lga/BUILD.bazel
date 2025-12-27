@@ -60,6 +60,6 @@ ddk_module(
         "//private/google-modules/perf:gs_perf_headers",
         "//private/google-modules/soc/gs:gs_soc_module",
         "//private/google-modules/soc/gs:headers",
-        "//private/google-modules/soc/gs/drivers/soc/google/gsa",
+        "//private/google-modules/soc/gs/drivers/soc/google/gsa:gsa_ko",
     ],
 )

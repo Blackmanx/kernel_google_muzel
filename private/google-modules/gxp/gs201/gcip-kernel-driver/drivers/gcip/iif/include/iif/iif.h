@@ -13,7 +13,7 @@
 
 /* Interface Version. */
 #define IIF_INTERFACE_VERSION_MAJOR 1
-#define IIF_INTERFACE_VERSION_MINOR 0
+#define IIF_INTERFACE_VERSION_MINOR 1
 
 #define IIF_IOCTL_BASE 'i'
 
@@ -22,6 +22,47 @@
 
 /* The maximum number of fences can be passed to one ioctl request. */
 #define IIF_MAX_NUM_FENCES 64
+
+/*
+ * By default, the fence will retire if there are no outstanding signalers, waiters and FDs. Its
+ * purpose is to return the fence ID to the pool in early stage before the fence releases so that we
+ * can minimize the possibility of the lack of fence ID. Therefore, the retirement condition will be
+ * checked for each `signal()`, `waited()` and `close(fd)` call. However, when the user sets this
+ * flag to a fence, the fence will retire only when it releases.
+ *
+ * If there is a possibility of a race condition between the signaler and waiters, this flag can be
+ * considered to prevent the early fence retirement. For example, if the signaler signals a fence
+ * before any waiter starts waiting on the fence, the IIF driver will think there are no outstanding
+ * signalers and waiters, so it will let the fence retire. That means upcoming waiters may try to
+ * wait on the retired fence which is invalid.
+ *
+ * Normally, that race condition doesn't have to be considered since the runtime will always hold
+ * FDs while drivers/firmwares manipulating a fence and the fence won't retired in any case until
+ * the runtime closes FDs. However, if there is an use case that utilizing a fence which won't be
+ * exposed to the runtime (i.e., no FD is installed to the fence), this flag will be required to
+ * prevent the race condition.
+ */
+#define IIF_FLAGS_RETIRE_ON_RELEASE (1u)
+
+/*
+ * Basically, IIF is supposed to be handled in the firmware-level if the signaler is non-AP.
+ * However, the IIF kernel driver is still signaling the IIF kernel object so that the IP kernel
+ * drivers can notice the fence unblock by registering poll callbacks or the runtime can wait for
+ * the fence unblock by polling on the fence (i.e., epoll() syscall).
+ *
+ * If this flag is set, it will disable polling on the fence at the kernel-level so that the kernel
+ * drivers or the runtime won't be notified even though they are polling on the fence. It is still
+ * safe to utilize the fence functions below like normal cases, but just the fence will never notify
+ * the ones polling on it.
+ *
+ * For example, it is still safe to call the `iif_fence_add_poll_callback()` function to register a
+ * callback, but the callback will never be invoked. Also, the `iif_fence_is_signaled()` function
+ * will still return true if the fence was signaled.
+ *
+ * Note that the `fence_unblocked()` operator registered to the `struct iif_manager` won't be
+ * invoked for the fence with this flag.
+ */
+#define IIF_FLAGS_DISABLE_POLL (1u << 1)
 
 /*
  * ioctls for /dev/iif.
@@ -197,5 +238,23 @@ struct iif_fence_signal_ioctl {
  */
 #define IIF_FENCE_SIGNAL \
 	_IOWR(IIF_IOCTL_BASE, IIF_FENCE_IOCTL_NUM_BASE + 2, struct iif_fence_signal_ioctl)
+
+/*
+ * Sets bitwise flags to the fence.
+ *
+ * See IIF_FLAGS_* defines to get the meaning of each bit.
+ *
+ * Returns 0 on success.
+ */
+#define IIF_FENCE_SET_FLAGS _IOW(IIF_IOCTL_BASE, IIF_FENCE_IOCTL_NUM_BASE + 3, __u32)
+
+/*
+ * Gets bitwise flags from the fence.
+ *
+ * See IIF_FLAGS_* defines to get the meaning of each bit.
+ *
+ * Returns 0 on success.
+ */
+#define IIF_FENCE_GET_FLAGS _IOR(IIF_IOCTL_BASE, IIF_FENCE_IOCTL_NUM_BASE + 4, __u32)
 
 #endif /* __IIF_IIF_H__ */

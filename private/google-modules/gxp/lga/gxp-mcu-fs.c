@@ -281,14 +281,6 @@ out:
 	return ret;
 }
 
-static inline enum gcip_telemetry_type to_gcip_telemetry_type(u8 type)
-{
-	if (type == GXP_TELEMETRY_TYPE_LOGGING)
-		return GCIP_TELEMETRY_TYPE_LOG;
-	else
-		return GCIP_TELEMETRY_TYPE_TRACE;
-}
-
 static int
 gxp_ioctl_register_mcu_telemetry_eventfd(struct gxp_client *client,
 					 struct gxp_register_telemetry_eventfd_ioctl __user *argp)
@@ -299,8 +291,14 @@ gxp_ioctl_register_mcu_telemetry_eventfd(struct gxp_client *client,
 	if (copy_from_user(&ibuf, argp, sizeof(ibuf)))
 		return -EFAULT;
 
-	return gcip_telemetry_set_event(&mcu->telemetry, to_gcip_telemetry_type(ibuf.type),
-					ibuf.eventfd);
+	switch (ibuf.type) {
+	case GXP_TELEMETRY_TYPE_LOGGING:
+		return gcip_telemetry_set_event(&mcu->telemetry_log, ibuf.eventfd);
+	case GXP_TELEMETRY_TYPE_TRACING:
+		return gcip_telemetry_set_event(&mcu->telemetry_trace, ibuf.eventfd);
+	default:
+		return -EOPNOTSUPP;
+	}
 }
 
 static int
@@ -313,9 +311,16 @@ gxp_ioctl_unregister_mcu_telemetry_eventfd(struct gxp_client *client,
 	if (copy_from_user(&ibuf, argp, sizeof(ibuf)))
 		return -EFAULT;
 
-	gcip_telemetry_unset_event(&mcu->telemetry, to_gcip_telemetry_type(ibuf.type));
-
-	return 0;
+	switch (ibuf.type) {
+	case GXP_TELEMETRY_TYPE_LOGGING:
+		gcip_telemetry_unset_event(&mcu->telemetry_log);
+		return 0;
+	case GXP_TELEMETRY_TYPE_TRACING:
+		gcip_telemetry_unset_event(&mcu->telemetry_trace);
+		return 0;
+	default:
+		return -EOPNOTSUPP;
+	}
 }
 
 long gxp_mcu_ioctl(struct file *file, uint cmd, ulong arg)
@@ -375,10 +380,10 @@ int gxp_mcu_mmap(struct file *file, struct vm_area_struct *vma)
 
 	switch (vma->vm_pgoff << PAGE_SHIFT) {
 	case GXP_MMAP_MCU_LOG_BUFFER_OFFSET:
-		ret = gcip_telemetry_mmap(&mcu->telemetry, GCIP_TELEMETRY_TYPE_LOG, vma);
+		ret = gcip_telemetry_mmap(&mcu->telemetry_log, vma);
 		break;
 	case GXP_MMAP_MCU_TRACE_BUFFER_OFFSET:
-		ret = gcip_telemetry_mmap(&mcu->telemetry, GCIP_TELEMETRY_TYPE_TRACE, vma);
+		ret = gcip_telemetry_mmap(&mcu->telemetry_trace, vma);
 		break;
 	default:
 		ret = -EOPNOTSUPP; /* unknown offset */
