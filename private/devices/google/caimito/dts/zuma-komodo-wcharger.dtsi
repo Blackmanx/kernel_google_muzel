@@ -35,5 +35,7 @@
 	fod_hpp_1 = [7f 7f 7b 7c ab 80 8a 59 92 12 96 dc a2 4b 80 28];
 	fod_hpp_2 = [88 7d 82 7c ae 88 8d 62 98 f3 97 e8 af 56 80 28];
 	fod_hpp_3 = [8e 7f 86 7c ab 9a 91 63 97 1e 93 42 a6 77 80 28];
+
+	google,wlc_qispec = <0x1301>;
 };
 

@@ -50,12 +50,12 @@ max77779,config {
 			0xB7 0x2341    /* nConvgCfg */
 		>;
 		max77779,fg-aafv = /bits/ 32 <
-			200     0   95  0xff
-			400    20   90  0xff
-			600    40   85  0xff
-			800    60   80  0xff
-			1000   80   75  0xff
-			2000  100   70  0xff
+			  0   95  0xf  0x0278
+			 20   90  0xf  0x013c
+			 40   85  0xf  0x013c
+			 60   80  0xf  0x013c
+			 80   75  0xf  0x013c
+			100   70  0xf  0x013c
 		>;
 	};
 
@@ -95,12 +95,12 @@ max77779,config {
 			/* 0x009D */	0xCEA4	/* nFilterCfg */
 		>;
 		max77779,fg-aafv = /bits/ 32 <
-			200     0   95  0xff
-			400    20   90  0xff
-			600    40   85  0xff
-			800    60   80  0xff
-			1000   80   75  0xff
-			2000  100   70  0xff
+			  0   95  0xf  0x0278
+			 20   90  0xf  0x013c
+			 40   85  0xf  0x013c
+			 60   80  0xf  0x013c
+			 80   75  0xf  0x013c
+			100   70  0xf  0x013c
 		>;
 	};
 
@@ -140,12 +140,12 @@ max77779,config {
 			/* 0x009D */	0xCEA4	/* nFilterCfg */
 		>;
 		max77779,fg-aafv = /bits/ 32 <
-			200     0   95  0xff
-			400    20   90  0xff
-			600    40   85  0xff
-			800    60   80  0xff
-			1000   80   75  0xff
-			2000  100   70  0xff
+			  0   95  0xf  0x0278
+			 20   90  0xf  0x013c
+			 40   85  0xf  0x013c
+			 60   80  0xf  0x013c
+			 80   75  0xf  0x013c
+			100   70  0xf  0x013c
 		>;
 	};
 };

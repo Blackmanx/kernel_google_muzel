@@ -23,5 +23,6 @@
 	fod_epp = [91 38 8C 23 8A 40 8F 2A 8F 25 95 09 A5 36 80 1B];
 	google,q_value = <74>;
 	google,rf_value = <106>;
+	google,wlc_qispec = <0x1300>;
 };
 
