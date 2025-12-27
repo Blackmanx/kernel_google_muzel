@@ -5,7 +5,7 @@ load("//build/kernel/kleaf:kernel.bzl", "ddk_headers", "ddk_module", "kernel_mod
 ddk_headers(
     name = "headers",
     hdrs = glob([
-        "inc/**/*.h",
+        "**/inc/**/*.h",
     ]),
     includes = [
         ".",

@@ -2162,7 +2162,7 @@ int cs_dsp_load_coeff(struct cs_dsp *dsp, const struct firmware *firmware,
 
 		if (text) {
 			memcpy(text, blk->data, le32_to_cpu(blk->len));
-			cs_dsp_info(dsp, "%s: %s\n", dsp->fw_name, text);
+			cs_dsp_dbg(dsp, "%s: %s\n", dsp->fw_name, text);
 			kfree(text);
 			text = NULL;
 		}

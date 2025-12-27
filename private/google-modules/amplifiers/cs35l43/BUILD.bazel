@@ -9,7 +9,7 @@ load(
 
 ddk_headers(
     name = "headers",
-    hdrs = glob(["include/*"]),
+    hdrs = glob(["include/**/*.h"]),
     includes = ["include"],
 )
 
