@@ -470,6 +470,8 @@ def kernel_build(
                 "**/BUILD.bazel",
                 "**/*.bzl",
             ],
+            # Not useful in practice, but useful to create a fake kernel_build() for tests.
+            allow_empty = True,
         )
 
     if strip_modules == None:

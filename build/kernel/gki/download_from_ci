@@ -328,8 +328,6 @@ def download_kernel(target, version, output_dir, fetch_system_dlkm=False):
   build_is_x86_64 = target in X86_64_TARGETS
   files = ["bzImage"] if build_is_x86_64 else ["Image"]
   files.append("System.map")
-  # vmlinux is needed by the platfrom build to dump BTF info for BPF programs
-  files.append("vmlinux")
 
   if fetch_system_dlkm:
     # Fetch GKI modules tarball with signed modules

@@ -14,6 +14,7 @@
 
 """UAPI headers target for DDK."""
 
+load("@bazel_skylib//lib:paths.bzl", "paths")
 load(":common_providers.bzl", "KernelBuildExtModuleInfo")
 load(":debug.bzl", "debug")
 load(":utils.bzl", "kernel_utils", "utils")
@@ -23,6 +24,22 @@ visibility("//build/kernel/kleaf/...")
 def _ddk_uapi_headers_impl(ctx):
     if not ctx.attr.out.endswith(".tar.gz"):
         fail("{}: out-file name must end with \".tar.gz\"".format(ctx.label.name))
+    elif ctx.attr.strip_prefix != paths.normalize(ctx.attr.strip_prefix):
+        fail("{}: strip_prefix must be normalized. Please use: {}".format(
+            ctx.attr.strip_prefix,
+            paths.normalize(ctx.attr.strip_prefix),
+        ))
+
+    strip_prefix = "{}/".format(ctx.attr.strip_prefix)
+    if not strip_prefix.startswith("include/uapi/"):
+        fail("{}: strip_prefix must begin with \"include/uapi/\"".format(strip_prefix))
+
+    # These characters could affect the regular expression that sed uses for removing the
+    # prefix, so do not allow them.
+    forbidden_chars = ["\\", "^", "|", ".", "$", "?", "*", "+", "(", ")", "[", "]"]
+    for char in forbidden_chars:
+        if char in strip_prefix:
+            fail("{}: strip_prefix must not contain regular expression metacharacters.")
 
     out_file = ctx.actions.declare_file("{}/{}".format(ctx.label.name, ctx.attr.out))
     ddk_config_env = ctx.attr.kernel_build[KernelBuildExtModuleInfo].ddk_config_env
@@ -39,7 +56,7 @@ def _ddk_uapi_headers_impl(ctx):
            make -C ${{KERNEL_DIR}} -f /dev/null scripts/unifdef
          # Install each header individually
            while read -r hdr; do
-             out_prefix=$(dirname $(echo ${{hdr}} | sed -e 's|.*include/uapi/||g'))
+             out_prefix=$(dirname $(echo ${{hdr}} | sed -e 's|.*{strip_prefix}||g'))
              mkdir -p {kernel_uapi_headers_dir}/usr/include/${{out_prefix}}
              base=$(basename ${{hdr}})
              (
@@ -53,6 +70,7 @@ def _ddk_uapi_headers_impl(ctx):
          # Delete kernel_uapi_headers_dir because it is not declared
            rm -rf {kernel_uapi_headers_dir}
     """.format(
+        strip_prefix = strip_prefix,
         out_file = out_file.path,
         kernel_uapi_headers_dir = out_file.path + "_staging",
     )
@@ -111,6 +129,10 @@ ddk_uapi_headers = rule(
                 KernelBuildExtModuleInfo,
             ],
             mandatory = True,
+        ),
+        "strip_prefix": attr.string(
+            doc = "Prefix to strip from UAPI header paths before copying them to usr/include. Must begin with include/uapi.",
+            default = "include/uapi",
         ),
         "_debug_print_scripts": attr.label(default = "//build/kernel/kleaf:debug_print_scripts"),
     },

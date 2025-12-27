@@ -758,17 +758,25 @@ _kernel_module = rule(
 def _kernel_module_set_defaults(kwargs):
     """Set default values for `_kernel_module` that can't be specified in `attr.*(default=...)` in rule()."""
     if kwargs.get("makefile") == None and kwargs.get("internal_ddk_makefiles_dir") == None:
-        kwargs["makefile"] = native.glob(["Makefile"])
+        kwargs["makefile"] = native.glob(
+            ["Makefile"],
+            # Not useful in practice, but useful to create a fake kernel_build() for tests.
+            allow_empty = True,
+        )
 
     if kwargs.get("outs") == None:
         kwargs["outs"] = ["{}.ko".format(kwargs["name"])]
 
     if kwargs.get("srcs") == None:
-        kwargs["srcs"] = native.glob([
-            "**/*.c",
-            "**/*.h",
-            "**/Kbuild",
-            "**/Makefile",
-        ])
+        kwargs["srcs"] = native.glob(
+            [
+                "**/*.c",
+                "**/*.h",
+                "**/Kbuild",
+                "**/Makefile",
+            ],
+            # Not useful in practice, but useful to create a fake kernel_build() for tests.
+            allow_empty = True,
+        )
 
     return kwargs

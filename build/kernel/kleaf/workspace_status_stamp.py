@@ -474,6 +474,12 @@ class Stamp(object):
             if project.is_relative_to(workspace_rel_path)]
         if not candidates:
             if project.parts[0] == "external":
+                # For --nosource_date_epoch_fix, keep the external/ path so the
+                # hack in build_utils.sh works
+                if "KLEAF_OUTPUT_BASE" not in os.environ and \
+                    len(project.parts) >= 2 and project.parts[1] == "kleaf":
+                        return (project,)
+
                 # These Git projects aren't available in the execroot because
                 # `//external` is not a valid package under the root repository,
                 # and these Git projects may be one of the following:
@@ -482,6 +488,7 @@ class Stamp(object):
                 #   fetched.
                 # Hence, we should skip them to not provide false information.
                 return ()
+
             # Regular source projects (packages in the root repository)
             # show up directly in the execroot.
             # Example: private/<manufacturer_name>/<device_name>

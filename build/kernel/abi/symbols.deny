@@ -19,6 +19,7 @@
 # always be used.
 filp_open					Drivers should not open files directly
 kernel_read					Drivers should never read from a file
+kernel_read_file			Drivers should never read from a file
 kernel_read_file_from_path	Drivers should never read from a file
 kernel_write				Drivers should never write to a file
 

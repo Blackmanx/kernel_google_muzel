@@ -91,8 +91,8 @@ def _default_target_configs():
         ["android/abi_gki_aarch64*"],
         exclude = ["**/*.xml", "**/*.stg", "android/abi_gki_aarch64"],
     )
-    aarch64_protected_exports_list = (native.glob(["android/abi_gki_protected_exports"]) or [None])[0]
-    aarch64_protected_modules_list = (native.glob(["android/gki_protected_modules"]) or [None])[0]
+    aarch64_protected_exports_list = (native.glob(["android/abi_gki_protected_exports"], allow_empty = True) or [None])[0]
+    aarch64_protected_modules_list = (native.glob(["android/gki_protected_modules"], allow_empty = True) or [None])[0]
     aarch64_trim_and_check = bool(aarch64_kmi_symbol_list) or len(aarch64_additional_kmi_symbol_lists) > 0
     aarch64_abi_definition_stg = native.glob(["android/abi_gki_aarch64.stg"])
     aarch64_abi_definition_stg = aarch64_abi_definition_stg[0] if aarch64_abi_definition_stg else None
@@ -517,7 +517,7 @@ def define_common_kernels(
         # On android14-5.15, riscv64 is not supported. However,
         # default_target_configs still contains riscv64 unconditionally.
         # Filter it out.
-        if not native.glob([new_target_config["build_config"]]):
+        if not native.glob([new_target_config["build_config"]], allow_empty = True):
             continue
         new_target_configs[name] = new_target_config
     target_configs = new_target_configs
@@ -542,6 +542,9 @@ def define_common_kernels(
                 # cscope files
                 "cscope.*",
                 "ncscope.*",
+
+                # ABI and symbol list files
+                "android/*",
             ],
         ),
     )
