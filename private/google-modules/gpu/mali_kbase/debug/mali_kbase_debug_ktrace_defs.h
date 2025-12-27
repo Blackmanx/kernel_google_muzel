@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note */
 /*
  *
- * (C) COPYRIGHT 2020-2023 ARM Limited. All rights reserved.
+ * (C) COPYRIGHT 2020-2024 ARM Limited. All rights reserved.
  *
  * This program is free software and is provided to you under the terms of the
  * GNU General Public License version 2 as published by the Free Software
@@ -22,6 +22,10 @@
 #ifndef _KBASE_DEBUG_KTRACE_DEFS_H_
 #define _KBASE_DEBUG_KTRACE_DEFS_H_
 
+#undef CONFIG_MALI_MIDGARD_ENABLE_TRACE
+#undef CONFIG_MALI_SYSTEM_TRACE
+#define CONFIG_MALI_MIDGARD_ENABLE_TRACE
+#define CONFIG_MALI_SYSTEM_TRACE
 /* Enable SW tracing when set */
 #if defined(CONFIG_MALI_MIDGARD_ENABLE_TRACE) || defined(CONFIG_MALI_SYSTEM_TRACE)
 #define KBASE_KTRACE_ENABLE 1
@@ -91,11 +95,7 @@ union kbase_ktrace_backend;
 
 #endif /* KBASE_KTRACE_TARGET_RBUF */
 
-#if MALI_USE_CSF
 #include "debug/backend/mali_kbase_debug_ktrace_defs_csf.h"
-#else
-#include "debug/backend/mali_kbase_debug_ktrace_defs_jm.h"
-#endif
 
 #if KBASE_KTRACE_TARGET_RBUF
 /* Indicates if the trace message has backend related info.
@@ -112,7 +112,7 @@ union kbase_ktrace_backend;
 
 #define KBASE_KTRACE_FLAG_ALL (KBASE_KTRACE_FLAG_COMMON_ALL | KBASE_KTRACE_FLAG_BACKEND_ALL)
 
-#define KBASE_KTRACE_SHIFT (9) /* 512 entries */
+#define KBASE_KTRACE_SHIFT (14) /* 16,384 entries */
 #define KBASE_KTRACE_SIZE (1 << KBASE_KTRACE_SHIFT)
 #define KBASE_KTRACE_MASK ((1 << KBASE_KTRACE_SHIFT) - 1)
 

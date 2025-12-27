@@ -36,6 +36,14 @@
  * DESCRIBED IN mali_kbase_debug_ktrace_codes.h
  */
 
+	/* new tiler chunk ktrace codes*/
+	KBASE_KTRACE_CODE_MAKE_CODE(TILER_CHUNK_ALLOC),
+
+	KBASE_KTRACE_CODE_MAKE_CODE(TILER_CHUNK_ALLOC_SIZE),
+
+	KBASE_KTRACE_CODE_MAKE_CODE(TILER_CHUNK_FREE),
+	KBASE_KTRACE_CODE_MAKE_CODE(TILER_CHUNK_FREE_SIZE),
+
 #if 0 /* Dummy section to avoid breaking formatting */
 int dummy_array[] = {
 #endif

@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note */
 /*
  *
- * (C) COPYRIGHT 2020-2023 ARM Limited. All rights reserved.
+ * (C) COPYRIGHT 2020-2024 ARM Limited. All rights reserved.
  *
  * This program is free software and is provided to you under the terms of the
  * GNU General Public License version 2 as published by the Free Software
@@ -40,11 +40,7 @@
 #include "mali_linux_trace.h"
 #endif
 
-#if MALI_USE_CSF
 #include "debug/backend/mali_kbase_debug_ktrace_csf.h"
-#else
-#include "debug/backend/mali_kbase_debug_ktrace_jm.h"
-#endif
 
 /**
  * kbase_ktrace_init - initialize kbase ktrace.
@@ -200,6 +196,207 @@ void kbasep_ktrace_dump(struct kbase_device *kbdev);
  * Master set of macros to route KTrace to any of the targets
  */
 
+#define ENABLE_KTRACE_CORE_CTX_DESTROY 0
+#define ENABLE_KTRACE_CORE_CTX_HWINSTR_TERM 0
+#define ENABLE_KTRACE_CORE_GPU_IRQ 0
+#define ENABLE_KTRACE_CORE_PWR_IRQ 0
+#define ENABLE_KTRACE_CORE_GPU_IRQ_CLEAR 0
+#define ENABLE_KTRACE_CORE_GPU_IRQ_DONE 0
+#define ENABLE_KTRACE_CORE_GPU_SOFT_RESET 1
+#define ENABLE_KTRACE_CORE_GPU_HARD_RESET 1
+#define ENABLE_KTRACE_CORE_GPU_PRFCNT_CLEAR 0
+#define ENABLE_KTRACE_CORE_GPU_PRFCNT_SAMPLE 0
+#define ENABLE_KTRACE_CORE_GPU_CLEAN_INV_CACHES 0
+
+#define ENABLE_KTRACE_PM_JOB_SUBMIT_AFTER_POWERING_UP 0
+#define ENABLE_KTRACE_PM_JOB_SUBMIT_AFTER_POWERED_UP 0
+#define ENABLE_KTRACE_PM_PWRON 0
+#define ENABLE_KTRACE_PM_PWRON_TILER 1
+#define ENABLE_KTRACE_PM_PWRON_L2 0
+#define ENABLE_KTRACE_PM_PWROFF 0
+#define ENABLE_KTRACE_PM_PWROFF_TILER 1
+#define ENABLE_KTRACE_PM_PWROFF_L2 0
+#define ENABLE_KTRACE_PM_CORES_POWERED 0
+#define ENABLE_KTRACE_PM_CORES_POWERED_TILER 0
+#define ENABLE_KTRACE_PM_CORES_POWERED_L2 0
+#define ENABLE_KTRACE_PM_PWRON_NEURAL 0
+#define ENABLE_KTRACE_PM_PWROFF_NEURAL 0
+#define ENABLE_KTRACE_PM_CORES_POWERED_NEURAL 0
+#define ENABLE_KTRACE_PM_CORES_CHANGE_DESIRED 0
+#define ENABLE_KTRACE_PM_CORES_CHANGE_DESIRED_TILER 0
+#define ENABLE_KTRACE_PM_CORES_CHANGE_AVAILABLE 0
+#define ENABLE_KTRACE_PM_CORES_CHANGE_AVAILABLE_TILER 0
+#define ENABLE_KTRACE_PM_CORES_CHANGE_AVAILABLE_L2 0
+#define ENABLE_KTRACE_PM_CORES_AVAILABLE 0
+#define ENABLE_KTRACE_PM_CORES_AVAILABLE_TILER 0
+#define ENABLE_KTRACE_PM_DESIRED_REACHED 0
+#define ENABLE_KTRACE_PM_DESIRED_REACHED_TILER 0
+#define ENABLE_KTRACE_PM_RELEASE_CHANGE_SHADER_NEEDED 0
+#define ENABLE_KTRACE_PM_RELEASE_CHANGE_TILER_NEEDED 0
+#define ENABLE_KTRACE_PM_REQUEST_CHANGE_SHADER_NEEDED 0
+#define ENABLE_KTRACE_PM_REQUEST_CHANGE_TILER_NEEDED 0
+#define ENABLE_KTRACE_PM_WAKE_WAITERS 0
+#define ENABLE_KTRACE_PM_CONTEXT_ACTIVE 0
+#define ENABLE_KTRACE_PM_CONTEXT_IDLE 0
+#define ENABLE_KTRACE_PM_GPU_ON 0
+#define ENABLE_KTRACE_PM_GPU_OFF 0
+#define ENABLE_KTRACE_PM_SET_POLICY 0
+#define ENABLE_KTRACE_PM_CA_SET_POLICY 0
+#define ENABLE_KTRACE_PM_CURRENT_POLICY_INIT 0
+#define ENABLE_KTRACE_PM_CURRENT_POLICY_TERM 0
+#define ENABLE_KTRACE_PM_POWEROFF_WAIT_WQ 0
+#define ENABLE_KTRACE_PM_RUNTIME_SUSPEND_CALLBACK 0
+#define ENABLE_KTRACE_PM_RUNTIME_RESUME_CALLBACK 0
+/* plus ENABLE_KTRACE_PM_L2_<STATE> for each PM_L2_… state from mali_kbase_pm_l2_states.h */
+
+#define ENABLE_KTRACE_SCHED_RETAIN_CTX_NOLOCK 0
+#define ENABLE_KTRACE_SCHED_RELEASE_CTX 0
+
+#define ENABLE_KTRACE_ARB_VM_STATE 0
+#define ENABLE_KTRACE_ARB_VM_EVT 0
+#define ENABLE_KTRACE_ARB_GPU_GRANTED 0
+#define ENABLE_KTRACE_ARB_GPU_LOST 0
+#define ENABLE_KTRACE_ARB_GPU_STARTED 0
+#define ENABLE_KTRACE_ARB_GPU_STOP_REQUESTED 0
+#define ENABLE_KTRACE_ARB_GPU_STOPPED 0
+#define ENABLE_KTRACE_ARB_GPU_REQUESTED 0
+/* New Tiler chunk alloc and free ktrace points added*/
+#define ENABLE_KTRACE_TILER_CHUNK_ALLOC 1
+#define ENABLE_KTRACE_TILER_CHUNK_ALLOC_SIZE 1
+#define ENABLE_KTRACE_TILER_CHUNK_FREE 1
+#define ENABLE_KTRACE_TILER_CHUNK_FREE_SIZE 1
+
+#define IS_KTRACE_ADD_ENABLED(code)                                                     \
+	(KBASE_KTRACE_CODE(code) == KBASE_KTRACE_CODE_CORE_CTX_DESTROY ?                \
+		       ENABLE_KTRACE_CORE_CTX_DESTROY :                                       \
+	 KBASE_KTRACE_CODE(code) == KBASE_KTRACE_CODE_CORE_CTX_HWINSTR_TERM ?           \
+		       ENABLE_KTRACE_CORE_CTX_HWINSTR_TERM :                                  \
+	 KBASE_KTRACE_CODE(code) == KBASE_KTRACE_CODE_CORE_GPU_IRQ ?                    \
+		       ENABLE_KTRACE_CORE_GPU_IRQ :                                           \
+	 KBASE_KTRACE_CODE(code) == KBASE_KTRACE_CODE_CORE_PWR_IRQ ?                    \
+		       ENABLE_KTRACE_CORE_PWR_IRQ :                                           \
+	 KBASE_KTRACE_CODE(code) == KBASE_KTRACE_CODE_CORE_GPU_IRQ_CLEAR ?              \
+		       ENABLE_KTRACE_CORE_GPU_IRQ_CLEAR :                                     \
+	 KBASE_KTRACE_CODE(code) == KBASE_KTRACE_CODE_CORE_GPU_IRQ_DONE ?               \
+		       ENABLE_KTRACE_CORE_GPU_IRQ_DONE :                                      \
+	 KBASE_KTRACE_CODE(code) == KBASE_KTRACE_CODE_CORE_GPU_SOFT_RESET ?             \
+		       ENABLE_KTRACE_CORE_GPU_SOFT_RESET :                                    \
+	 KBASE_KTRACE_CODE(code) == KBASE_KTRACE_CODE_CORE_GPU_HARD_RESET ?             \
+		       ENABLE_KTRACE_CORE_GPU_HARD_RESET :                                    \
+	 KBASE_KTRACE_CODE(code) == KBASE_KTRACE_CODE_CORE_GPU_PRFCNT_CLEAR ?           \
+		       ENABLE_KTRACE_CORE_GPU_PRFCNT_CLEAR :                                  \
+	 KBASE_KTRACE_CODE(code) == KBASE_KTRACE_CODE_CORE_GPU_PRFCNT_SAMPLE ?          \
+		       ENABLE_KTRACE_CORE_GPU_PRFCNT_SAMPLE :                                 \
+	 KBASE_KTRACE_CODE(code) == KBASE_KTRACE_CODE_CORE_GPU_CLEAN_INV_CACHES ?       \
+		       ENABLE_KTRACE_CORE_GPU_CLEAN_INV_CACHES :                              \
+	 KBASE_KTRACE_CODE(code) == KBASE_KTRACE_CODE_PM_JOB_SUBMIT_AFTER_POWERING_UP ? \
+		       ENABLE_KTRACE_PM_JOB_SUBMIT_AFTER_POWERING_UP :                        \
+	 KBASE_KTRACE_CODE(code) == KBASE_KTRACE_CODE_PM_JOB_SUBMIT_AFTER_POWERED_UP ?  \
+		       ENABLE_KTRACE_PM_JOB_SUBMIT_AFTER_POWERED_UP :                         \
+	 KBASE_KTRACE_CODE(code) == KBASE_KTRACE_CODE_PM_PWRON ?                        \
+		       ENABLE_KTRACE_PM_PWRON :                                               \
+	 KBASE_KTRACE_CODE(code) == KBASE_KTRACE_CODE_PM_PWRON_TILER ?                  \
+		       ENABLE_KTRACE_PM_PWRON_TILER :                                         \
+	 KBASE_KTRACE_CODE(code) == KBASE_KTRACE_CODE_PM_PWRON_L2 ?                     \
+		       ENABLE_KTRACE_PM_PWRON_L2 :                                            \
+	 KBASE_KTRACE_CODE(code) == KBASE_KTRACE_CODE_PM_PWROFF ?                       \
+		       ENABLE_KTRACE_PM_PWROFF :                                              \
+	 KBASE_KTRACE_CODE(code) == KBASE_KTRACE_CODE_PM_PWROFF_TILER ?                 \
+		       ENABLE_KTRACE_PM_PWROFF_TILER :                                        \
+	 KBASE_KTRACE_CODE(code) == KBASE_KTRACE_CODE_PM_PWROFF_L2 ?                    \
+		       ENABLE_KTRACE_PM_PWROFF_L2 :                                           \
+	 KBASE_KTRACE_CODE(code) == KBASE_KTRACE_CODE_PM_CORES_POWERED ?                \
+		       ENABLE_KTRACE_PM_CORES_POWERED :                                       \
+	 KBASE_KTRACE_CODE(code) == KBASE_KTRACE_CODE_PM_CORES_POWERED_TILER ?          \
+		       ENABLE_KTRACE_PM_CORES_POWERED_TILER :                                 \
+	 KBASE_KTRACE_CODE(code) == KBASE_KTRACE_CODE_PM_CORES_POWERED_L2 ?             \
+		       ENABLE_KTRACE_PM_CORES_POWERED_L2 :                                    \
+	 KBASE_KTRACE_CODE(code) == KBASE_KTRACE_CODE_PM_PWRON_NEURAL ?                 \
+		       ENABLE_KTRACE_PM_PWRON_NEURAL :                                        \
+	 KBASE_KTRACE_CODE(code) == KBASE_KTRACE_CODE_PM_PWROFF_NEURAL ?                \
+		       ENABLE_KTRACE_PM_PWROFF_NEURAL :                                       \
+	 KBASE_KTRACE_CODE(code) == KBASE_KTRACE_CODE_PM_CORES_POWERED_NEURAL ?         \
+		       ENABLE_KTRACE_PM_CORES_POWERED_NEURAL :                                \
+	 KBASE_KTRACE_CODE(code) == KBASE_KTRACE_CODE_PM_CORES_CHANGE_DESIRED ?         \
+		       ENABLE_KTRACE_PM_CORES_CHANGE_DESIRED :                                \
+	 KBASE_KTRACE_CODE(code) == KBASE_KTRACE_CODE_PM_CORES_CHANGE_DESIRED_TILER ?   \
+		       ENABLE_KTRACE_PM_CORES_CHANGE_DESIRED_TILER :                          \
+	 KBASE_KTRACE_CODE(code) == KBASE_KTRACE_CODE_PM_CORES_CHANGE_AVAILABLE ?       \
+		       ENABLE_KTRACE_PM_CORES_CHANGE_AVAILABLE :                              \
+	 KBASE_KTRACE_CODE(code) == KBASE_KTRACE_CODE_PM_CORES_CHANGE_AVAILABLE_TILER ? \
+		       ENABLE_KTRACE_PM_CORES_CHANGE_AVAILABLE_TILER :                        \
+	 KBASE_KTRACE_CODE(code) == KBASE_KTRACE_CODE_PM_CORES_CHANGE_AVAILABLE_L2 ?    \
+		       ENABLE_KTRACE_PM_CORES_CHANGE_AVAILABLE_L2 :                           \
+	 KBASE_KTRACE_CODE(code) == KBASE_KTRACE_CODE_PM_CORES_AVAILABLE ?              \
+		       ENABLE_KTRACE_PM_CORES_AVAILABLE :                                     \
+	 KBASE_KTRACE_CODE(code) == KBASE_KTRACE_CODE_PM_CORES_AVAILABLE_TILER ?        \
+		       ENABLE_KTRACE_PM_CORES_AVAILABLE_TILER :                               \
+	 KBASE_KTRACE_CODE(code) == KBASE_KTRACE_CODE_PM_DESIRED_REACHED ?              \
+		       ENABLE_KTRACE_PM_DESIRED_REACHED :                                     \
+	 KBASE_KTRACE_CODE(code) == KBASE_KTRACE_CODE_PM_DESIRED_REACHED_TILER ?        \
+		       ENABLE_KTRACE_PM_DESIRED_REACHED_TILER :                               \
+	 KBASE_KTRACE_CODE(code) == KBASE_KTRACE_CODE_PM_RELEASE_CHANGE_SHADER_NEEDED ? \
+		       ENABLE_KTRACE_PM_RELEASE_CHANGE_SHADER_NEEDED :                        \
+	 KBASE_KTRACE_CODE(code) == KBASE_KTRACE_CODE_PM_RELEASE_CHANGE_TILER_NEEDED ?  \
+		       ENABLE_KTRACE_PM_RELEASE_CHANGE_TILER_NEEDED :                         \
+	 KBASE_KTRACE_CODE(code) == KBASE_KTRACE_CODE_PM_REQUEST_CHANGE_SHADER_NEEDED ? \
+		       ENABLE_KTRACE_PM_REQUEST_CHANGE_SHADER_NEEDED :                        \
+	 KBASE_KTRACE_CODE(code) == KBASE_KTRACE_CODE_PM_REQUEST_CHANGE_TILER_NEEDED ?  \
+		       ENABLE_KTRACE_PM_REQUEST_CHANGE_TILER_NEEDED :                         \
+	 KBASE_KTRACE_CODE(code) == KBASE_KTRACE_CODE_PM_WAKE_WAITERS ?                 \
+		       ENABLE_KTRACE_PM_WAKE_WAITERS :                                        \
+	 KBASE_KTRACE_CODE(code) == KBASE_KTRACE_CODE_PM_CONTEXT_ACTIVE ?               \
+		       ENABLE_KTRACE_PM_CONTEXT_ACTIVE :                                      \
+	 KBASE_KTRACE_CODE(code) == KBASE_KTRACE_CODE_PM_CONTEXT_IDLE ?                 \
+		       ENABLE_KTRACE_PM_CONTEXT_IDLE :                                        \
+	 KBASE_KTRACE_CODE(code) == KBASE_KTRACE_CODE_PM_GPU_ON ?                       \
+		       ENABLE_KTRACE_PM_GPU_ON :                                              \
+	 KBASE_KTRACE_CODE(code) == KBASE_KTRACE_CODE_PM_GPU_OFF ?                      \
+		       ENABLE_KTRACE_PM_GPU_OFF :                                             \
+	 KBASE_KTRACE_CODE(code) == KBASE_KTRACE_CODE_PM_SET_POLICY ?                   \
+		       ENABLE_KTRACE_PM_SET_POLICY :                                          \
+	 KBASE_KTRACE_CODE(code) == KBASE_KTRACE_CODE_PM_CA_SET_POLICY ?                \
+		       ENABLE_KTRACE_PM_CA_SET_POLICY :                                       \
+	 KBASE_KTRACE_CODE(code) == KBASE_KTRACE_CODE_PM_CURRENT_POLICY_INIT ?          \
+		       ENABLE_KTRACE_PM_CURRENT_POLICY_INIT :                                 \
+	 KBASE_KTRACE_CODE(code) == KBASE_KTRACE_CODE_PM_CURRENT_POLICY_TERM ?          \
+		       ENABLE_KTRACE_PM_CURRENT_POLICY_TERM :                                 \
+	 KBASE_KTRACE_CODE(code) == KBASE_KTRACE_CODE_PM_POWEROFF_WAIT_WQ ?             \
+		       ENABLE_KTRACE_PM_POWEROFF_WAIT_WQ :                                    \
+	 KBASE_KTRACE_CODE(code) == KBASE_KTRACE_CODE_PM_RUNTIME_SUSPEND_CALLBACK ?     \
+		       ENABLE_KTRACE_PM_RUNTIME_SUSPEND_CALLBACK :                            \
+	 KBASE_KTRACE_CODE(code) == KBASE_KTRACE_CODE_PM_RUNTIME_RESUME_CALLBACK ?      \
+		       ENABLE_KTRACE_PM_RUNTIME_RESUME_CALLBACK :                             \
+	 KBASE_KTRACE_CODE(code) == KBASE_KTRACE_CODE_SCHED_RETAIN_CTX_NOLOCK ?         \
+		       ENABLE_KTRACE_SCHED_RETAIN_CTX_NOLOCK :                                \
+	 KBASE_KTRACE_CODE(code) == KBASE_KTRACE_CODE_SCHED_RELEASE_CTX ?               \
+		       ENABLE_KTRACE_SCHED_RELEASE_CTX :                                      \
+	 KBASE_KTRACE_CODE(code) == KBASE_KTRACE_CODE_ARB_VM_STATE ?                    \
+		       ENABLE_KTRACE_ARB_VM_STATE :                                           \
+	 KBASE_KTRACE_CODE(code) == KBASE_KTRACE_CODE_ARB_VM_EVT ?                      \
+		       ENABLE_KTRACE_ARB_VM_EVT :                                             \
+	 KBASE_KTRACE_CODE(code) == KBASE_KTRACE_CODE_ARB_GPU_GRANTED ?                 \
+		       ENABLE_KTRACE_ARB_GPU_GRANTED :                                        \
+	 KBASE_KTRACE_CODE(code) == KBASE_KTRACE_CODE_ARB_GPU_LOST ?                    \
+		       ENABLE_KTRACE_ARB_GPU_LOST :                                           \
+	 KBASE_KTRACE_CODE(code) == KBASE_KTRACE_CODE_ARB_GPU_STARTED ?                 \
+		       ENABLE_KTRACE_ARB_GPU_STARTED :                                        \
+	 KBASE_KTRACE_CODE(code) == KBASE_KTRACE_CODE_ARB_GPU_STOP_REQUESTED ?          \
+		       ENABLE_KTRACE_ARB_GPU_STOP_REQUESTED :                                 \
+	 KBASE_KTRACE_CODE(code) == KBASE_KTRACE_CODE_ARB_GPU_STOPPED ?                 \
+		       ENABLE_KTRACE_ARB_GPU_STOPPED :                                        \
+	 KBASE_KTRACE_CODE(code) == KBASE_KTRACE_CODE_ARB_GPU_REQUESTED ?               \
+		       ENABLE_KTRACE_ARB_GPU_REQUESTED :                                      \
+	 KBASE_KTRACE_CODE(code) == KBASE_KTRACE_CODE_TILER_CHUNK_ALLOC ?               \
+		       ENABLE_KTRACE_TILER_CHUNK_ALLOC :                                      \
+	 KBASE_KTRACE_CODE(code) == KBASE_KTRACE_CODE_TILER_CHUNK_ALLOC_SIZE ?          \
+		       ENABLE_KTRACE_TILER_CHUNK_ALLOC_SIZE :                                 \
+	 KBASE_KTRACE_CODE(code) == KBASE_KTRACE_CODE_TILER_CHUNK_FREE ?                \
+		       ENABLE_KTRACE_TILER_CHUNK_FREE :                                       \
+	 KBASE_KTRACE_CODE(code) == KBASE_KTRACE_CODE_TILER_CHUNK_FREE_SIZE ?           \
+		       ENABLE_KTRACE_TILER_CHUNK_FREE_SIZE :                                  \
+		       0)
+
 /**
  * KBASE_KTRACE_ADD - Add trace values
  * @kbdev:    kbase device
@@ -218,8 +415,10 @@ void kbasep_ktrace_dump(struct kbase_device *kbdev);
 	do {                                                                      \
 		/* capture values that could come from non-pure function calls */ \
 		u64 __info_val = info_val;                                        \
-		KBASE_KTRACE_RBUF_ADD(kbdev, code, kctx, __info_val);             \
-		KBASE_KTRACE_FTRACE_ADD(kbdev, code, kctx, __info_val);           \
+		if (IS_KTRACE_ADD_ENABLED(code)) {                                \
+			KBASE_KTRACE_RBUF_ADD(kbdev, code, kctx, __info_val);     \
+			KBASE_KTRACE_FTRACE_ADD(kbdev, code, kctx, __info_val);   \
+		}                                                                 \
 	} while (0)
 
 /**
