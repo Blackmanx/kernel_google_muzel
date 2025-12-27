@@ -123,7 +123,7 @@ static void vpu_enable_interrupt(struct vpu_core *core)
 
 static int vpu_sleep_wakeup(struct vpu_core *core, bool is_sleep)
 {
-	int rc;
+	int rc, ret;
 
 	if (is_sleep) {
 		rc = vpu_wait_busy_status(core, W6_VPU_CMD_BUSY_STATUS);
@@ -140,22 +140,27 @@ static int vpu_sleep_wakeup(struct vpu_core *core, bool is_sleep)
 			return rc;
 
 		if (!READ_VPU_REGISTER(core, W6_RET_SUCCESS)) {
-			rc = READ_VPU_REGISTER(core, W6_RET_FAIL_REASON);
+			ret = READ_VPU_REGISTER(core, W6_RET_FAIL_REASON);
 
-			if (rc == WAVE6_SYSERR_QUEUEING_FAIL)
-				dev_warn(core->dev, "sleep returns QUEUEING_FAIL\n");
-			else if (rc == WAVE6_SYSERR_ACCESS_VIOLATION_HW)
-				dev_warn(core->dev, "sleep returns ACCESS_VIOLATION_HW\n");
-			else if (rc == WAVE6_SYSERR_WATCHDOG_TIMEOUT)
-				dev_warn(core->dev, "sleep returns WATCHDOG_TIMEOUT\n");
-			else if (rc == WAVE6_SYSERR_BUS_ERROR)
-				dev_warn(core->dev, "sleep returns SYSERR_BUS_ERROR\n");
-			else if (rc == WAVE6_SYSERR_DOUBLE_FAULT)
-				dev_warn(core->dev, "sleep returns DOUBLE_FAULT\n");
-			else if (rc == WAVE6_SYSERR_VPU_STILL_RUNNING)
+			switch (ret) {
+			case WAVE6_SYSERR_VPU_STILL_RUNNING:
 				dev_dbg(core->dev, "sleep returns VPU_STILL_RUNNING\n");
-			else
-				dev_warn(core->dev, "sleep returns error %d\n", rc);
+				rc = -EBUSY;
+				break;
+			case WAVE6_SYSERR_INSTRUCTION_ACCESS_VIOLATION:
+			case WAVE6_SYSERR_PRIVILEGE_VIOLATION:
+			case WAVE6_SYSERR_DATA_ADDR_ALIGNMENT:
+			case WAVE6_SYSERR_DATA_ACCESS_VIOLATION:
+			case WAVE6_SYSERR_INSTRUCTION_ADDR_ALIGNMENT:
+			case WAVE6_SYSERR_UNKNOWN:
+				dev_warn(core->dev, "sleep returns exception 0x%x\n", ret);
+				rc = -EFAULT;
+				break;
+			default:
+				dev_warn(core->dev, "sleep returns error 0x%x\n", ret);
+				rc = -EINVAL;
+				break;
+			}
 		}
 	} else {
 		vpu_enable_interrupt(core);
@@ -169,8 +174,9 @@ static int vpu_sleep_wakeup(struct vpu_core *core, bool is_sleep)
 			return rc;
 
 		if (!READ_VPU_REGISTER(core, W6_RET_SUCCESS)) {
-			rc = READ_VPU_REGISTER(core, W6_RET_FAIL_REASON);
-			dev_warn(core->dev, "wakeup command returns error %d\n", rc);
+			ret = READ_VPU_REGISTER(core, W6_RET_FAIL_REASON);
+			dev_warn(core->dev, "wakeup command returns error 0x%x\n", ret);
+			rc = -EINVAL;
 		}
 	}
 
@@ -187,9 +193,12 @@ static int vpu_wait_interrupt(struct vpu_core *core, uint32_t *reason)
 	if (!intr_queue)
 		return -EINVAL;
 
-	rc = wait_event_interruptible_timeout(intr_queue->wq,
-					kfifo_len(&intr_queue->intr_pending_q),
-					msecs_to_jiffies(VPU_BUSY_CHECK_TIMEOUT));
+	/* b/446005383#comment5 this wait can't be interrupted as we need
+	 * vpu to stop either by sleep command or waiting for a while here
+	 */
+	rc = wait_event_timeout(intr_queue->wq,
+			kfifo_len(&intr_queue->intr_pending_q),
+			msecs_to_jiffies(VPU_BUSY_CHECK_TIMEOUT));
 	if (!rc) {
 		dev_warn(core->dev, "timed out waiting for interrupt\n");
 		return -ETIMEDOUT;
@@ -199,7 +208,7 @@ static int vpu_wait_interrupt(struct vpu_core *core, uint32_t *reason)
 						sizeof(u32), &intr_queue->kfifo_lock);
 
 	if (num <= 0) {
-		dev_warn(core->dev, "unknown error occurred\n");
+		dev_warn(core->dev, "no entry in fifo queue\n");
 		*reason = 0;
 		return -EINTR;
 	}
@@ -229,9 +238,9 @@ static int vpu_sleep(struct vpu_core *core)
 	int rc;
 	uint32_t reason;
 
-	/* Expect VPU_STILL_RUNNING for the first sleep cmd */
+	/* Expect VPU_STILL_RUNNING (mapped to -EBUSY), for the first sleep cmd */
 	rc = vpu_sleep_wakeup(core, true);
-	if (rc != WAVE6_SYSERR_VPU_STILL_RUNNING)
+	if (rc != -EBUSY)
 		goto out;
 
 	/* Expect SLEEP_VPU_IDLE interrupt */
@@ -328,8 +337,17 @@ int vpu_pm_power_off(struct vpu_core *core)
 	 */
 	if (!vpu_idle(core)) {
 		dev_info(core->dev, "power off without vpu idle\n");
-		if (vpu_sleep(core))
+		rc = vpu_sleep(core);
+		if (rc) {
+			if (rc == -EFAULT) {
+				/* b/439991064#comment7. In case of vCPU exception,
+				 * sleep cmd is ignored and we need to explicitly wait for idle
+				 * to make sure vCore is not active anymore
+				 */
+				vpu_wait_idle(core);
+			}
 			vpu_wait_idle_fail(core);
+		}
 	}
 
 	rc = pm_runtime_put_sync(core->pd_dev);

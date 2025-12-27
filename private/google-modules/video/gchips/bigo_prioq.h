@@ -14,6 +14,6 @@ bool dequeue_prioq(struct bigo_core *core, struct bigo_job **job,
                         bool *should_stop);
 int enqueue_prioq(struct bigo_core *core, struct bigo_inst *inst);
 
-void clear_job_from_prioq(struct bigo_core *core, struct bigo_inst *inst);
+bool clear_job_from_prioq(struct bigo_core *core, struct bigo_inst *inst);
 
 #endif //_BIGO_PRIOQ_H_

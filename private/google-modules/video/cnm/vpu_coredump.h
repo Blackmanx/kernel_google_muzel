@@ -16,6 +16,7 @@ struct vpu_dump_info {
 	char            *name;
 	void            *addr;
 	u64              size;
+	char            *crash_info;
 };
 
 int vpu_sscd_dev_register(struct vpu_core *core);

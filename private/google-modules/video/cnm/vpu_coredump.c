@@ -50,10 +50,17 @@ int vpu_do_sscoredump(struct vpu_core *core, const struct vpu_dump_info *dbg_inf
 		return -EINVAL;
 	}
 
+	if (!dbg_info) {
+		dev_err(core->dev, "dbg_info is invalid\n");
+		return -EINVAL;
+	}
+
 	memset(&seg, 0, sizeof(seg));
 	seg.addr = dbg_info->addr;
 	seg.size = dbg_info->size;
+	if (dbg_info->crash_info[0] == '\0')
+		snprintf(dbg_info->crash_info, VPU_CRASH_INFO_LEN, "VPU crash");
 
 	return sscd_platdata->sscd_report(&core->sscd_pdev, &seg, 1,
-		SSCD_FLAGS_ELFARM64HDR, "VPU crash\n");
+		SSCD_FLAGS_ELFARM64HDR, dbg_info->crash_info);
 }

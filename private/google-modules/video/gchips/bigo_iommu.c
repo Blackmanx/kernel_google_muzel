@@ -98,10 +98,10 @@ static int add_to_mapped_list(struct bigo_core *core, struct bigo_inst *inst,
 	binfo->fd = mapping->fd;
 	binfo->size = mapping->size;
 	binfo->offset = mapping->offset;
+	mapping->iova = binfo->iova;
 	mutex_lock(&inst->lock);
 	list_add_tail(&binfo->list, &inst->buffers);
 	mutex_unlock(&inst->lock);
-	mapping->iova = binfo->iova;
 	return rc;
 
 fail_map_attachment:

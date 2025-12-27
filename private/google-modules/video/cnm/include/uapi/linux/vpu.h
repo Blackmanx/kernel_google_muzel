@@ -21,6 +21,7 @@
 #define _VPU_IOWR(nr, size) _IOWR(VPU_IOC_MAGIC, nr, size)
 
 #define MAX_HEAP_NAME 32
+#define VPU_CRASH_INFO_LEN 128
 
 enum cpu_cmd_id {
 	VPU_CMD_REG_SZ,
@@ -38,6 +39,7 @@ enum cpu_cmd_id {
 	VPU_DMA_BUF_SYNC,
 	VPU_SSCD_COREDUMP,
 	VPU_NOTIFY_IDLE,
+	VPU_NOTIFY_WAKELOCK,
 };
 /* <END OF HELPERS> */
 
@@ -79,6 +81,7 @@ struct vpu_buf_sync {
 struct vpu_coredump_info {
 	__u32 size;
 	__u32 fd;
+	char crash_info[VPU_CRASH_INFO_LEN];
 };
 
 #define VPU_IOCX_GET_REG_SZ		_VPU_IOR(VPU_CMD_REG_SZ, __u32)
@@ -95,5 +98,6 @@ struct vpu_coredump_info {
 #define VPU_IOCX_DMA_BUF_SYNC		_VPU_IOW(VPU_DMA_BUF_SYNC, struct vpu_buf_sync)
 #define VPU_IOCX_SSCD_COREDUMP		_VPU_IOW(VPU_SSCD_COREDUMP, struct vpu_coredump_info)
 #define VPU_IOCX_NOTIFY_IDLE		_VPU_IOW(VPU_NOTIFY_IDLE, __u32)
+#define VPU_IOCX_NOTIFY_WAKELOCK	_VPU_IOW(VPU_NOTIFY_WAKELOCK, __u32)
 
 #endif /* _UAPI_VPU_H_ */

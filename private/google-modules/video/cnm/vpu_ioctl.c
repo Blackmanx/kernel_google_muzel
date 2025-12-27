@@ -37,10 +37,12 @@
 
 #define VPU_DEVCLASS_NAME "vpu_codec"
 #define VPU_CHRDEV_NAME "vpu"
+#define VPU_INIT_WAKELOCK_NAME "vpu_init"
 #define VPU_FW_NAME "seurat.bin"
 /* b/304879706#comment13, 1MB is enough for text + common_data section.
    Use 2MB for potential separation of text and common data */
 #define VPU_FW_CODE_SIZE (2 * 1024 * 1024)
+#define VPU_WAKELOCK_TIMEOUT_MS 3000
 
 void vpu_update_system_state(struct vpu_core *core)
 {
@@ -116,6 +118,30 @@ static void vpu_free_intr_queue(struct vpu_intr_queue *intr_queue)
 	kfifo_free(&intr_queue->intr_pending_q);
 }
 
+struct vpu_dmabuf_info *vpu_get_fw_debug_buf(struct vpu_core *core)
+{
+	struct vpu_dmabuf_info *curr, *temp;
+	/* vpuapi is using index 0 when allocating debug buf */
+	struct vpu_dmabuf_list *dmabuf_list = &core->dmabuf_list[0];
+	struct vpu_dmabuf_info *dmabuf_info = NULL;
+	uint32_t debug_buf_iova = READ_VPU_REGISTER(core, CMD_COMMON_MEM_DEBUG_BASE);
+
+	if (!debug_buf_iova)
+		return NULL;
+
+	mutex_lock(&dmabuf_list->lock);
+	list_for_each_entry_safe(curr, temp, &dmabuf_list->allocs, list) {
+		if (curr->iova == debug_buf_iova) {
+			dmabuf_info = curr;
+			dev_dbg(core->dev, "found debug buf iova %pad\n", &curr->iova);
+			break;
+		}
+	}
+	mutex_unlock(&dmabuf_list->lock);
+
+	return dmabuf_info;
+}
+
 static int vpu_open_inst(struct vpu_core *core, uint32_t inst_idx)
 {
 	int rc = 0;
@@ -145,6 +171,13 @@ static int vpu_open_inst(struct vpu_core *core, uint32_t inst_idx)
 		pr_err("failed to set vpu instance\n");
 		goto err_inst_idx;
 	}
+
+	/* record the debug memory which is set after VPU_Init
+	 * TODO: Add an ioctl to explicitly set fw debug buf if we need to know debug memory
+	 * before the first VPU_IOCX_OPEN_INSTANCE
+	 */
+	if (!core->fw_debug_buf)
+		core->fw_debug_buf = vpu_get_fw_debug_buf(core);
 
 	inst->core = core;
 	inst->idx = inst_idx;
@@ -817,6 +850,10 @@ static long vpu_unlocked_ioctl(struct file *fp, unsigned int cmd,
 					rc = -EINVAL;
 					break;
 				}
+				if (core->fw_debug_buf && core->fw_debug_buf->fd == dmabuf.fd) {
+					/* defer release fw debug buffer */
+					break;
+				}
 				vpu_free_dma_buf(alloc_list, list_lock, &dmabuf);
 				if (copy_to_user(user_desc, &dmabuf, sizeof(dmabuf))) {
 					pr_err("Failed to copy to user\n");
@@ -979,6 +1016,8 @@ static long vpu_unlocked_ioctl(struct file *fp, unsigned int cmd,
 
 				dbg_info.size = dump_info.size;
 				dbg_info.addr = vmap.vaddr;
+				dbg_info.crash_info = dump_info.crash_info;
+				dbg_info.crash_info[VPU_CRASH_INFO_LEN - 1] = '\0';
 				core->need_reload_fw = true;
 				vpu_do_sscoredump(core, &dbg_info);
 				dma_buf_vunmap_unlocked(dma_buf, &vmap);
@@ -997,7 +1036,16 @@ static long vpu_unlocked_ioctl(struct file *fp, unsigned int cmd,
 				rc = vpu_pm_resume(core->dev);
 
 			break;
-
+		case VPU_IOCX_NOTIFY_WAKELOCK:
+			mutex_lock(&core->lock);
+			if (core->wakelock) {
+				if (arg)
+					__pm_stay_awake(core->wakelock);
+				else
+					__pm_relax(core->wakelock);
+			}
+			mutex_unlock(&core->lock);
+			break;
 		default:
 			pr_err("Inside default cmd 0x%x\n", cmd);
 			rc = -EINVAL;
@@ -1027,6 +1075,10 @@ static int vpu_open(struct inode *inode, struct file *file)
 		container_of(file->f_inode->i_cdev, struct vpu_core, cdev);
 	int rc;
 	pr_debug("Inside vpu open\n");
+
+	/* VPU initialization is expected to complete within 3 seconds */
+	if (core->init_wakelock)
+		__pm_wakeup_event(core->init_wakelock, VPU_WAKELOCK_TIMEOUT_MS);
 
 	if (core->need_reload_fw) {
 		/* after coredump FW may be corrupted (b/389175194#comment30) */
@@ -1098,8 +1150,13 @@ static int vpu_release(struct inode *inode, struct file *file)
 
 		mutex_lock(&dmabuf_list->lock);
 		list_for_each_entry_safe(curr, temp, &dmabuf_list->allocs, list) {
-			dev_warn(core->dev, "inst[%d] has leaked allocation fd %d iova %pad\n",
+			if (core->fw_debug_buf && core->fw_debug_buf->iova == curr->iova) {
+				dev_dbg(core->dev, "free debug buffer iova %pad\n", &curr->iova);
+			} else {
+				dev_warn(core->dev,
+					"inst[%d] has leaked allocation fd %d iova %pad\n",
 					inst_idx, curr->fd, &curr->iova);
+			}
 			list_del(&curr->list);
 			_vpu_free_dma_info(curr);
 		}
@@ -1112,6 +1169,8 @@ static int vpu_release(struct inode *inode, struct file *file)
 		}
 		mutex_unlock(&dmabuf_list->lock);
 	}
+
+	core->fw_debug_buf = NULL;
 
 	return 0;
 }
@@ -1354,6 +1413,14 @@ static int vpu_probe(struct platform_device *pdev)
 	if (rc)
 		dev_err(&pdev->dev, "failed to register sscd\n");
 
+	core->wakelock = wakeup_source_register(&pdev->dev, dev_name(&pdev->dev));
+	if (!core->wakelock)
+		dev_err(&pdev->dev, "failed to register wakeup source\n");
+
+	core->init_wakelock = wakeup_source_register(&pdev->dev, VPU_INIT_WAKELOCK_NAME);
+	if (!core->init_wakelock)
+		dev_err(&pdev->dev, "failed to register init wakeup source\n");
+
 	return rc;
 err_load_fw:
 	vpu_pm_deinit(core);
@@ -1375,6 +1442,8 @@ static int vpu_remove(struct platform_device *pdev)
 {
 	struct vpu_core *core = (struct vpu_core *)platform_get_drvdata(pdev);
 
+	wakeup_source_unregister(core->init_wakelock);
+	wakeup_source_unregister(core->wakelock);
 	vpu_sscd_dev_unregister(core);
 
 	vpu_deinit_debugfs(&core->debugfs);

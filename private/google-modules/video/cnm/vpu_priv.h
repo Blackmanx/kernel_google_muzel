@@ -98,12 +98,15 @@ struct vpu_core {
 	phys_addr_t paddr;
 	void __iomem *base;
 	void __iomem *qch_base;
+	struct wakeup_source *wakelock;
+	struct wakeup_source *init_wakelock;
 	struct mutex lock;
 	int inst_count;
 	spinlock_t inst_lock;
 	struct vpu_inst *instances[MAX_NUM_INST];
 	struct vpu_dmabuf_list dmabuf_list[MAX_NUM_INST];
 	struct vpu_dmabuf_info *fw_buf;
+	struct vpu_dmabuf_info *fw_debug_buf;
 	struct list_head allocs;
 	struct vpu_debugfs debugfs;
 	struct vpu_secure secure;
