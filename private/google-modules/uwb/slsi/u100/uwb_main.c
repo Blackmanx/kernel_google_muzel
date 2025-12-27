@@ -18,14 +18,14 @@
 #include "include/uwb_gpio.h"
 #include "include/uwb_fw_common.h"
 #include "include/uwb_coredump.h"
+#include "include/uwb_debugfs.h"
 #include "include/uwb_sysnodes.h"
 
-#define UWB_DD_VERSION "0.7.7"
+#define UWB_DD_VERSION "0.7.13"
 #define ENUM_TO_STR(R) #R
 #define MIN_TL_SIZE 2
 #define TEST_FW_SUFFIX "_test"
 #define DOT_CHAR '.'
-#define BOOT_FAIL_BUF_SIZE 40
 #define ALV_PLL_WORK 0x00
 #define ALV_NOT_WORK 0x01
 #define PLL_NOT_WORK 0x02
@@ -62,14 +62,26 @@ static const char *get_firmware_type_str(struct firmware_info *fw_info)
 	}
 }
 
-static void parse_firmware_info(struct u100_ctx *u100_ctx, uint8_t *data, int skb_len)
+static void display_fw_version(struct u100_ctx *u100_ctx)
 {
+	if ((u100_ctx->u100_state == U100_EDS_STATE || u100_ctx->u100_state == U100_FW_STATE)
+		&& !atomic_read(&u100_ctx->flashing))
+		UWB_INFO("U100 fw version[%s%.*s], key_type[%d], host_type[%#x]\n",
+			get_firmware_type_str(&u100_ctx->fw_info), FW_VERSION_LEN,
+			u100_ctx->fw_info.version, u100_ctx->fw_info.key_type,
+			u100_ctx->fw_info.host_type);
+}
+
+static int parse_firmware_info(struct u100_ctx *u100_ctx, uint8_t *data, int skb_len)
+{
+	int ret = 0;
 	uint8_t tlv_num;
 	uint8_t type;
 	uint8_t len;
 
 	memcpy(u100_ctx->fw_info.version, UNKNOWN_STR, sizeof(UNKNOWN_STR));
 	memset(u100_ctx->fw_info.nv_hash, 0, NV_HASH_LEN);
+	u100_ctx->fw_info.host_type = HOST_TYPE_LEGACY;
 	u100_ctx->fw_info.key_type = KEY_TYPE_UNKNOWN;
 
 	tlv_num = *data;
@@ -86,26 +98,35 @@ static void parse_firmware_info(struct u100_ctx *u100_ctx, uint8_t *data, int sk
 		if (len > skb_len)
 			break;
 
+		/* TODO: returns an error when mandatory TLVs are missing or broken. */
 		if (type == TLV_TYPE_FW_VERSION) {
-			if (len == FW_VERSION_LEN)
+			if (len == FW_VERSION_LEN) {
 				memcpy(u100_ctx->fw_info.version, data, len);
-			else
+			} else {
 				UWB_ERR("Invalid length %d for ATR FW_VERSION", len);
+				ret = -EPROTO;
+			}
 		} else if (type == TLV_TYPE_NV_HASH) {
-			if (len == NV_HASH_LEN)
+			if (len == NV_HASH_LEN) {
 				memcpy(u100_ctx->fw_info.nv_hash, data, len);
-			else
+			} else {
 				UWB_ERR("Invalid length %d for ATR NV_HASH", len);
+				ret = -EPROTO;
+			}
 		} else if (type == TLV_TYPE_KEY_TYPE) {
-			if (len == KEY_TYPE_LEN)
+			if (len == KEY_TYPE_LEN) {
 				u100_ctx->fw_info.key_type = *data;
-			else
+			} else {
 				UWB_ERR("Invalid length %d for ATR KEY_TYPE", len);
+				ret = -EPROTO;
+			}
 		} else if (type == TLV_TYPE_DEV_ID) {
-			if (len == DEV_ID_LEN)
+			if (len == DEV_ID_LEN) {
 				memcpy(u100_ctx->fw_info.devid, data, len);
-			else
+			} else {
 				UWB_ERR("Invalid length %d for ATR DEV_ID", len);
+				ret = -EPROTO;
+			}
 		} else if (type == TLV_TYPE_HW_STATUS) {
 			if (len == HW_STATUS_LEN) {
 				if ((*data & ALV_NOT_WORK) == ALV_NOT_WORK)
@@ -113,57 +134,30 @@ static void parse_firmware_info(struct u100_ctx *u100_ctx, uint8_t *data, int sk
 				if ((*data & PLL_NOT_WORK) == PLL_NOT_WORK)
 					UWB_ERR("Hardware status PLL clock is not working");
 				u100_ctx->fw_info.hw_status = *data;
-			} else
+			} else {
 				UWB_ERR("Invalid length %d for ATR HW_STATUS", len);
-		} else
+				ret = -EPROTO;
+			}
+		} else if (type == TLV_TYPE_HOST_TYPE) {
+			if (len == HOST_TYPE_LEN) {
+				u100_ctx->fw_info.host_type = *data >> HOST_TYPE_BIT_OFFSET;
+			} else {
+				UWB_ERR("Invalid length %d for ATR HOST_TYPE", len);
+				ret = -EPROTO;
+			}
+		} else {
 			UWB_DEBUG("Unknown TLV type[0x%02x] in ATR", type);
+		}
 
 		data += len;
 		skb_len -= len;
 		tlv_num--;
 	}
-}
 
-static void parse_atr(struct u100_ctx *u100_ctx, struct sk_buff *skb)
-{
-	int ori_u100_state = U100_UNKNOWN_STATE;
-	unsigned char *data;
+	if (!ret)
+		display_fw_version(u100_ctx);
 
-	if (skb->len < MINIMAL_ATR_SIZE) {
-		u100_ctx->is_atr_right = false;
-		return;
-	}
-
-	data = skb->data;
-	memset(&u100_ctx->fw_info, 0, sizeof(struct firmware_info));
-	u100_ctx->fw_info.fw_type = FW_TYPE_UNKNOWN;
-	mutex_lock(&u100_ctx->atr_lock);
-	ori_u100_state = u100_ctx->u100_state;
-	u100_ctx->u100_state = data[U100_STATE_INDEX_IN_ATR];
-	if (u100_ctx->u100_state == U100_FW_STATE) {
-		if (skb->len <= FW_TYPE_INDEX_IN_ATR) {
-			u100_ctx->is_atr_right = false;
-			mutex_unlock(&u100_ctx->atr_lock);
-			return;
-		}
-		u100_ctx->fw_info.fw_type = data[FW_TYPE_INDEX_IN_ATR];
-		if (u100_ctx->fw_info.fw_type == FW_TYPE_EDS)
-			u100_ctx->u100_state = U100_EDS_STATE;
-		else if (skb->len > TLV_SIZE_INDEX_IN_ATR)
-			parse_firmware_info(u100_ctx, &data[TLV_SIZE_INDEX_IN_ATR],
-					skb->len - TLV_SIZE_INDEX_IN_ATR);
-		u100_ctx->is_download_mode = false;
-	}
-
-	if (ori_u100_state != u100_ctx->u100_state)
-		UWB_INFO("U100 state set to [%#x]", u100_ctx->u100_state);
-	mutex_unlock(&u100_ctx->atr_lock);
-	if (atomic_read(&u100_ctx->waiting_atr)) {
-		atomic_set(&u100_ctx->waiting_atr, 0);
-		complete_all(&u100_ctx->atr_done_cmpl);
-		u100_ctx->wait_atr_err = FW_OK;
-	}
-	u100_ctx->is_atr_right = true;
+	return ret;
 }
 
 static bool is_atr(struct u100_ctx *u100_ctx, struct sk_buff *skb)
@@ -185,22 +179,92 @@ static bool is_atr(struct u100_ctx *u100_ctx, struct sk_buff *skb)
 	return true;
 }
 
+static void dump_skb(struct sk_buff *skb)
+{
+	print_hex_dump(KERN_WARNING, LOG_TAG "Recv Data: ", DUMP_PREFIX_NONE, 16, 1,
+		       skb->data, min(skb->len, SKB_MAX_PRINT_SIZE), false);
+}
+
+static int process_atr(struct u100_ctx *u100_ctx, struct sk_buff *skb)
+{
+	unsigned char *data = skb->data;
+
+	mutex_lock(&u100_ctx->atr_lock);
+
+	/* Process ATR only when waiting_atr is marked. */
+	if (u100_ctx->waiting_atr) {
+		if (!is_atr(u100_ctx, skb)) {
+			UWB_WARN("Unexpected non-ATR received.\n");
+			dump_skb(skb);
+			mutex_unlock(&u100_ctx->atr_lock);
+			return -EIO;
+		}
+	} else {
+		if (is_atr(u100_ctx, skb)) {
+			UWB_WARN("Unexpected ATR received.\n");
+			dump_skb(skb);
+			mutex_unlock(&u100_ctx->atr_lock);
+			return -EIO;
+		} else {
+			/* Not in sync-power-up operation. */
+			mutex_unlock(&u100_ctx->atr_lock);
+			return 0;
+		}
+	}
+
+	if (skb->len < MINIMAL_ATR_SIZE) {
+		UWB_WARN("Illegal ATR message received (too short).\n");
+		goto err_process_atr;
+	}
+
+	memset(&u100_ctx->fw_info, 0, sizeof(struct firmware_info));
+	u100_ctx->fw_info.fw_type = FW_TYPE_UNKNOWN;
+	u100_ctx->u100_state = data[U100_STATE_INDEX_IN_ATR];
+
+	if (u100_ctx->u100_state == U100_FW_STATE) {
+		if (skb->len <= FW_TYPE_INDEX_IN_ATR) {
+			UWB_WARN("Illegal ATR message received (failed to parse FW type).\n");
+			goto err_process_atr;
+		}
+
+		u100_ctx->fw_info.fw_type = data[FW_TYPE_INDEX_IN_ATR];
+		if (u100_ctx->fw_info.fw_type == FW_TYPE_EDS)
+			u100_ctx->u100_state = U100_EDS_STATE;
+		else if (parse_firmware_info(u100_ctx, &data[TLV_SIZE_INDEX_IN_ATR],
+					     skb->len - TLV_SIZE_INDEX_IN_ATR))
+			goto err_process_atr;
+
+		u100_ctx->is_download_mode = false;
+	}
+
+	UWB_INFO("ATR received, U100 state: [%#x].\n", u100_ctx->u100_state);
+
+	if (u100_ctx->u100_state == u100_ctx->u100_state_wanted) {
+		u100_ctx->waiting_atr = false;
+		complete_all(&u100_ctx->atr_done_cmpl);
+	}
+	mutex_unlock(&u100_ctx->atr_lock);
+
+	return 0;
+
+err_process_atr:
+	u100_ctx->waiting_atr = false;
+	u100_ctx->u100_state = U100_UNKNOWN_STATE;
+	complete_all(&u100_ctx->atr_done_cmpl);
+	mutex_unlock(&u100_ctx->atr_lock);
+
+	dump_skb(skb);
+
+	return -EIO;
+}
+
 static void io_dev_recv_uci(struct u100_ctx *u100_ctx, struct sk_buff *skb)
 {
 	struct sk_buff_head *rxq = &u100_ctx->sk_rx_q;
-	int wait_atr = atomic_read(&u100_ctx->waiting_atr);
-	bool res;
 	struct sk_buff *rx_queue_head;
 
-	res = is_atr(u100_ctx, skb);
-	if (res) {
-		parse_atr(u100_ctx, skb);
-		u100_ctx->register_device(u100_ctx);
-	}
-	if (wait_atr && (!res || !u100_ctx->is_atr_right)) {
-		print_hex_dump(KERN_WARNING, LOG_TAG "Recv Data: ", DUMP_PREFIX_NONE, 16, 1,
-				skb->data, min(skb->len, SKB_MAX_PRINT_SIZE), false);
-		u100_ctx->wait_atr_err = FW_ERROR_DATA;
+	if (process_atr(u100_ctx, skb)) {
+		UWB_ERR("Failed to process ATR.\n");
 	}
 
 	if (is_coredump(u100_ctx, skb)) {
@@ -232,11 +296,8 @@ static void io_dev_recv_uci(struct u100_ctx *u100_ctx, struct sk_buff *skb)
 
 static void unregister_device(struct u100_ctx *u100_ctx)
 {
-	if (u100_ctx->misc_registered) {
-		u100_ctx->misc_registered = false;
-		misc_deregister(&u100_ctx->uci_dev);
-		UWB_DEBUG("Deregistered %s\n", u100_ctx->uci_dev.name);
-	}
+	misc_deregister(&u100_ctx->uci_dev);
+	UWB_DEBUG("Deregistered %s\n", u100_ctx->uci_dev.name);
 }
 
 static void register_device(struct u100_ctx *u100_ctx)
@@ -246,29 +307,15 @@ static void register_device(struct u100_ctx *u100_ctx)
 
 	uci_misc = &u100_ctx->uci_dev;
 	mutex_lock(&u100_ctx->atr_lock);
-	if (u100_ctx->u100_state == U100_FW_STATE) {
-		UWB_DEBUG("ATR received U100 enter FW.");
-		if (!u100_ctx->misc_registered && !atomic_read(&u100_ctx->flashing) &&
-		   (u100_ctx->fw_info.hw_status == ALV_PLL_WORK)) {
-			uci_misc->minor = MISC_DYNAMIC_MINOR;
-			ret = misc_register(uci_misc);
-			if (ret) {
-				UWB_ERR("Failed to register uci device\n");
-				mutex_unlock(&u100_ctx->atr_lock);
-				return;
-			}
-			u100_ctx->misc_registered = true;
-			UWB_INFO("Registered %s\n", uci_misc->name);
-		}
-	} else if (!atomic_read(&u100_ctx->opened))
-		unregister_device(u100_ctx);
-
-	if ((u100_ctx->u100_state == U100_EDS_STATE || u100_ctx->u100_state == U100_FW_STATE)
-		&& !atomic_read(&u100_ctx->flashing)) {
-		UWB_INFO("U100 fw version[%s%.*s], key_type[%d]\n",
-			get_firmware_type_str(&u100_ctx->fw_info), FW_VERSION_LEN,
-			u100_ctx->fw_info.version, u100_ctx->fw_info.key_type);
+	UWB_DEBUG("Register Device");
+	uci_misc->minor = MISC_DYNAMIC_MINOR;
+	ret = misc_register(uci_misc);
+	if (ret) {
+		UWB_ERR("Failed to register uci device\n");
+		mutex_unlock(&u100_ctx->atr_lock);
+		return;
 	}
+	UWB_INFO("Registered %s\n", uci_misc->name);
 	mutex_unlock(&u100_ctx->atr_lock);
 }
 
@@ -488,13 +535,10 @@ static long uci_ioctl(struct file *fp, unsigned int cmd, unsigned long args)
 
 	case UWB_IOCTL_POWER_ON:
 		UWB_DEBUG("UWB_IOCTL_POWER_ON\n");
-		disable_irq(u100_ctx->spi->irq);
-		/* When DD is not in power off, power_on_ioctl should perform reset */
-		if (!atomic_read(&u100_ctx->u100_powered_on))
-			uwbs_power_on(u100_ctx);
-		else
-			uwbs_reset(u100_ctx);
-		enable_irq(u100_ctx->spi->irq);
+		/* Check u100 status */
+		ret = uwbs_sync_reset(u100_ctx);
+		if (ret)
+			u100_report_coredump_on_poweron(u100_ctx, ret);
 		break;
 
 	case UWB_IOCTL_POWER_OFF:
@@ -535,8 +579,9 @@ static long uci_ioctl(struct file *fp, unsigned int cmd, unsigned long args)
 			UWB_ERR("Power switch error %d",
 					PTR_ERR_OR_ZERO(u100_ctx->gpio_u100_power));
 			ret = -EIO;
-		} else
-			uwbs_reset_vbat(u100_ctx);
+		} else {
+			uwbs_ldsw_reset(u100_ctx);
+		}
 		break;
 
 	default:
@@ -550,9 +595,12 @@ exit:
 
 static void start_download_mode(struct u100_ctx *u100_ctx)
 {
-	u100_ctx->is_download_mode = true;
-	uwbs_start_download(u100_ctx);
-	UWB_INFO("Enter U100 download mode success.");
+	if (!uwbs_start_download(u100_ctx)) {
+		u100_ctx->is_download_mode = true;
+		UWB_INFO("Enter U100 download mode success.\n");
+	} else {
+		UWB_ERR("Enter U100 download mode failed.\n");
+	}
 }
 
 static bool enter_bl0_mode(struct u100_ctx *u100_ctx)
@@ -623,20 +671,18 @@ static int uwb_spi_probe(struct spi_device *spi)
 	if (!u100_ctx)
 		return -ENOMEM;
 
-	u100_ctx->is_atr_right = true;
 	u100_ctx->spi = spi;
 	mutex_init(&u100_ctx->lock);
 	mutex_init(&u100_ctx->atr_lock);
 	spi_set_drvdata(spi, u100_ctx);
 
-	skb_queue_head_init(&u100_ctx->sk_tx_q);
 	skb_queue_head_init(&u100_ctx->sk_rx_q);
 	init_completion(&u100_ctx->tx_done_cmpl);
 	init_completion(&u100_ctx->atr_done_cmpl);
-	init_completion(&u100_ctx->irq_done_cmpl);
 	init_completion(&u100_ctx->process_done_cmpl);
 	init_waitqueue_head(&u100_ctx->wq);
 	mutex_init(&u100_ctx->ioctl_mutex);
+	mutex_init(&u100_ctx->tx_mutex);
 
 	ret = device_init_wakeup(&spi->dev, true);
 	if (ret)
@@ -659,7 +705,6 @@ static int uwb_spi_probe(struct spi_device *spi)
 	uci_misc->parent = &spi->dev;
 
 	u100_ctx->recv_package = io_dev_recv_uci;
-	u100_ctx->register_device = register_device;
 	uwb_set_spi_type(SPI_TYPE_UCI);
 
 	u100_ctx->coredump = devm_kzalloc(&spi->dev, sizeof(struct uwb_coredump),
@@ -680,22 +725,12 @@ static int uwb_spi_probe(struct spi_device *spi)
 	if (ret < 0)
 		goto err_setup;
 	mdelay(GPIO_DELAY_MS);
-	ret = uwbs_sync_reset(u100_ctx);
-	if (!ignore_atr_error) {
-		if (ret)
-			goto err_setup;
-
-		if (!u100_ctx->is_atr_right) {
-			UWB_WARN("Illegal ATR message.");
-			ret = -EINVAL;
-			goto err_setup;
-		}
-	} else
-		UWB_WARN("Ignore ATR ret %d", ret);
 
 	ret = uwb_sysfs_init(u100_ctx);
 	if (ret)
 		UWB_ERR("Failed to initialize the sysnodes\n");
+
+	uwb_debugfs_init(u100_ctx);
 
 	atomic_set(&u100_ctx->num_spi_slow_txs, 0);
 	u100_ctx->is_download_mode = false;
@@ -713,36 +748,26 @@ static int uwb_spi_probe(struct spi_device *spi)
 		} else {
 			UWB_DEBUG("fwname %s", fwname);
 			if (set_fw_name(u100_ctx, fwname)) {
-				ret = init_fw_download_thread(u100_ctx, true);
+				ret = init_fw_download_thread(u100_ctx, false);
 				if (ret < 0)
-					UWB_WARN("init_fw_download_thread failed\n");
+					UWB_WARN("init_fw_download failed\n");
 			}
 		}
 	}
 
+	register_device(u100_ctx);
 	UWB_DEBUG("UWB probe end");
 	return 0;
 
 err_setup:
-	if (u100_ctx->coredump && u100_ctx->coredump->sscd) {
-		char buf[BOOT_FAIL_BUF_SIZE];
-		struct uwb_coredump *coredump = u100_ctx->coredump;
-		struct sscd_platform_data *sscd_pdata = &coredump->sscd->sscd_pdata;
-
-		if (u100_ctx->gpio_u100_power && sscd_pdata) {
-			scnprintf(buf, BOOT_FAIL_BUF_SIZE, "u100 boot up failed with err: %d", ret);
-			sscd_pdata->sscd_report(&coredump->sscd->sscd_dev, coredump->sscd->segs,
-						0, 0, (const char *) buf);
-		}
+	u100_report_coredump_on_poweron(u100_ctx, ret);
+	if (u100_ctx->coredump && u100_ctx->coredump->sscd)
 		u100_unregister_coredump(u100_ctx);
-	}
-	if (!IS_ERR_OR_NULL(u100_ctx->gpio_u100_en))
-		set_gpio_value(&u100_ctx->gpio_u100_en, 0);
-	if (!IS_ERR_OR_NULL(u100_ctx->gpio_u100_power))
-		gpiod_direction_output(u100_ctx->gpio_u100_power, 0);
+
 	mutex_destroy(&u100_ctx->lock);
 	mutex_destroy(&u100_ctx->atr_lock);
 	mutex_destroy(&u100_ctx->ioctl_mutex);
+	mutex_destroy(&u100_ctx->tx_mutex);
 	unregister_device(u100_ctx);
 	UWB_ERR("UWB probe error %d", ret);
 	return ret;
@@ -761,12 +786,14 @@ static void uwb_spi_remove(struct spi_device *spi)
 		mutex_destroy(&u100_ctx->lock);
 		mutex_destroy(&u100_ctx->atr_lock);
 		mutex_destroy(&u100_ctx->ioctl_mutex);
+		mutex_destroy(&u100_ctx->tx_mutex);
 		if (atomic_read(&u100_ctx->flashing))
 			stop_fw_download_thread(u100_ctx);
 
 		u100_unregister_coredump(u100_ctx);
 
 		uwb_sysfs_exit(u100_ctx);
+		uwb_debugfs_deinit(u100_ctx);
 	}
 	UWB_DEBUG("Removed U100 spi module\n");
 }

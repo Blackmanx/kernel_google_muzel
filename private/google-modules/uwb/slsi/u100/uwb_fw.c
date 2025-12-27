@@ -414,8 +414,8 @@ static int uwb_flash(struct u100_ctx *ctx)
 		UWB_ERR("FW_FLASH Flash FW binary[%s] failed!\n",
 			ctx->uwb_fw_ctx.uwb_fw[ctx->uwb_fw_ctx.current_bin_idx].fw_name);
 	uwb_set_spi_type(SPI_TYPE_UCI);
-	if (uwbs_sync_reset(ctx))
-		uwbs_reset(ctx);
+	uwbs_sync_reset(ctx);
+
 	uwb_release_firmware(&ctx->uwb_fw_ctx.uwb_fw[DEFAULT_BIN_IDX]);
 	uwb_release_firmware(&ctx->uwb_fw_ctx.uwb_fw[DEFAULT_BIN_TEST_IDX]);
 	return ret;
@@ -446,7 +446,6 @@ static int fw_download_task(void *data)
 	ctx->uwb_fw_ctx.notify_progress = NULL;
 	uwb_set_spi_type(SPI_TYPE_UCI);
 	atomic_dec_return(&ctx->flashing);
-	ctx->register_device(ctx);
 	module_put(THIS_MODULE);
 
 	end_time = ktime_get();

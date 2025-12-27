@@ -14,9 +14,8 @@
 #define GPIO_DELAY_MS 50
 
 /* uci gpio irq */
-void uwb_init_irq(struct uwb_irq *irq, unsigned int num, const char *name,
-				unsigned long flags);
-int uwb_request_irq(struct uwb_irq *irq, irq_handler_t isr, struct u100_ctx *u100_ctx);
+int uwb_init_irq(struct u100_ctx *u100_ctx, unsigned int num);
+
 void set_gpio_value(void *desc, int value);
 int get_gpio_value(void *desc);
 

@@ -27,6 +27,8 @@
 #define TLV_TYPE_KEY_TYPE 0x0B
 #define TLV_TYPE_DEV_ID 0xA1
 #define TLV_TYPE_HW_STATUS 0xA2
+#define TLV_TYPE_HOST_TYPE 0xA3
+#define HOST_TYPE_LEN 1
 #define FW_TYPE_LEN 1
 #define FW_VERSION_LEN 12
 #define NV_HASH_LEN 32
@@ -34,13 +36,14 @@
 #define DEV_ID_LEN 16
 #define HW_STATUS_LEN 1
 
+#define HOST_TYPE_BIT_OFFSET 4
 #define MAX_RSP_LEN 260
 #define MAX_CMD (255 + 3 + 2)
 #define MAX_AP_APDU_DATA_FM_LEN 8192
 #define SEND_PKT_HEADER_LEN 12
 #define MAX_SPI_BLOCK_SIZE (MAX_AP_APDU_DATA_FM_LEN + SEND_PKT_HEADER_LEN)
-#define FW_INFO_RESERVED_LEN (MAX_FW_INFO_SIZE - FW_TYPE_LEN - FW_VERSION_LEN \
-				- NV_HASH_LEN - KEY_TYPE_LEN - DEV_ID_LEN - HW_STATUS_LEN)
+#define FW_INFO_RESERVED_LEN (MAX_FW_INFO_SIZE - FW_TYPE_LEN - FW_VERSION_LEN - NV_HASH_LEN \
+				- KEY_TYPE_LEN - DEV_ID_LEN - HW_STATUS_LEN - HOST_TYPE_LEN)
 #define DEFAULT_FAST_MODE_DISABLE 0
 
 struct u100_ctx;
@@ -85,6 +88,7 @@ struct firmware_info {
 	uint8_t key_type;
 	char devid[DEV_ID_LEN];
 	uint8_t hw_status;
+	uint8_t host_type;
 	char reserved[FW_INFO_RESERVED_LEN];
 };
 

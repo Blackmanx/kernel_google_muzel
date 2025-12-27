@@ -14,6 +14,7 @@ ddk_module(
     ]) + [
         "uwb_controller.c",
         "uwb_coredump.c",
+        "uwb_debugfs.c",
         "uwb_fw.c",
         "uwb_fw_ap.c",
         "uwb_fw_bl1.c",

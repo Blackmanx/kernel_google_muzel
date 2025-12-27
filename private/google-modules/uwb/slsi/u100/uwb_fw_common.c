@@ -306,6 +306,7 @@ enum fw_err enter_uwb_bl0_mode_with_retry(struct u100_ctx *u100_ctx, int max_ret
 	int ret = 0;
 	int retry_cnt = 0;
 
+	u100_ctx->u100_state = U100_UNKNOWN_STATE;
 	while (retry_cnt < max_retry) {
 		retry_cnt++;
 		ret = enter_uwb_bl0_mode(u100_ctx);
