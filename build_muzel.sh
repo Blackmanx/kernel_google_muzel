@@ -1,7 +1,1 @@
-#!/bin/bash
-# SPDX-License-Identifier: GPL-2.0
-
-exec tools/bazel run \
-  --config=stamp \
-  --config=muzel \
-  //private/devices/google/muzel:lga_muzel_dist "$@"
+private/devices/google/muzel/build_muzel.sh
