@@ -365,6 +365,12 @@ Description:
 		meter_channels:
 		The reported value indicates the meter channel number.
 
+What:		/sys/devices/virtual/pmic/mitigation/br_stats/max_odpm_stats
+Date:		Aug, 2025
+Contact:	"Sam Ou" <samou@google.com>
+Description:
+		max_odpm_stats: max instant odpm information (see uapi/brownout_stats.h)
+
 What:		/sys/devices/virtual/pmic/mitigation/mitigation/<PMIC>_mitigation_threshold
 Date:		Dec, 2023
 Contact:	"George Lee" <geolee@google.com>
@@ -554,3 +560,21 @@ Contact:	"Allen Jiang" <alljiang@google.com>
 Description:
 		The reported value indicates if the VDROOP2 OCP batfet timer is enabled.
 		1 means enabled; 0 means disabled.
+
+What:		/sys/devices/virtual/pmic/mitigation/debounce_time/<IRQ>_DET
+Date:		Jul, 2025
+Contact:	"Sam Ou" <samou@google.com>
+Description:
+		The detect deglitch time of the interrupts.
+
+What:		/sys/devices/virtual/pmic/mitigation/debounce_time/<IRQ>_REL
+Date:		Jul, 2025
+Contact:	"Sam Ou" <samou@google.com>
+Description:
+		The detect release time of the interrupts.
+
+What:		/sys/devices/virtual/pmic/mitigation/userspace/throttle_state
+Date:		Aug, 2025
+Contact:	"Sam Ou" <samou@google.com>
+Description:
+		The throttling state level control from userspace.

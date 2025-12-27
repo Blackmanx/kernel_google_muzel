@@ -114,16 +114,36 @@ u64 settings_to_current(struct bcl_device *bcl_dev, int pmic, int idx, u32 setti
 	return (u32)_IQ30_to_int(raw_unit);
 }
 
-void compute_mitigation_modules(struct bcl_device *bcl_dev,
-				struct bcl_mitigation_conf *mitigation_conf, u32 *odpm_lpf_value)
+void compute_odpm_lpf(struct bcl_device *bcl_dev,
+				struct timespec64 triggered_time,
+				struct bcl_mitigation_conf *mitigation_conf,
+				struct odpm_lpf *odpm_lpf,
+				struct max_odpm_lpf *max_odpm_lpf)
 {
 	int i;
+	u32 odpm_lpf_value, odpm_lpf_thres;
 
 	for (i = 0; i < METER_CHANNEL_MAX; i++) {
-		if (odpm_lpf_value[i] >= mitigation_conf[i].threshold) {
+		odpm_lpf_value = odpm_lpf->value[i];
+		odpm_lpf_thres = mitigation_conf[i].threshold;
+		if (odpm_lpf_value >= odpm_lpf_thres) {
+			/* Compute mitigation modules */
 			atomic_or(BIT(mitigation_conf[i].module_id),
 					  &bcl_dev->mitigation_module_ids);
+
+			if (odpm_lpf_value >= odpm_lpf_thres * 3)
+				max_odpm_lpf[i].count_lvl_2++;
+			else if (odpm_lpf_value >= odpm_lpf_thres * 2)
+				max_odpm_lpf[i].count_lvl_1++;
+			else
+				max_odpm_lpf[i].count_lvl_0++;
 		}
+		if (odpm_lpf_value >= max_odpm_lpf[i].value) {
+			max_odpm_lpf[i].time = triggered_time;
+			max_odpm_lpf[i].value = odpm_lpf_value;
+			max_odpm_lpf[i].triggered_idx = bcl_dev->br_stats->triggered_idx;
+		}
+
 	}
 }
 

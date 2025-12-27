@@ -150,11 +150,19 @@ int google_bcl_parse_qos(struct bcl_device *bcl_dev)
 			bcl_dev->zone[idx]->bcl_qos->cpu_limit[QOS_CPU0][QOS_LIGHT_IND] = INT_MAX;
 			bcl_dev->zone[idx]->bcl_qos->cpu_limit[QOS_CPU0][QOS_HEAVY_IND] = INT_MAX;
 		}
-		if (of_property_read_u32_array(child, "cpucl1",
-					       &bcl_dev->zone[idx]->bcl_qos->cpu_limit[QOS_CPU1][0],
+		if (of_property_read_u32_array(child, "cpucl1a",
+					       &bcl_dev->zone[idx]
+						       ->bcl_qos->cpu_limit[QOS_CPU1A][0],
 					       QOS_PARAM_CNT) != 0) {
-			bcl_dev->zone[idx]->bcl_qos->cpu_limit[QOS_CPU1][QOS_LIGHT_IND] = INT_MAX;
-			bcl_dev->zone[idx]->bcl_qos->cpu_limit[QOS_CPU1][QOS_HEAVY_IND] = INT_MAX;
+			bcl_dev->zone[idx]->bcl_qos->cpu_limit[QOS_CPU1A][QOS_LIGHT_IND] = INT_MAX;
+			bcl_dev->zone[idx]->bcl_qos->cpu_limit[QOS_CPU1A][QOS_HEAVY_IND] = INT_MAX;
+		}
+		if (of_property_read_u32_array(child, "cpucl1b",
+					       &bcl_dev->zone[idx]
+						       ->bcl_qos->cpu_limit[QOS_CPU1B][0],
+					       QOS_PARAM_CNT) != 0) {
+			bcl_dev->zone[idx]->bcl_qos->cpu_limit[QOS_CPU1B][QOS_LIGHT_IND] = INT_MAX;
+			bcl_dev->zone[idx]->bcl_qos->cpu_limit[QOS_CPU1B][QOS_HEAVY_IND] = INT_MAX;
 		}
 		if (of_property_read_u32_array(child, "cpucl2",
 					       &bcl_dev->zone[idx]->bcl_qos->cpu_limit[QOS_CPU2][0],
@@ -241,8 +249,7 @@ static void process_qos_request(struct work_struct *work)
 void google_bcl_qos_update(struct bcl_zone *zone, int throttle_lvl)
 {
 	struct bcl_device *bcl_dev;
-	int i;
-	int cpu0_freq = INT_MAX, cpu1_freq = INT_MAX, cpu2_freq = INT_MAX;
+	int cpu0_freq = INT_MAX, cpu1a_freq = INT_MAX, cpu1b_freq = INT_MAX, cpu2_freq = INT_MAX;
 	int tpu_freq = INT_MAX, gpu_freq = INT_MAX, gxp_freq = INT_MAX;
 
 	if (!zone->bcl_qos)
@@ -256,27 +263,25 @@ void google_bcl_qos_update(struct bcl_zone *zone, int throttle_lvl)
 	if (throttle_lvl == QOS_NONE)
 		goto end_qos_update;
 
-	for (i = 0; i < TRIGGERED_SOURCE_MAX; i++) {
-		if (bcl_dev->zone[i] && bcl_dev->zone[i]->bcl_qos && zone->throttle_lvl) {
-
-			cpu0_freq = umin(cpu0_freq, bcl_dev->zone[i]->bcl_qos->cpu_limit[QOS_CPU0]
-					[throttle_lvl - QOS_PARAM_OFFSET]);
-			cpu1_freq = umin(cpu1_freq, bcl_dev->zone[i]->bcl_qos->cpu_limit[QOS_CPU1]
-					[throttle_lvl - QOS_PARAM_OFFSET]);
-			cpu2_freq = umin(cpu2_freq, bcl_dev->zone[i]->bcl_qos->cpu_limit[QOS_CPU2]
-					[throttle_lvl - QOS_PARAM_OFFSET]);
-			tpu_freq = umin(tpu_freq, bcl_dev->zone[i]->bcl_qos->df_limit[QOS_TPU]
-					[throttle_lvl - QOS_PARAM_OFFSET]);
-			gpu_freq = umin(gpu_freq, bcl_dev->zone[i]->bcl_qos->df_limit[QOS_GPU]
-					[throttle_lvl - QOS_PARAM_OFFSET]);
-			gxp_freq = umin(gxp_freq, bcl_dev->zone[i]->bcl_qos->df_limit[QOS_GXP]
-					[throttle_lvl - QOS_PARAM_OFFSET]);
-		}
-	}
+	cpu0_freq = umin(cpu0_freq, zone->bcl_qos->cpu_limit[QOS_CPU0]
+			[zone->throttle_lvl - QOS_PARAM_OFFSET]);
+	cpu1a_freq = umin(cpu1a_freq, zone->bcl_qos->cpu_limit[QOS_CPU1A]
+			[zone->throttle_lvl - QOS_PARAM_OFFSET]);
+	cpu1b_freq = umin(cpu1b_freq, zone->bcl_qos->cpu_limit[QOS_CPU1B]
+			[zone->throttle_lvl - QOS_PARAM_OFFSET]);
+	cpu2_freq = umin(cpu2_freq, zone->bcl_qos->cpu_limit[QOS_CPU2]
+			[zone->throttle_lvl - QOS_PARAM_OFFSET]);
+	tpu_freq = umin(tpu_freq, zone->bcl_qos->df_limit[QOS_TPU]
+			[zone->throttle_lvl - QOS_PARAM_OFFSET]);
+	gpu_freq = umin(gpu_freq, zone->bcl_qos->df_limit[QOS_GPU]
+			[zone->throttle_lvl - QOS_PARAM_OFFSET]);
+	gxp_freq = umin(gxp_freq, zone->bcl_qos->df_limit[QOS_GXP]
+			[zone->throttle_lvl - QOS_PARAM_OFFSET]);
 
 end_qos_update:
 	zone->bcl_qos->cpu_freq[QOS_CPU0] = cpu0_freq;
-	zone->bcl_qos->cpu_freq[QOS_CPU1] = cpu1_freq;
+	zone->bcl_qos->cpu_freq[QOS_CPU1A] = cpu1a_freq;
+	zone->bcl_qos->cpu_freq[QOS_CPU1B] = cpu1b_freq;
 	zone->bcl_qos->cpu_freq[QOS_CPU2] = cpu2_freq;
 	zone->bcl_qos->df_freq[QOS_TPU] = tpu_freq;
 	zone->bcl_qos->df_freq[QOS_GPU] = gpu_freq;

@@ -5,8 +5,11 @@
 
 #include "bcl.h"
 
-void compute_mitigation_modules(struct bcl_device *bcl_dev,
-				struct bcl_mitigation_conf *mitigation_conf, u32 *odpm_lpf_value);
+void compute_odpm_lpf(struct bcl_device *bcl_dev,
+				struct timespec64 triggered_time,
+				struct bcl_mitigation_conf *mitigation_conf,
+				struct odpm_lpf *odpm_lpf,
+				struct max_odpm_lpf *max_odpm_lpf);
 irqreturn_t sub_pwr_warn_irq_handler(int irq, void *data);
 irqreturn_t main_pwr_warn_irq_handler(int irq, void *data);
 void main_pwrwarn_irq_work(struct work_struct *work);
@@ -52,5 +55,10 @@ int read_odpm_int_bckup(struct bcl_device *bcl_dev, int *odpm_int_bckup, u16 *ty
 uint32_t core_pmic_read_main_pwrwarn(struct bcl_device *bcl_dev, int pwrwarn_idx);
 uint32_t core_pmic_read_sub_pwrwarn(struct bcl_device *bcl_dev, int pwrwarn_idx);
 uint32_t core_pmic_get_cpm_cached_sys_evt(struct bcl_device *bcl_dev);
+
+#if IS_ENABLED(CONFIG_KUNIT)
+u32 convert_pre_uvlo_lvl(int value);
+int convert_pre_ocp_lvl(int value, int idx, u32 *output);
+#endif
 
 #endif /* __CORE_PMIC_DEFS_H */

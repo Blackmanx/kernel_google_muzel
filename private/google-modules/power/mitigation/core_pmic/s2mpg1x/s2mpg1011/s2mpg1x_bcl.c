@@ -11,8 +11,11 @@ int google_bcl_configure_modem(struct bcl_device *bcl_dev)
 	return 0;
 }
 
-void compute_mitigation_modules(struct bcl_device *bcl_dev,
-				struct bcl_mitigation_conf *mitigation_conf, u32 *odpm_lpf_value)
+void compute_odpm_lpf(struct bcl_device *bcl_dev,
+				struct timespec64 triggered_time,
+				struct bcl_mitigation_conf *mitigation_conf,
+				struct odpm_lpf *odpm_lpf,
+				struct max_odpm_lpf *max_odpm_lpf)
 {
 }
 

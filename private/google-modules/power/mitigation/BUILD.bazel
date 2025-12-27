@@ -1,6 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 
-load("@bazel_skylib//rules:common_settings.bzl", "string_flag")
 load("//build/kernel/kleaf:kernel.bzl", "checkpatch", "ddk_headers", "ddk_module", "kernel_module_group")
 
 checkpatch(
@@ -39,36 +38,11 @@ filegroup(
     ],
 )
 
-config_setting(
-    name = "soc_rdo",
-    flag_values = {
-        ":soc": "rdo",
-    },
-)
-
-config_setting(
-    name = "soc_lga",
-    flag_values = {
-        ":soc": "lga",
-    },
-)
-
-config_setting(
-    name = "soc_gs",
-    flag_values = {
-        ":soc": "gs",
-    },
-)
-
-string_flag(
-    name = "soc",
-    build_setting_default = "undefined",
-)
-
 ddk_module(
     name = "google_bcl",
     srcs = [
         "google_bcl_core.c",
+        "google_bcl_core_helper.c",
         "google_bcl_data_logging.c",
         "google_bcl_debugfs.c",
         "google_bcl_irq_mon.c",
@@ -78,6 +52,7 @@ ddk_module(
         "ifpmic/max77759/max77759_vdroop.c",
         "ifpmic/max77779/max77779_vdroop.c",
         "ifpmic/max777x9.c",
+        "soc/userspace/userspace_bcl_qos.c",
     ],
     out = "google_bcl.ko",
     conditional_srcs = {
@@ -161,14 +136,36 @@ ddk_module(
         "//private/google-modules/bms/misc:headers",
         "//private/google-modules/soc/gs:gs_soc_module",
         "//private/google-modules/soc/gs:headers",
-        "//private/google-modules/soc/rdo:rdo_soc_headers",
-        "//private/google-modules/soc/rdo:rdo_soc_module",
     ] + select({
-        ":soc_lga": ["//private/google-modules/perf:google_pm_qos"],
-        ":soc_rdo": ["//private/google-modules/perf:google_pm_qos"],
-        ":soc_gs": [],
+        "//private/devices/google/common:soc_is_laguna_or_later": [
+            "//private/google-modules/perf:google_pm_qos",
+            "//private/google-modules/soc/rdo:rdo_soc_headers",
+            "//private/google-modules/soc/rdo:rdo_soc_module",
+        ],
         "//conditions:default": [],
     }),
+)
+
+ddk_module(
+    name = "google_da918x_bcl_test",
+    srcs = [
+        "core_pmic/core_pmic_defs.h",
+        "core_pmic/da918x/da9188_limits.h",
+        "test/da918x_bcl_tests.c",
+    ],
+    out = "google_da918x_bcl_test.ko",
+    defconfig = "test/kunit_defconfig",
+    kconfig = "test/Kconfig",
+    kernel_build = "//private/devices/google/common:kernel",
+    visibility = [
+        "//private/devices/google:__subpackages__",
+    ],
+    deps = [
+        ":google_bcl",
+        ":headers",
+        "//common:all_headers_aarch64",
+        "//private/google-modules/soc/rdo:rdo_soc_headers",
+    ],
 )
 
 kernel_module_group(

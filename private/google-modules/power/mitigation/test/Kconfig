@@ -1,0 +1,8 @@
+# SPDX-License-Identifier: GPL-2.0-only
+#
+config GOOGLE_DA918X_BCL_KUNIT_TEST
+	tristate "Google LLC DA918x BCL tests" if !KUNIT_ALL_TESTS
+	depends on KUNIT
+	default KUNIT_ALL_TESTS
+	help
+		This enables the test suite that will test DA918x BCL functionality.

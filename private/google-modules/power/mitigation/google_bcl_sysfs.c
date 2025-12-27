@@ -17,18 +17,18 @@
 #include <linux/power_supply.h>
 #include <linux/platform_device.h>
 #include <linux/regmap.h>
+#include <max77779.h>
 #include "bcl.h"
 #include "core_pmic/core_pmic_defs.h"
 #include "ifpmic/ifpmic_defs.h"
 #include "ifpmic/max77759/max77759_irq.h"
 #include "ifpmic/max77779/max77779_irq.h"
 #include "soc/soc_defs.h"
+#include "soc/userspace/userspace_bcl_qos.h"
 #include "uapi/brownout_stats.h"
 #if IS_ENABLED(CONFIG_GOOGLE_MFD_DA9188)
 #include <mailbox/protocols/mba/cpm/common/bcl/bcl_service.h>
 #endif
-
-#define ENABLE_THERMAL 0
 
 static const char * const batt_irq_names[] = {
 	"uvlo1", "uvlo2", "batoilo", "batoilo2"
@@ -1013,8 +1013,6 @@ static ssize_t uvlo1_lvl_show(struct device *dev, struct device_attribute *attr,
 	if (!bcl_dev->intf_pmic_dev)
 		return -EBUSY;
 	uvlo_reg_read(bcl_dev->intf_pmic_dev, bcl_dev->ifpmic, UVLO1, &uvlo1_lvl);
-	bcl_dev->zone[UVLO1]->bcl_lvl = VD_BATTERY_VOLTAGE - VD_STEP * uvlo1_lvl +
-			VD_LOWER_LIMIT - THERMAL_HYST_LEVEL;
 	return sysfs_emit(buf, "%dmV\n", VD_STEP * uvlo1_lvl + VD_LOWER_LIMIT);
 }
 
@@ -1048,7 +1046,6 @@ static ssize_t uvlo1_lvl_store(struct device *dev,
 	enable_irq(bcl_dev->zone[UVLO1]->bcl_irq);
 	if (ret)
 		return ret;
-	bcl_dev->zone[UVLO1]->bcl_lvl = VD_BATTERY_VOLTAGE - value - THERMAL_HYST_LEVEL;
 	return size;
 
 }
@@ -1068,8 +1065,6 @@ static ssize_t uvlo2_lvl_show(struct device *dev, struct device_attribute *attr,
 	if (!bcl_dev->intf_pmic_dev)
 		return -EBUSY;
 	uvlo_reg_read(bcl_dev->intf_pmic_dev, bcl_dev->ifpmic, UVLO2, &uvlo2_lvl);
-	bcl_dev->zone[UVLO1]->bcl_lvl = VD_BATTERY_VOLTAGE - VD_STEP * uvlo2_lvl +
-			VD_LOWER_LIMIT - THERMAL_HYST_LEVEL;
 	return sysfs_emit(buf, "%dmV\n", VD_STEP * uvlo2_lvl + VD_LOWER_LIMIT);
 }
 
@@ -1105,7 +1100,6 @@ static ssize_t uvlo2_lvl_store(struct device *dev,
 	enable_irq(bcl_dev->zone[UVLO2]->bcl_irq);
 	if (ret)
 		return ret;
-	bcl_dev->zone[UVLO2]->bcl_lvl = VD_BATTERY_VOLTAGE - value - THERMAL_HYST_LEVEL;
 	return size;
 }
 
@@ -1125,7 +1119,6 @@ static ssize_t batoilo_lvl_show(struct device *dev, struct device_attribute *att
 		return -EBUSY;
 	batoilo_reg_read(bcl_dev->intf_pmic_dev, bcl_dev->ifpmic, BATOILO1, &lvl);
 	batoilo1_lvl = BO_STEP * lvl + bcl_dev->batt_irq_conf1.batoilo_lower_limit;
-	bcl_dev->zone[BATOILO1]->bcl_lvl = batoilo1_lvl;
 	return sysfs_emit(buf, "%umA\n", batoilo1_lvl);
 }
 
@@ -1156,7 +1149,6 @@ static ssize_t batoilo_lvl_store(struct device *dev,
 	ret = batoilo_reg_write(bcl_dev->intf_pmic_dev, lvl, bcl_dev->ifpmic, BATOILO1);
 	if (ret)
 		return ret;
-	bcl_dev->zone[BATOILO1]->bcl_lvl = value - THERMAL_HYST_LEVEL;
 	return size;
 }
 
@@ -1176,7 +1168,6 @@ static ssize_t batoilo2_lvl_show(struct device *dev, struct device_attribute *at
 		return -EBUSY;
 	batoilo_reg_read(bcl_dev->intf_pmic_dev, bcl_dev->ifpmic, BATOILO2, &lvl);
 	batoilo2_lvl = BO_STEP * lvl + bcl_dev->batt_irq_conf2.batoilo_lower_limit;
-	bcl_dev->zone[BATOILO2]->bcl_lvl = batoilo2_lvl;
 	return sysfs_emit(buf, "%umA\n", batoilo2_lvl);
 }
 
@@ -1207,7 +1198,6 @@ static ssize_t batoilo2_lvl_store(struct device *dev,
 	ret = batoilo_reg_write(bcl_dev->intf_pmic_dev, lvl, bcl_dev->ifpmic, BATOILO2);
 	if (ret)
 		return ret;
-	bcl_dev->zone[BATOILO2]->bcl_lvl = value - THERMAL_HYST_LEVEL;
 	return size;
 }
 
@@ -1541,6 +1531,536 @@ static const struct attribute_group triggered_lvl_group = {
 	.attrs = triggered_lvl_attrs,
 	.name = "triggered_lvl",
 };
+
+#if IS_ENABLED(CONFIG_GOOGLE_MFD_DA9188) || IS_ENABLED(CONFIG_SOC_ZUMAPRO)
+enum DEBOUNCE_TYPE {
+	deglitch,
+	release
+};
+
+static int read_debounce(struct device *dev, int idx, enum DEBOUNCE_TYPE type,
+						 bool is_int)
+{
+	struct platform_device *pdev = container_of(dev, struct platform_device, dev);
+	struct bcl_device *bcl_dev = platform_get_drvdata(pdev);
+	u8 val, regval, reg_addr;
+
+	if (!bcl_dev->intf_pmic_dev)
+		return -EBUSY;
+
+	switch (idx) {
+	case UVLO1:
+		if (max77779_external_chg_reg_read(bcl_dev->intf_pmic_dev,
+							 MAX77779_SYS_UVLO1_CNFG_1, &regval) < 0)
+			return -EIO;
+		if (type == deglitch) {
+			val = _max77779_sys_uvlo1_cnfg_1_sys_uvlo1_det_get(regval);
+			bcl_dev->batt_irq_conf1.uvlo_det = val;
+		} else {
+			val = _max77779_sys_uvlo1_cnfg_1_sys_uvlo1_rel_get(regval);
+			bcl_dev->batt_irq_conf1.uvlo_rel = val;
+		}
+		break;
+	case UVLO2:
+		if (max77779_external_chg_reg_read(bcl_dev->intf_pmic_dev,
+							 MAX77779_SYS_UVLO2_CNFG_1, &regval) < 0)
+			return -EIO;
+		if (type == deglitch) {
+			val = _max77779_sys_uvlo2_cnfg_1_sys_uvlo2_det_get(regval);
+			bcl_dev->batt_irq_conf2.uvlo_det = val;
+		} else {
+			val = _max77779_sys_uvlo2_cnfg_1_sys_uvlo2_rel_get(regval);
+			bcl_dev->batt_irq_conf2.uvlo_rel = val;
+		}
+		break;
+	case BATOILO1:
+		reg_addr = is_int ? MAX77779_BAT_OILO1_CNFG_2 : MAX77779_BAT_OILO1_CNFG_1;
+		if (max77779_external_chg_reg_read(bcl_dev->intf_pmic_dev,
+							 reg_addr, &regval) < 0)
+			return -EIO;
+
+		if (is_int) {
+			if (type == deglitch) {
+				val = _max77779_bat_oilo1_cnfg_2_bat_oilo1_int_det_get(regval);
+				bcl_dev->batt_irq_conf1.batoilo_int_det = val;
+			} else {
+				val = _max77779_bat_oilo1_cnfg_2_bat_oilo1_int_rel_get(regval);
+				bcl_dev->batt_irq_conf1.batoilo_int_rel = val;
+			}
+		} else {
+			if (type == deglitch) {
+				val = _max77779_bat_oilo1_cnfg_1_bat_oilo1_det_get(regval);
+				bcl_dev->batt_irq_conf1.batoilo_det = val;
+			} else {
+				val = _max77779_bat_oilo1_cnfg_1_bat_oilo1_rel_get(regval);
+				bcl_dev->batt_irq_conf1.batoilo_rel = val;
+			}
+		}
+		break;
+	case BATOILO2:
+		reg_addr = is_int ? MAX77779_BAT_OILO2_CNFG_2 : MAX77779_BAT_OILO2_CNFG_1;
+		if (max77779_external_chg_reg_read(bcl_dev->intf_pmic_dev,
+							 reg_addr, &regval) < 0)
+			return -EIO;
+
+		if (is_int) {
+			if (type == deglitch) {
+				val = _max77779_bat_oilo2_cnfg_2_bat_oilo2_int_det_get(regval);
+				bcl_dev->batt_irq_conf2.batoilo_int_det = val;
+			} else {
+				val = _max77779_bat_oilo2_cnfg_2_bat_oilo2_int_rel_get(regval);
+				bcl_dev->batt_irq_conf2.batoilo_int_rel = val;
+			}
+		} else {
+			if (type == deglitch) {
+				val = _max77779_bat_oilo2_cnfg_1_bat_oilo2_det_get(regval);
+				bcl_dev->batt_irq_conf2.batoilo_det = val;
+			} else {
+				val = _max77779_bat_oilo2_cnfg_1_bat_oilo2_rel_get(regval);
+				bcl_dev->batt_irq_conf2.batoilo_rel = val;
+			}
+		}
+		break;
+	default:
+		return -EINVAL;
+	}
+
+	return val;
+}
+
+static int write_debounce(struct device *dev, const char *buf, int idx,
+						  enum DEBOUNCE_TYPE type, bool is_int)
+{
+	struct platform_device *pdev = container_of(dev, struct platform_device, dev);
+	struct bcl_device *bcl_dev = platform_get_drvdata(pdev);
+	u8 val, regval, *irq_conf_val, reg_addr;
+	int ret;
+
+	ret = kstrtou8(buf, 16, &val);
+	if (ret)
+		return ret;
+	if (!bcl_dev->intf_pmic_dev)
+		return -EBUSY;
+
+	switch (idx) {
+	case UVLO1:
+		if ((type == deglitch && val > UVLO_DET_MAX) ||
+		    (type == release && val > UVLO_REL_MAX))
+			return -EINVAL;
+		if (max77779_external_chg_reg_read(bcl_dev->intf_pmic_dev,
+							 MAX77779_SYS_UVLO1_CNFG_1, &regval) < 0)
+			return -EIO;
+
+		disable_irq(bcl_dev->zone[UVLO1]->bcl_irq);
+		if (type == deglitch) {
+			regval = _max77779_sys_uvlo1_cnfg_1_sys_uvlo1_det_set(regval, val);
+			irq_conf_val = &bcl_dev->batt_irq_conf1.uvlo_det;
+		} else {
+			regval = _max77779_sys_uvlo1_cnfg_1_sys_uvlo1_rel_set(regval, val);
+			irq_conf_val = &bcl_dev->batt_irq_conf1.uvlo_rel;
+		}
+		if (max77779_external_chg_reg_write(bcl_dev->intf_pmic_dev,
+							MAX77779_SYS_UVLO1_CNFG_1, regval) == 0)
+			*irq_conf_val = val;
+		enable_irq(bcl_dev->zone[UVLO1]->bcl_irq);
+		break;
+	case UVLO2:
+		if ((type == deglitch && val > UVLO_DET_MAX) ||
+		    (type == release && val > UVLO_REL_MAX))
+			return -EINVAL;
+		if (max77779_external_chg_reg_read(bcl_dev->intf_pmic_dev,
+							 MAX77779_SYS_UVLO2_CNFG_1, &regval) < 0)
+			return -EIO;
+
+		disable_irq(bcl_dev->zone[UVLO2]->bcl_irq);
+		if (type == deglitch) {
+			regval = _max77779_sys_uvlo2_cnfg_1_sys_uvlo2_det_set(regval, val);
+			irq_conf_val = &bcl_dev->batt_irq_conf2.uvlo_det;
+		} else {
+			regval = _max77779_sys_uvlo2_cnfg_1_sys_uvlo2_rel_set(regval, val);
+			irq_conf_val = &bcl_dev->batt_irq_conf2.uvlo_rel;
+		}
+		if (max77779_external_chg_reg_write(bcl_dev->intf_pmic_dev,
+							MAX77779_SYS_UVLO2_CNFG_1, regval) == 0)
+			*irq_conf_val = val;
+		enable_irq(bcl_dev->zone[UVLO2]->bcl_irq);
+		break;
+	case BATOILO1:
+		if ((type == deglitch && val > OILO_DET_MAX) ||
+		    (type == release && val > OILO_REL_MAX))
+			return -EINVAL;
+		reg_addr = is_int ? MAX77779_BAT_OILO1_CNFG_2 : MAX77779_BAT_OILO1_CNFG_1;
+		if (max77779_external_chg_reg_read(bcl_dev->intf_pmic_dev,
+							 reg_addr, &regval) < 0)
+			return -EIO;
+
+		disable_irq(bcl_dev->zone[BATOILO1]->bcl_irq);
+		if (is_int) {
+			if (type == deglitch) {
+				regval = _max77779_bat_oilo1_cnfg_2_bat_oilo1_int_det_set(regval,
+											  val);
+				irq_conf_val = &bcl_dev->batt_irq_conf1.batoilo_int_det;
+			} else {
+				regval = _max77779_bat_oilo1_cnfg_2_bat_oilo1_int_rel_set(regval,
+											  val);
+				irq_conf_val = &bcl_dev->batt_irq_conf1.batoilo_int_rel;
+			}
+		} else {
+			if (type == deglitch) {
+				regval = _max77779_bat_oilo1_cnfg_1_bat_oilo1_det_set(regval, val);
+				irq_conf_val = &bcl_dev->batt_irq_conf1.batoilo_det;
+			} else {
+				regval = _max77779_bat_oilo1_cnfg_1_bat_oilo1_rel_set(regval, val);
+				irq_conf_val = &bcl_dev->batt_irq_conf1.batoilo_rel;
+			}
+		}
+		if (max77779_external_chg_reg_write(bcl_dev->intf_pmic_dev,
+							reg_addr, regval) == 0)
+			*irq_conf_val = val;
+		enable_irq(bcl_dev->zone[BATOILO1]->bcl_irq);
+		break;
+	case BATOILO2:
+		if ((type == deglitch && val > OILO_DET_MAX) ||
+		    (type == release && val > OILO_REL_MAX))
+			return -EINVAL;
+		reg_addr = is_int ? MAX77779_BAT_OILO2_CNFG_2 : MAX77779_BAT_OILO2_CNFG_1;
+		if (max77779_external_chg_reg_read(bcl_dev->intf_pmic_dev,
+							 reg_addr, &regval) < 0)
+			return -EIO;
+
+		disable_irq(bcl_dev->zone[BATOILO2]->bcl_irq);
+		if (is_int) {
+			if (type == deglitch) {
+				regval = _max77779_bat_oilo2_cnfg_2_bat_oilo2_int_det_set(regval,
+											  val);
+				irq_conf_val = &bcl_dev->batt_irq_conf2.batoilo_int_det;
+			} else {
+				regval = _max77779_bat_oilo2_cnfg_2_bat_oilo2_int_rel_set(regval,
+											  val);
+				irq_conf_val = &bcl_dev->batt_irq_conf2.batoilo_int_rel;
+			}
+		} else {
+			if (type == deglitch) {
+				regval = _max77779_bat_oilo2_cnfg_1_bat_oilo2_det_set(regval, val);
+				irq_conf_val = &bcl_dev->batt_irq_conf2.batoilo_det;
+			} else {
+				regval = _max77779_bat_oilo2_cnfg_1_bat_oilo2_rel_set(regval, val);
+				irq_conf_val = &bcl_dev->batt_irq_conf2.batoilo_rel;
+			}
+		}
+		if (max77779_external_chg_reg_write(bcl_dev->intf_pmic_dev,
+							reg_addr, regval) == 0)
+			*irq_conf_val = val;
+		enable_irq(bcl_dev->zone[BATOILO2]->bcl_irq);
+		break;
+	default:
+		return -EINVAL;
+	}
+
+	if (ret < 0)
+		return -EIO;
+
+	return 0;
+}
+
+static ssize_t uvlo1_det_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	int ret = read_debounce(dev, UVLO1, deglitch, false);
+
+	if (ret < 0)
+		return ret;
+
+	return sysfs_emit(buf, "%#x\n", ret);
+}
+
+static ssize_t uvlo1_det_store(struct device *dev,
+				  struct device_attribute *attr, const char *buf, size_t size)
+{
+	int ret = write_debounce(dev, buf, UVLO1, deglitch, false);
+
+	if (ret < 0)
+		return ret;
+
+	return size;
+}
+
+static DEVICE_ATTR_RW(uvlo1_det);
+
+static ssize_t uvlo2_det_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	int ret = read_debounce(dev, UVLO2, deglitch, false);
+
+	if (ret < 0)
+		return ret;
+
+	return sysfs_emit(buf, "%#x\n", ret);
+
+}
+
+static ssize_t uvlo2_det_store(struct device *dev,
+				  struct device_attribute *attr, const char *buf, size_t size)
+{
+	int ret = write_debounce(dev, buf, UVLO2, deglitch, false);
+
+	if (ret < 0)
+		return ret;
+
+	return size;
+}
+
+static DEVICE_ATTR_RW(uvlo2_det);
+
+static ssize_t batoilo1_det_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	int ret = read_debounce(dev, BATOILO1, deglitch, false);
+
+	if (ret < 0)
+		return ret;
+
+	return sysfs_emit(buf, "%#x\n", ret);
+}
+
+static ssize_t batoilo1_det_store(struct device *dev,
+				  struct device_attribute *attr, const char *buf, size_t size)
+{
+	int ret = write_debounce(dev, buf, BATOILO1, deglitch, false);
+
+	if (ret < 0)
+		return ret;
+
+	return size;
+}
+
+static DEVICE_ATTR_RW(batoilo1_det);
+
+static ssize_t batoilo2_det_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	int ret = read_debounce(dev, BATOILO2, deglitch, false);
+
+	if (ret < 0)
+		return ret;
+
+	return sysfs_emit(buf, "%#x\n", ret);
+}
+
+static ssize_t batoilo2_det_store(struct device *dev,
+				  struct device_attribute *attr, const char *buf, size_t size)
+{
+	int ret = write_debounce(dev, buf, BATOILO2, deglitch, false);
+
+	if (ret < 0)
+		return ret;
+
+	return size;
+}
+
+static DEVICE_ATTR_RW(batoilo2_det);
+
+static ssize_t batoilo1_int_det_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	int ret = read_debounce(dev, BATOILO1, deglitch, true);
+
+	if (ret < 0)
+		return ret;
+
+	return sysfs_emit(buf, "%#x\n", ret);
+}
+
+static ssize_t batoilo1_int_det_store(struct device *dev,
+				  struct device_attribute *attr, const char *buf, size_t size)
+{
+	int ret = write_debounce(dev, buf, BATOILO1, deglitch, true);
+
+	if (ret < 0)
+		return ret;
+
+	return size;
+}
+
+static DEVICE_ATTR_RW(batoilo1_int_det);
+
+static ssize_t batoilo2_int_det_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	int ret = read_debounce(dev, BATOILO2, deglitch, true);
+
+	if (ret < 0)
+		return ret;
+
+	return sysfs_emit(buf, "%#x\n", ret);
+}
+
+static ssize_t batoilo2_int_det_store(struct device *dev,
+				  struct device_attribute *attr, const char *buf, size_t size)
+{
+	int ret = write_debounce(dev, buf, BATOILO2, deglitch, true);
+
+	if (ret < 0)
+		return ret;
+
+	return size;
+}
+
+static DEVICE_ATTR_RW(batoilo2_int_det);
+
+static ssize_t uvlo1_rel_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	int ret = read_debounce(dev, UVLO1, release, false);
+
+	if (ret < 0)
+		return ret;
+
+	return sysfs_emit(buf, "%#x\n", ret);
+}
+
+static ssize_t uvlo1_rel_store(struct device *dev,
+				  struct device_attribute *attr, const char *buf, size_t size)
+{
+	int ret = write_debounce(dev, buf, UVLO1, release, false);
+
+	if (ret < 0)
+		return ret;
+
+	return size;
+}
+
+static DEVICE_ATTR_RW(uvlo1_rel);
+
+static ssize_t uvlo2_rel_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	int ret = read_debounce(dev, UVLO2, release, false);
+
+	if (ret < 0)
+		return ret;
+
+	return sysfs_emit(buf, "%#x\n", ret);
+}
+
+static ssize_t uvlo2_rel_store(struct device *dev,
+				  struct device_attribute *attr, const char *buf, size_t size)
+{
+	int ret = write_debounce(dev, buf, UVLO2, release, false);
+
+	if (ret < 0)
+		return ret;
+
+	return size;
+}
+
+static DEVICE_ATTR_RW(uvlo2_rel);
+
+static ssize_t batoilo1_rel_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	int ret = read_debounce(dev, BATOILO1, release, false);
+
+	if (ret < 0)
+		return ret;
+
+	return sysfs_emit(buf, "%#x\n", ret);
+}
+
+static ssize_t batoilo1_rel_store(struct device *dev,
+				  struct device_attribute *attr, const char *buf, size_t size)
+{
+	int ret = write_debounce(dev, buf, BATOILO1, release, false);
+
+	if (ret < 0)
+		return ret;
+
+	return size;
+}
+
+static DEVICE_ATTR_RW(batoilo1_rel);
+
+static ssize_t batoilo2_rel_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	int ret = read_debounce(dev, BATOILO2, release, false);
+
+	if (ret < 0)
+		return ret;
+
+	return sysfs_emit(buf, "%#x\n", ret);
+}
+
+static ssize_t batoilo2_rel_store(struct device *dev,
+				  struct device_attribute *attr, const char *buf, size_t size)
+{
+	int ret = write_debounce(dev, buf, BATOILO2, release, false);
+
+	if (ret < 0)
+		return ret;
+
+	return size;
+}
+
+static DEVICE_ATTR_RW(batoilo2_rel);
+
+static ssize_t batoilo1_int_rel_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	int ret = read_debounce(dev, BATOILO1, release, true);
+
+	if (ret < 0)
+		return ret;
+
+	return sysfs_emit(buf, "%#x\n", ret);
+}
+
+static ssize_t batoilo1_int_rel_store(struct device *dev,
+				  struct device_attribute *attr, const char *buf, size_t size)
+{
+	int ret = write_debounce(dev, buf, BATOILO1, release, true);
+
+	if (ret < 0)
+		return ret;
+
+	return size;
+}
+
+static DEVICE_ATTR_RW(batoilo1_int_rel);
+
+static ssize_t batoilo2_int_rel_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	int ret = read_debounce(dev, BATOILO2, release, true);
+
+	if (ret < 0)
+		return ret;
+
+	return sysfs_emit(buf, "%#x\n", ret);
+}
+
+static ssize_t batoilo2_int_rel_store(struct device *dev,
+				  struct device_attribute *attr, const char *buf, size_t size)
+{
+	int ret = write_debounce(dev, buf, BATOILO2, release, true);
+
+	if (ret < 0)
+		return ret;
+
+	return size;
+}
+
+static DEVICE_ATTR_RW(batoilo2_int_rel);
+
+static struct attribute *debounce_time_attrs[] = {
+	&dev_attr_uvlo1_det.attr,
+	&dev_attr_uvlo2_det.attr,
+	&dev_attr_batoilo1_det.attr,
+	&dev_attr_batoilo2_det.attr,
+	&dev_attr_batoilo1_int_det.attr,
+	&dev_attr_batoilo2_int_det.attr,
+	&dev_attr_uvlo1_rel.attr,
+	&dev_attr_uvlo2_rel.attr,
+	&dev_attr_batoilo1_rel.attr,
+	&dev_attr_batoilo2_rel.attr,
+	&dev_attr_batoilo1_int_rel.attr,
+	&dev_attr_batoilo2_int_rel.attr,
+	NULL,
+};
+
+static const struct attribute_group debounce_time_group = {
+	.attrs = debounce_time_attrs,
+	.name = "debounce_time",
+};
+#endif
 
 static ssize_t clk_div_show(struct bcl_device *bcl_dev, int idx, char *buf)
 {
@@ -2780,6 +3300,16 @@ static ssize_t qos_show(struct bcl_device *bcl_dev, int idx, char *buf)
 	if ((!zone) || (!zone->bcl_qos))
 		return -EIO;
 
+#if IS_ENABLED(CONFIG_SOC_RDO) || IS_ENABLED(CONFIG_SOC_LGA)
+	return sysfs_emit(buf, "CPU0,CPU1A,CPU1B,CPU2,GPU,TPU,GXP\n%d,%d,%d,%d,%d,%d,%d\n",
+			  zone->bcl_qos->cpu_limit[QOS_CPU0][QOS_LIGHT_IND],
+			  zone->bcl_qos->cpu_limit[QOS_CPU1A][QOS_LIGHT_IND],
+			  zone->bcl_qos->cpu_limit[QOS_CPU1B][QOS_LIGHT_IND],
+			  zone->bcl_qos->cpu_limit[QOS_CPU2][QOS_LIGHT_IND],
+			  zone->bcl_qos->df_limit[QOS_GPU][QOS_LIGHT_IND],
+			  zone->bcl_qos->df_limit[QOS_TPU][QOS_LIGHT_IND],
+			  zone->bcl_qos->df_limit[QOS_GXP][QOS_LIGHT_IND]);
+#else
 	return sysfs_emit(buf, "CPU0,CPU1,CPU2,GPU,TPU,GXP\n%d,%d,%d,%d,%d,%d\n",
 			  zone->bcl_qos->cpu_limit[QOS_CPU0][QOS_LIGHT_IND],
 			  zone->bcl_qos->cpu_limit[QOS_CPU1][QOS_LIGHT_IND],
@@ -2787,26 +3317,44 @@ static ssize_t qos_show(struct bcl_device *bcl_dev, int idx, char *buf)
 			  zone->bcl_qos->df_limit[QOS_GPU][QOS_LIGHT_IND],
 			  zone->bcl_qos->df_limit[QOS_TPU][QOS_LIGHT_IND],
 			  zone->bcl_qos->df_limit[QOS_GXP][QOS_LIGHT_IND]);
+#endif
 }
 
 static ssize_t qos_store(struct bcl_device *bcl_dev, int idx, const char *buf, size_t size)
 {
-	unsigned int cpu0, cpu1, cpu2, gpu, tpu, gxp;
+	unsigned int soc[7];
+	int ret, intended_items;
 	struct bcl_zone *zone;
 
-	if (sscanf(buf, "%d,%d,%d,%d,%d,%d", &cpu0, &cpu1, &cpu2, &gpu, &tpu, &gxp) != 6)
+	if (IS_ENABLED(CONFIG_SOC_RDO) || IS_ENABLED(CONFIG_SOC_LGA)) {
+		ret = sscanf(buf, "%d,%d,%d,%d,%d,%d,%d",
+			 &soc[0], &soc[1], &soc[2], &soc[3], &soc[4], &soc[5], &soc[6]);
+		intended_items = 7;
+	} else {
+		ret = sscanf(buf, "%d,%d,%d,%d,%d,%d",
+			 &soc[0], &soc[1], &soc[2], &soc[3], &soc[4], &soc[5]);
+		intended_items = 6;
+	}
+
+	if (ret != intended_items)
 		return -EINVAL;
+
 	if (!bcl_dev)
 		return -EIO;
 	zone = bcl_dev->zone[idx];
 	if ((!zone) || (!zone->bcl_qos))
 		return -EIO;
-	zone->bcl_qos->cpu_limit[QOS_CPU0][QOS_LIGHT_IND] = cpu0;
-	zone->bcl_qos->cpu_limit[QOS_CPU1][QOS_LIGHT_IND] = cpu1;
-	zone->bcl_qos->cpu_limit[QOS_CPU2][QOS_LIGHT_IND] = cpu2;
-	zone->bcl_qos->df_limit[QOS_GPU][QOS_LIGHT_IND] = gpu;
-	zone->bcl_qos->df_limit[QOS_TPU][QOS_LIGHT_IND] = tpu;
-	zone->bcl_qos->df_limit[QOS_GXP][QOS_LIGHT_IND] = gxp;
+	zone->bcl_qos->cpu_limit[QOS_CPU0][QOS_LIGHT_IND] = soc[0];
+#if IS_ENABLED(CONFIG_SOC_RDO) || IS_ENABLED(CONFIG_SOC_LGA)
+	zone->bcl_qos->cpu_limit[QOS_CPU1A][QOS_LIGHT_IND] = soc[1];
+	zone->bcl_qos->cpu_limit[QOS_CPU1B][QOS_LIGHT_IND] = soc[2];
+#else
+	zone->bcl_qos->cpu_limit[QOS_CPU1][QOS_LIGHT_IND] = soc[1];
+#endif
+	zone->bcl_qos->cpu_limit[QOS_CPU2][QOS_LIGHT_IND] = soc[intended_items - 4];
+	zone->bcl_qos->df_limit[QOS_GPU][QOS_LIGHT_IND] = soc[intended_items - 3];
+	zone->bcl_qos->df_limit[QOS_TPU][QOS_LIGHT_IND] = soc[intended_items - 2];
+	zone->bcl_qos->df_limit[QOS_GXP][QOS_LIGHT_IND] = soc[intended_items - 1];
 
 	return size;
 }
@@ -3847,6 +4395,40 @@ static ssize_t enable_br_stats_store(struct device *dev, struct device_attribute
 
 static DEVICE_ATTR_RW(enable_br_stats);
 
+static ssize_t throttle_state_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct platform_device *pdev = container_of(dev, struct platform_device, dev);
+	struct bcl_device *bcl_dev = platform_get_drvdata(pdev);
+
+	return sysfs_emit(buf, "%d\n", bcl_dev->throttle_state);
+}
+
+static ssize_t throttle_state_store(struct device *dev, struct device_attribute *attr,
+				     const char *buf, size_t size)
+{
+	struct platform_device *pdev = container_of(dev, struct platform_device, dev);
+	struct bcl_device *bcl_dev = platform_get_drvdata(pdev);
+	unsigned int value;
+	int ret;
+
+	ret = kstrtou32(buf, 10, &value);
+	if (ret)
+		return ret;
+
+	ret = userspace_bcl_qos_update(bcl_dev, value);
+	if (ret)
+		return ret;
+
+	return size;
+}
+
+static DEVICE_ATTR_RW(throttle_state);
+
+static struct attribute *userspace_attrs[] = {
+	&dev_attr_throttle_state.attr,
+	NULL,
+};
+
 static ssize_t trigger_br_stats_store(struct device *dev, struct device_attribute *attr,
 				const char *buf, size_t size)
 {
@@ -3881,6 +4463,32 @@ static struct attribute *br_stats_attrs[] = {
 	NULL,
 };
 
+static ssize_t max_odpm_stats_dump_read(struct file *filp,
+				  struct kobject *kobj, struct bin_attribute *attr,
+				  char *buf, loff_t off, size_t count)
+{
+	struct device *dev = container_of(kobj, struct device, kobj);
+	struct platform_device *pdev = container_of(dev, struct platform_device, dev);
+	struct bcl_device *bcl_dev = platform_get_drvdata(pdev);
+
+	ssize_t size = sizeof(struct max_odpm_stats);
+
+	if (off > size)
+		return 0;
+	if (count > size - off)
+		count = size - off;
+
+	memcpy(buf, (const void *)bcl_dev->max_odpm_stats + off, count);
+
+	return count;
+}
+
+static struct bin_attribute max_odpm_stats_dump_attr = {
+	.attr = { .name = "max_odpm_stats", .mode = 0444 },
+	.read = max_odpm_stats_dump_read,
+	.size = sizeof(struct max_odpm_stats),
+};
+
 static ssize_t br_stats_dump_read(struct file *filp,
 				  struct kobject *kobj, struct bin_attribute *attr,
 				  char *buf, loff_t off, size_t count)
@@ -3907,6 +4515,7 @@ static struct bin_attribute br_stats_dump_attr = {
 
 static struct bin_attribute *br_stats_bin_attrs[] = {
 	&br_stats_dump_attr,
+	&max_odpm_stats_dump_attr,
 	NULL,
 };
 
@@ -4405,6 +5014,11 @@ const struct attribute_group sys_evt_group = {
 	.name = "sys_evt",
 };
 
+static const struct attribute_group userspace_group = {
+	.attrs = userspace_attrs,
+	.name = "userspace",
+};
+
 const struct attribute_group mitigation_group = {
 	.attrs = mitigation_attrs,
 	.name = "mitigation",
@@ -4435,6 +5049,9 @@ const struct attribute_group *mitigation_mw_groups[] = {
 };
 
 const struct attribute_group *mitigation_sq_groups[] = {
+#if IS_ENABLED(CONFIG_GOOGLE_MFD_DA9188) || IS_ENABLED(CONFIG_SOC_ZUMAPRO)
+	&debounce_time_group,
+#endif
 	&instr_group,
 	&triggered_lvl_group,
 	&triggered_count_group,
@@ -4449,6 +5066,7 @@ const struct attribute_group *mitigation_sq_groups[] = {
 	&clock_ratio_group,
 	&clock_stats_group,
 	&sys_evt_group,
+	&userspace_group,
 #if IS_ENABLED(CONFIG_GOOGLE_MFD_DA9188)
 	&trigger_timer_group,
 	&mitigation_res_en_group,

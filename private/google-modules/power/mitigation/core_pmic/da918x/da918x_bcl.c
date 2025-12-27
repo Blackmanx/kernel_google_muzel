@@ -6,6 +6,7 @@
 
 #include "da9188_limits.h"
 #include "da9189_limits.h"
+#include <kunit/visibility.h>
 #include <linux/iio/iio.h>
 #include <linux/of_gpio.h>
 #include <linux/types.h>
@@ -31,21 +32,24 @@ static int retrieve_pre_uvlo_lvl(u16 reg)
 	return DA9188_PRE_UVLO_MIN + reg * DA9188_PRE_UVLO_STEP;
 }
 
-static u32 convert_pre_uvlo_lvl(int value)
+VISIBLE_IF_KUNIT u32 convert_pre_uvlo_lvl(int value)
 {
-	u32 pre_uvlo_lvl = 0x0;
+	u8 rise_th, fall_th;
 
 	if (value < DA9188_PRE_UVLO_MIN || value > DA9188_PRE_UVLO_MAX)
 		return 0;
-	pre_uvlo_lvl = (value - DA9188_PRE_UVLO_MIN) / DA9188_PRE_UVLO_STEP;
-	pre_uvlo_lvl |= (value + DA9188_PRE_UVLO_OFFSET - DA9188_PRE_UVLO_MIN)
-			/ DA9188_PRE_UVLO_STEP << 4;
-	return pre_uvlo_lvl | ((pre_uvlo_lvl - 2) << 4);
+	fall_th = (value - DA9188_PRE_UVLO_MIN) / DA9188_PRE_UVLO_STEP;
+	if (fall_th > 2)
+		rise_th = fall_th - 2;
+	else
+		rise_th = 0;
+	return (rise_th << 4) | fall_th;
 }
+EXPORT_SYMBOL_IF_KUNIT(convert_pre_uvlo_lvl);
 
-static int convert_pre_ocp_lvl(int value, int idx, u32 *output)
+VISIBLE_IF_KUNIT int convert_pre_ocp_lvl(int value, int idx, u32 *output)
 {
-	u32 pre_ocp_lvl = 0x0;
+	int pre_ocp_lvl = 0x0;
 
 	switch (idx) {
 	case PRE_OCP_CPU1:
@@ -56,14 +60,12 @@ static int convert_pre_ocp_lvl(int value, int idx, u32 *output)
 	case PRE_OCP_INFRA:
 		if ((value < PRE_OCP_MIN) || (value > DA9188_PRE_OCP_B2M_LIMIT))
 			return -EINVAL;
-		pre_ocp_lvl = (DA9188_PRE_OCP_B2M_LIMIT - value) / PRE_OCP_STEP;
-		*output = (pre_ocp_lvl | pre_ocp_lvl << 4);
+		pre_ocp_lvl = (DA9188_PRE_OCP_B2M_LIMIT - value - 1) / PRE_OCP_STEP;
 		break;
 	case PRE_OCP_TPU:
 		if ((value < PRE_OCP_TPU_MIN) || (value > DA9188_PRE_OCP_B7M_LIMIT))
 			return -EINVAL;
-		pre_ocp_lvl = (DA9188_PRE_OCP_B7M_LIMIT - value) / PRE_OCP_TPU_STEP;
-		*output = (pre_ocp_lvl | pre_ocp_lvl << 4);
+		pre_ocp_lvl = (DA9188_PRE_OCP_B7M_LIMIT - value - 9) / PRE_OCP_TPU_STEP;
 		break;
 	case SOFT_PRE_OCP_CPU1:
 	case SOFT_PRE_OCP_CPU2:
@@ -73,20 +75,23 @@ static int convert_pre_ocp_lvl(int value, int idx, u32 *output)
 	case SOFT_PRE_OCP_INFRA:
 		if ((value < SOFT_PRE_OCP_MIN) || (value > SOFT_PRE_OCP_MAX))
 			return -EINVAL;
-		pre_ocp_lvl = (SOFT_PRE_OCP_MAX - value) / PRE_OCP_STEP;
-		*output = (pre_ocp_lvl | pre_ocp_lvl << 4);
+		pre_ocp_lvl = (SOFT_PRE_OCP_MAX - value - 1) / PRE_OCP_STEP;
 		break;
 	case SOFT_PRE_OCP_TPU:
 		if ((value < SOFT_PRE_OCP_TPU_MIN) || (value > SOFT_PRE_OCP_TPU_MAX))
 			return -EINVAL;
-		pre_ocp_lvl = (SOFT_PRE_OCP_TPU_MAX - value) / PRE_OCP_TPU_STEP;
-		*output = (pre_ocp_lvl | pre_ocp_lvl << 4);
+		pre_ocp_lvl = (SOFT_PRE_OCP_TPU_MAX - value - 9) / PRE_OCP_TPU_STEP;
 		break;
 	default:
 		return -EINVAL;
 	};
+
+	if (pre_ocp_lvl < 0)
+		pre_ocp_lvl = 0;
+	*output = (pre_ocp_lvl | pre_ocp_lvl << 4);
 	return 0;
 }
+EXPORT_SYMBOL_IF_KUNIT(convert_pre_ocp_lvl);
 
 static int retrieve_pre_ocp_lvl(int idx, u16 reg)
 {
@@ -941,6 +946,7 @@ void core_pmic_main_meter_read_lpf_data(struct bcl_device *bcl_dev, struct brown
 	}
 
 	ktime_get_real_ts64((struct timespec64 *)&br_stat->main_odpm_lpf.time);
+	ktime_get_real_ts64((struct timespec64 *)&br_stat->sub_odpm_lpf.time);
 }
 
 int core_pmic_main_read_uvlo(struct bcl_device *bcl_dev, unsigned int *smpl_warn_lvl)
@@ -1058,16 +1064,51 @@ int core_pmic_sub_write_register(struct bcl_device *bcl_dev, u16 reg, u8 value, 
 	return _core_pmic_write_register(bcl_dev, reg, value, is_meter, CORE_SUB_PMIC);
 }
 
-void compute_mitigation_modules(struct bcl_device *bcl_dev,
-				struct bcl_mitigation_conf *mitigation_conf, u32 *odpm_lpf_value)
-{
-	int i;
 
-	for (i = 0; i < ODPM_CHANNEL_NUM; i++) {
-		if (odpm_lpf_value[i] >= mitigation_conf[i].threshold) {
-			atomic_or(BIT(mitigation_conf[i].module_id),
-					  &bcl_dev->mitigation_module_ids);
+void compute_odpm_lpf(struct bcl_device *bcl_dev,
+				struct timespec64 triggered_time,
+				struct bcl_mitigation_conf *mitigation_conf,
+				struct odpm_lpf *odpm_lpf,
+				struct max_odpm_lpf *max_odpm_lpf)
+{
+	int ch, meter_ch_idx;
+	u32 odpm_lpf_value, odpm_lpf_thres;
+
+	for (ch = 0; ch < ODPM_CHANNEL_NUM; ++ch) {
+		/* google_odpm integrated main and sub in one reading
+		 * on anacapa.
+		 */
+		if (ch >= METER_CHANNEL_MAX) {
+			meter_ch_idx = ch - METER_CHANNEL_MAX;
+			mitigation_conf = bcl_dev->main_mitigation_conf;
+			odpm_lpf = &bcl_dev->br_stats->main_odpm_lpf;
+			max_odpm_lpf = bcl_dev->max_odpm_stats->main_max_odpm_lpf;
+		} else {
+			meter_ch_idx = ch;
+			mitigation_conf = bcl_dev->sub_mitigation_conf;
+			odpm_lpf = &bcl_dev->br_stats->sub_odpm_lpf;
+			max_odpm_lpf = bcl_dev->max_odpm_stats->sub_max_odpm_lpf;
 		}
+		odpm_lpf_value = odpm_lpf->value[meter_ch_idx];
+		odpm_lpf_thres = mitigation_conf[meter_ch_idx].threshold;
+		if (odpm_lpf_value >= odpm_lpf_thres) {
+			/* Compute mitigation modules */
+			atomic_or(BIT(mitigation_conf[meter_ch_idx].module_id),
+					  &bcl_dev->mitigation_module_ids);
+
+			if (odpm_lpf_value >= odpm_lpf_thres * 3)
+				max_odpm_lpf[meter_ch_idx].count_lvl_2++;
+			else if (odpm_lpf_value >= odpm_lpf_thres * 2)
+				max_odpm_lpf[meter_ch_idx].count_lvl_1++;
+			else
+				max_odpm_lpf[meter_ch_idx].count_lvl_0++;
+		}
+		if (odpm_lpf_value >= max_odpm_lpf[meter_ch_idx].value) {
+			max_odpm_lpf[meter_ch_idx].time = triggered_time;
+			max_odpm_lpf[meter_ch_idx].value = odpm_lpf_value;
+			max_odpm_lpf[meter_ch_idx].triggered_idx = bcl_dev->br_stats->triggered_idx;
+		}
+
 	}
 }
 
@@ -1338,7 +1379,7 @@ uint32_t core_pmic_get_pre_evt_cnt(struct bcl_device *bcl_dev, int zone_idx)
 {
 	uint32_t response[] = {0, 0};
 
-	google_bcl_cpm_send_cmd(bcl_dev, MB_BCL_CMD_GET_PRE_EVT_COUNT, zone_idx, 0, 0, response);
+	google_bcl_cpm_send_cmd(bcl_dev, MB_BCL_CMD_GET_PRE_EVT_COUNT, 0, 0, zone_idx, response);
 	if (response[0] > 0)
 		return -EINVAL;
 

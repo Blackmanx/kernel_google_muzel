@@ -77,8 +77,6 @@ int core_pmic_sub_set_ocp_lvl(struct bcl_device *bcl_dev, u64 val, u8 addr,
 	value &= ~(OCP_WARN_MASK) << OCP_WARN_LVL_SHIFT;
 	value |= ((ulimit - val) / step) << OCP_WARN_LVL_SHIFT;
 	ret = pmic_write(CORE_PMIC_SUB, bcl_dev, addr, value);
-	if (!ret)
-		bcl_dev->zone[id]->bcl_lvl = val - THERMAL_HYST_LEVEL;
 	enable_irq(bcl_dev->zone[id]->bcl_irq);
 
 	return ret;

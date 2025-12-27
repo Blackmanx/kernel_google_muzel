@@ -60,6 +60,18 @@ struct odpm_lpf {
 	u32 value[COMPATIBLE_METER_CHANNEL_MAX];
 };
 
+struct max_odpm_lpf {
+	struct timespec64 time;
+	u32 value;
+	u32 triggered_idx;
+	/* Exceeding odpm threshold */
+	u32 count_lvl_0;
+	/* Exceeding odpm threshold times 2 */
+	u32 count_lvl_1;
+	/* Exceeding odpm threshold times 3 */
+	u32 count_lvl_2;
+};
+
 struct vimon_data {
 	s32 data[MAX77779_VIMON_DATA_SIZE];
 	s32 v_data[MAX77779_VIMON_CH_DATA_SIZE];
@@ -80,5 +92,11 @@ struct brownout_stats {
 	u32 triggered_state;
 };
 static_assert(sizeof(struct brownout_stats) <= PAGE_SIZE);
+
+struct max_odpm_stats {
+	struct max_odpm_lpf main_max_odpm_lpf[COMPATIBLE_METER_CHANNEL_MAX];
+	struct max_odpm_lpf sub_max_odpm_lpf[COMPATIBLE_METER_CHANNEL_MAX];
+};
+static_assert(sizeof(struct max_odpm_stats) <= PAGE_SIZE);
 
 #endif /* __BROWNOUT_STATS_H */

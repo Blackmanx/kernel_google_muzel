@@ -80,37 +80,38 @@ void google_bcl_teardown_mailbox(struct bcl_device *bcl_dev)
 static void google_bcl_setup_clock_div_ratio(struct bcl_device *bcl_dev)
 {
 	int ret, i;
+	uint32_t response[2] = {0, 0};
 
 	for (i = 0; i < SUBSYSTEM_SOURCE_MAX; i++) {
 		if (i > AUR)
 			break;
 		ret = google_bcl_cpm_send_cmd(bcl_dev, MB_BCL_CMD_SET_CONFIG, i,
 					      MB_ZONE_CONFIG_DIV_4_DIV_RATIO,
-					      (uint16_t)bcl_dev->core_conf[i].con_heavy, NULL);
-		if (ret < 0) {
+					      (uint16_t)bcl_dev->core_conf[i].con_heavy, response);
+		if (ret < 0 || response[0]) {
 			dev_err(bcl_dev->device, "Cannot set heavy clock ratio %d\n", i);
 			break;
 		}
 		ret = google_bcl_cpm_send_cmd(bcl_dev, MB_BCL_CMD_SET_CONFIG, i,
 					      MB_ZONE_CONFIG_DIV_2_DIV_RATIO,
-					      (uint16_t)bcl_dev->core_conf[i].con_light, NULL);
-		if (ret < 0) {
+					      (uint16_t)bcl_dev->core_conf[i].con_light, response);
+		if (ret < 0 || response[0]) {
 			dev_err(bcl_dev->device, "Cannot set light clock ratio %d\n", i);
 			break;
 		}
 		ret = google_bcl_cpm_send_cmd(bcl_dev, MB_BCL_CMD_SET_CONFIG, i,
 					      MB_ZONE_CONFIG_MITIGATION_RESPONSE_EN,
 					      (uint16_t)bcl_dev->core_conf[i].clkdivstep,
-					      NULL);
-		if (ret < 0) {
+					      response);
+		if (ret < 0 || response[0]) {
 			dev_err(bcl_dev->device, "Cannot set mitigation response en %d\n", i);
 			break;
 		}
 		ret = google_bcl_cpm_send_cmd(bcl_dev, MB_BCL_CMD_SET_CONFIG, i,
 					      MB_ZONE_CONFIG_MITIGATION_RESPONSE_TYPE,
 					      (uint16_t)bcl_dev->core_conf[i].mitigation_type,
-					      NULL);
-		if (ret < 0) {
+					      response);
+		if (ret < 0 || response[0]) {
 			dev_err(bcl_dev->device, "Cannot set mitigation response type %d\n", i);
 			break;
 		}
@@ -123,6 +124,7 @@ static ssize_t google_bcl_mitigation_to_cpm(struct bcl_device *bcl_dev,
 {
 	int i, ret;
 	uint16_t value;
+	uint32_t response[2] = {0, 0};
 
 	for (i = 0; i <= SUBSYSTEM_SOURCE_MAX; i++) {
 		if (i >= AUR)
@@ -138,8 +140,8 @@ static ssize_t google_bcl_mitigation_to_cpm(struct bcl_device *bcl_dev,
 
 		ret = google_bcl_cpm_send_cmd(
 			bcl_dev, MB_BCL_CMD_SET_CONFIG, i,
-			MB_ZONE_CONFIG_MITIGATION_RESPONSE_EN, value, NULL);
-		if (ret < 0) {
+			MB_ZONE_CONFIG_MITIGATION_RESPONSE_EN, value, response);
+		if (ret < 0 || response[0]) {
 			dev_err(bcl_dev->device,
 				"Cannot set mitigation response en %d\n", i);
 			return ret;
@@ -151,10 +153,11 @@ static ssize_t google_bcl_mitigation_to_cpm(struct bcl_device *bcl_dev,
 void google_bcl_set_batfet_timer(struct bcl_device *bcl_dev)
 {
 	int ret;
+	uint32_t response[2] = {0, 0};
 
 	ret = google_bcl_cpm_send_cmd(bcl_dev, MB_BCL_CMD_SET_CONFIG, 0,
-			MB_BCL_CONFIG_OCP_BATFET_TIMER_SET, 1, NULL);
-	if (ret < 0)
+			MB_BCL_CONFIG_OCP_BATFET_TIMER_SET, 1, response);
+	if (ret < 0 || response[0])
 		dev_err(bcl_dev->device, "Cannot cancel OCP BATFET timer\n");
 
 }
@@ -162,10 +165,11 @@ void google_bcl_set_batfet_timer(struct bcl_device *bcl_dev)
 void google_bcl_cancel_batfet_timer(struct bcl_device *bcl_dev)
 {
 	int ret;
+	uint32_t response[2] = {0, 0};
 
 	ret = google_bcl_cpm_send_cmd(bcl_dev, MB_BCL_CMD_SET_CONFIG, 0,
-			MB_BCL_CONFIG_OCP_BATFET_TIMER_CANCEL, 1, NULL);
-	if (ret < 0)
+			MB_BCL_CONFIG_OCP_BATFET_TIMER_CANCEL, 1, response);
+	if (ret < 0 || response[0])
 		dev_err(bcl_dev->device, "Cannot cancel OCP BATFET timer\n");
 
 }
@@ -173,16 +177,17 @@ void google_bcl_cancel_batfet_timer(struct bcl_device *bcl_dev)
 static void google_bcl_setup_batfet_timer(struct bcl_device *bcl_dev)
 {
 	int ret;
+	uint32_t response[2] = {0, 0};
 
 	ret = google_bcl_cpm_send_cmd(bcl_dev, MB_BCL_CMD_SET_CONFIG, 0,
-			MB_BCL_CONFIG_OCP_BATFET_TIMEOUT, bcl_dev->ocp_batfet_timeout, NULL);
-	if (ret < 0)
+			MB_BCL_CONFIG_OCP_BATFET_TIMEOUT, bcl_dev->ocp_batfet_timeout, response);
+	if (ret < 0 || response[0])
 		dev_err(bcl_dev->device, "Cannot set OCP BATFET timeout\n");
 
 	ret = google_bcl_cpm_send_cmd(bcl_dev, MB_BCL_CMD_SET_CONFIG, 0,
 			MB_BCL_CONFIG_OCP_BATFET_TIMEOUT_ENABLE,
-			bcl_dev->ocp_batfet_timeout_enable, NULL);
-	if (ret < 0)
+			bcl_dev->ocp_batfet_timeout_enable, response);
+	if (ret < 0 || response[0])
 		dev_err(bcl_dev->device, "Cannot set OCP BATFET timeout enable\n");
 }
 
@@ -283,19 +288,20 @@ void google_bcl_parse_clk_div_dtree(struct bcl_device *bcl_dev)
 	bcl_dev->core_conf[CPU0].mitigation_type = get_prop_u32(np, "cpu0_mitigation_type");
 
 	bcl_dev->cpu_cluster[QOS_CPU0] = get_prop_u32(np, "cpu0_cluster");
-	bcl_dev->cpu_cluster[QOS_CPU1] = get_prop_u32(np, "cpu1_cluster");
+	bcl_dev->cpu_cluster[QOS_CPU1A] = get_prop_u32(np, "cpu1a_cluster");
+	bcl_dev->cpu_cluster[QOS_CPU1B] = get_prop_u32(np, "cpu1b_cluster");
 	bcl_dev->cpu_cluster[QOS_CPU2] = get_prop_u32(np, "cpu2_cluster");
 }
 
 ssize_t safe_emit_bcl_cnt(char *buf, struct bcl_zone *zone)
 {
-	uint32_t response[] = {0, 0};
+	uint32_t response[2] = {0, 0};
 	struct bcl_device *bcl_dev;
 
 	if (!zone || WARN_ON_ONCE(!zone->parent))
 		return sysfs_emit(buf, "0\n");
 	bcl_dev = zone->parent;
-	google_bcl_cpm_send_cmd(zone->parent, MB_BCL_CMD_GET_COUNT, zone->idx, 0, 0, response);
+	google_bcl_cpm_send_cmd(zone->parent, MB_BCL_CMD_GET_COUNT, 0, 0, zone->idx, response);
 	return sysfs_emit(buf, "%d\n", response[1]);
 }
 
@@ -325,7 +331,7 @@ int google_set_db(struct bcl_device *data, unsigned int value, enum MPMM_SOURCE 
 
 ssize_t get_clk_ratio(struct bcl_device *bcl_dev, enum RATIO_SOURCE idx, char *buf, int sub_idx)
 {
-	uint32_t response[] = {0, 0};
+	uint32_t response[2] = {0, 0};
 	uint8_t mode;
 
 	mode = idx == heavy ? MB_ZONE_CONFIG_DIV_4_DIV_RATIO : MB_ZONE_CONFIG_DIV_2_DIV_RATIO;
@@ -337,7 +343,7 @@ ssize_t get_clk_ratio(struct bcl_device *bcl_dev, enum RATIO_SOURCE idx, char *b
 
 ssize_t get_clk_stats(struct bcl_device *bcl_dev, int idx, char *buf)
 {
-	uint32_t response[] = {0, 0};
+	uint32_t response[2] = {0, 0};
 
 	google_bcl_cpm_send_cmd(bcl_dev, MB_BCL_CMD_GET_CONFIG, idx,
 				MB_ZONE_CONFIG_DIV_2_DIV_STATUS, 0, response);
@@ -348,6 +354,7 @@ ssize_t set_clk_div(struct bcl_device *bcl_dev, int idx, const char *buf, size_t
 {
 	uint32_t value;
 	int ret;
+	uint32_t response[2] = {0, 0};
 
 	ret = kstrtou32(buf, 16, &value);
 	if (ret)
@@ -357,14 +364,14 @@ ssize_t set_clk_div(struct bcl_device *bcl_dev, int idx, const char *buf, size_t
 		return -EIO;
 
 	ret = google_bcl_cpm_send_cmd(bcl_dev, MB_BCL_CMD_SET_CONFIG, idx,
-				      MB_ZONE_CONFIG_DIV_2_CTRL_MODE, (uint16_t)value, NULL);
-	if (ret < 0) {
+				      MB_ZONE_CONFIG_DIV_2_CTRL_MODE, (uint16_t)value, response);
+	if (ret < 0 || response[0]) {
 		dev_err(bcl_dev->device, "Cannot set clock div %d\n", idx);
 		return -EINVAL;
 	}
 	ret = google_bcl_cpm_send_cmd(bcl_dev, MB_BCL_CMD_SET_CONFIG, idx,
-				      MB_ZONE_CONFIG_DIV_4_CTRL_MODE, (uint16_t)value, NULL);
-	if (ret < 0) {
+				      MB_ZONE_CONFIG_DIV_4_CTRL_MODE, (uint16_t)value, response);
+	if (ret < 0 || response[0]) {
 		dev_err(bcl_dev->device, "Cannot set clock div %d\n", idx);
 		return -EINVAL;
 	}
@@ -373,7 +380,7 @@ ssize_t set_clk_div(struct bcl_device *bcl_dev, int idx, const char *buf, size_t
 
 ssize_t get_clk_div(struct bcl_device *bcl_dev, int idx, char *buf)
 {
-	uint32_t response[] = {0, 0};
+	uint32_t response[2] = {0, 0};
 
 	google_bcl_cpm_send_cmd(bcl_dev, MB_BCL_CMD_GET_CONFIG, idx,
 				MB_ZONE_CONFIG_DIV_2_CTRL_MODE, 0, response);
@@ -386,6 +393,7 @@ ssize_t set_clk_ratio(struct bcl_device *bcl_dev, enum RATIO_SOURCE idx,
 	uint32_t value;
 	int ret;
 	uint8_t mode;
+	uint32_t response[2] = {0, 0};
 
 	ret = kstrtou32(buf, 10, &value);
 	if (ret)
@@ -397,8 +405,8 @@ ssize_t set_clk_ratio(struct bcl_device *bcl_dev, enum RATIO_SOURCE idx,
 	mode = idx == heavy ? MB_ZONE_CONFIG_DIV_4_DIV_RATIO : MB_ZONE_CONFIG_DIV_2_DIV_RATIO;
 
 	ret = google_bcl_cpm_send_cmd(bcl_dev, MB_BCL_CMD_SET_CONFIG, sub_idx,
-				      mode, (uint16_t)value, NULL);
-	if (ret < 0) {
+				      mode, (uint16_t)value, response);
+	if (ret < 0 || response[0]) {
 		dev_err(bcl_dev->device, "Cannot set clock ratio %d\n", idx);
 		return -EINVAL;
 	}
@@ -466,6 +474,7 @@ ssize_t set_mitigation_res_en(struct bcl_device *bcl_dev, const char *buf, size_
 {
 	uint32_t value;
 	int ret;
+	uint32_t response[2] = {0, 0};
 
 	ret = kstrtou32(buf, 16, &value);
 	if (ret)
@@ -476,8 +485,8 @@ ssize_t set_mitigation_res_en(struct bcl_device *bcl_dev, const char *buf, size_
 
 	ret = google_bcl_cpm_send_cmd(bcl_dev, MB_BCL_CMD_SET_CONFIG, idx,
 				      MB_ZONE_CONFIG_MITIGATION_RESPONSE_EN, (uint16_t)value,
-				      NULL);
-	if (ret < 0) {
+				      response);
+	if (ret < 0 || response[0]) {
 		dev_err(bcl_dev->device, "Cannot set mitigation response en %d\n", idx);
 		return -EINVAL;
 	}
@@ -486,7 +495,7 @@ ssize_t set_mitigation_res_en(struct bcl_device *bcl_dev, const char *buf, size_
 
 ssize_t get_mitigation_res_en(struct bcl_device *bcl_dev, int idx, char *buf)
 {
-	uint32_t response[] = {0, 0};
+	uint32_t response[2] = {0, 0};
 
 	google_bcl_cpm_send_cmd(bcl_dev, MB_BCL_CMD_GET_CONFIG, idx,
 				MB_ZONE_CONFIG_MITIGATION_RESPONSE_EN, 0, response);
@@ -497,6 +506,7 @@ ssize_t set_mitigation_res_type(struct bcl_device *bcl_dev, const char *buf, siz
 {
 	uint32_t value;
 	int ret;
+	uint32_t response[2] = {0, 0};
 
 	ret = kstrtou32(buf, 16, &value);
 	if (ret)
@@ -507,8 +517,8 @@ ssize_t set_mitigation_res_type(struct bcl_device *bcl_dev, const char *buf, siz
 
 	ret = google_bcl_cpm_send_cmd(bcl_dev, MB_BCL_CMD_SET_CONFIG, idx,
 				      MB_ZONE_CONFIG_MITIGATION_RESPONSE_TYPE, (uint16_t)value,
-				      NULL);
-	if (ret < 0) {
+				      response);
+	if (ret < 0 || response[0]) {
 		dev_err(bcl_dev->device, "Cannot set mitigation response type %d\n", idx);
 		return -EINVAL;
 	}
@@ -517,7 +527,7 @@ ssize_t set_mitigation_res_type(struct bcl_device *bcl_dev, const char *buf, siz
 
 ssize_t get_mitigation_res_type(struct bcl_device *bcl_dev, int idx, char *buf)
 {
-	uint32_t response[] = {0, 0};
+	uint32_t response[2] = {0, 0};
 
 	google_bcl_cpm_send_cmd(bcl_dev, MB_BCL_CMD_GET_CONFIG, idx,
 				MB_ZONE_CONFIG_MITIGATION_RESPONSE_TYPE, 0, response);
@@ -528,6 +538,7 @@ ssize_t set_mitigation_res_hyst(struct bcl_device *bcl_dev, const char *buf, siz
 {
 	uint32_t value;
 	int ret;
+	uint32_t response[2] = {0, 0};
 
 	ret = kstrtou32(buf, 16, &value);
 	if (ret)
@@ -538,8 +549,8 @@ ssize_t set_mitigation_res_hyst(struct bcl_device *bcl_dev, const char *buf, siz
 
 	ret = google_bcl_cpm_send_cmd(bcl_dev, MB_BCL_CMD_SET_CONFIG, idx,
 				      MB_ZONE_CONFIG_MITIGATION_RESPONSE_HYST, (uint16_t)value,
-				      NULL);
-	if (ret < 0) {
+				      response);
+	if (ret < 0 || response[0]) {
 		dev_err(bcl_dev->device, "Cannot set mitigation response hyst %d\n", idx);
 		return -EINVAL;
 	}
@@ -548,7 +559,7 @@ ssize_t set_mitigation_res_hyst(struct bcl_device *bcl_dev, const char *buf, siz
 
 ssize_t get_mitigation_res_hyst(struct bcl_device *bcl_dev, int idx, char *buf)
 {
-	uint32_t response[] = {0, 0};
+	uint32_t response[2] = {0, 0};
 
 	google_bcl_cpm_send_cmd(bcl_dev, MB_BCL_CMD_GET_CONFIG, idx,
 				MB_ZONE_CONFIG_MITIGATION_RESPONSE_HYST, 0, response);
@@ -557,7 +568,7 @@ ssize_t get_mitigation_res_hyst(struct bcl_device *bcl_dev, int idx, char *buf)
 
 ssize_t get_ocp_batfet_timeout_enable(struct bcl_device *bcl_dev, char *buf)
 {
-	uint32_t response[] = {0, 0};
+	uint32_t response[2] = {0, 0};
 
 	google_bcl_cpm_send_cmd(bcl_dev, MB_BCL_CMD_GET_CONFIG, 0,
 			MB_BCL_CONFIG_OCP_BATFET_TIMEOUT_ENABLE, 0, response);
@@ -568,6 +579,7 @@ ssize_t set_ocp_batfet_timeout_enable(struct bcl_device *bcl_dev, const char *bu
 {
 	bool value;
 	int ret;
+	uint32_t response[2] = {0, 0};
 
 	ret = kstrtobool(buf, &value);
 	if (ret)
@@ -577,15 +589,15 @@ ssize_t set_ocp_batfet_timeout_enable(struct bcl_device *bcl_dev, const char *bu
 
 	bcl_dev->ocp_batfet_timeout_enable = value;
 	ret = google_bcl_cpm_send_cmd(bcl_dev, MB_BCL_CMD_SET_CONFIG, 0,
-			MB_BCL_CONFIG_OCP_BATFET_TIMEOUT_ENABLE, (bool)value, NULL);
-	if (ret < 0)
+			MB_BCL_CONFIG_OCP_BATFET_TIMEOUT_ENABLE, (bool)value, response);
+	if (ret < 0 || response[0])
 		dev_err(bcl_dev->device, "Cannot set OCP BATFET timeout enable\n");
 	return size;
 }
 
 ssize_t get_ocp_batfet_timeout(struct bcl_device *bcl_dev, char *buf)
 {
-	uint32_t response[] = {0, 0};
+	uint32_t response[2] = {0, 0};
 
 	/* Mailbox payload only supports sending value of size 16bits */
 	google_bcl_cpm_send_cmd(bcl_dev, MB_BCL_CMD_GET_CONFIG, 0,
@@ -597,6 +609,7 @@ ssize_t set_ocp_batfet_timeout(struct bcl_device *bcl_dev, const char *buf, size
 {
 	uint32_t value;
 	int ret;
+	uint32_t response[2] = {0, 0};
 
 	ret = kstrtou32(buf, 10, &value);
 	if (ret)
@@ -609,8 +622,8 @@ ssize_t set_ocp_batfet_timeout(struct bcl_device *bcl_dev, const char *buf, size
 	bcl_dev->ocp_batfet_timeout = value;
 
 	ret = google_bcl_cpm_send_cmd(bcl_dev, MB_BCL_CMD_SET_CONFIG, 0,
-			MB_BCL_CONFIG_OCP_BATFET_TIMEOUT, bcl_dev->ocp_batfet_timeout, NULL);
-	if (ret < 0)
+			MB_BCL_CONFIG_OCP_BATFET_TIMEOUT, bcl_dev->ocp_batfet_timeout, response);
+	if (ret < 0 || response[0])
 		dev_err(bcl_dev->device, "Cannot set OCP BATFET timeout\n");
 	return size;
 }

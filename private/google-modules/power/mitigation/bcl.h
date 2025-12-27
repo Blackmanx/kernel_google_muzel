@@ -67,6 +67,7 @@ enum IFPMIC {
 #define TIMEOUT_1MS			1
 #define DATA_LOGGING_TIME_MS		48
 #define DATA_LOGGING_NUM		50
+#define DATA_LOGGING_COOL_DOWN_TIME_MS	300
 #define HEAVY_MITIGATION_MODULES_NUM	3
 #define MITIGATION_INPUT_DELIM		","
 #define MITIGATION_PRINT_BUF_SIZE	256
@@ -81,6 +82,11 @@ enum IFPMIC {
 #define OCP_BATFET_TIMER_MAXIMUM_MS		1000
 #define OCP_BATFET_TIMER_MINIMUM_MS		0
 #define LAST_CURR_RD_CNT_MAX			10
+#define UVLO_DET_MAX			0x1
+#define UVLO_REL_MAX			0x3
+#define OILO_DET_MAX			0x1f
+#define OILO_REL_MAX			0x05
+
 
 enum IRQ_CONFIG {
 	IRQ_NOT_EXIST,
@@ -222,7 +228,12 @@ enum MPMM_SOURCE {
 
 enum cpu_qos_device_idx {
 	QOS_CPU0,
+#if IS_ENABLED(CONFIG_SOC_RDO) || IS_ENABLED(CONFIG_SOC_LGA)
+	QOS_CPU1A,
+	QOS_CPU1B,
+#else
 	QOS_CPU1,
+#endif
 	QOS_CPU2,
 	CPU_CORES_MAX
 };
@@ -243,6 +254,14 @@ enum odpm_rdback_type {
 	TELEM_VOLTAGE,
 	TELEM_CURRENT,
 	TELEM_POWER,
+};
+
+enum THROTTLE_STATE {
+	THROTTLE_STATE_NONE,
+	THROTTLE_STATE_MEDIUM,
+	THROTTLE_STATE_HEAVY,
+	THROTTLE_STATE_CRITICAL,
+	THROTTLE_STATE_MAX,
 };
 
 struct qos_throttle_limit {
@@ -272,12 +291,10 @@ struct bcl_zone {
 	struct delayed_work warn_work;
 	struct delayed_work enable_irq_work;
 	struct qos_throttle_limit *bcl_qos;
+	struct qos_throttle_limit *userspace_bcl_qos;
 	struct ocpsmpl_stats bcl_stats;
 	struct zone_triggered_stats last_triggered;
 	atomic_t bcl_cnt;
-	int bcl_prev_lvl;
-	int bcl_cur_lvl;
-	int bcl_lvl;
 	u16 bcl_pin;
 	int bcl_irq;
 	int irq_type;
@@ -408,6 +425,7 @@ struct bcl_device {
 	struct thermal_zone_device *soc_tz;
 	struct thermal_zone_device_ops soc_tz_ops;
 	bool throttle;
+	int throttle_state;
 
 	int trip_high_temp;
 	int trip_low_temp;
@@ -513,6 +531,7 @@ struct bcl_device {
 	unsigned int triggered_idx;
 	ssize_t br_stats_size;
 	struct brownout_stats *br_stats;
+	struct max_odpm_stats *max_odpm_stats;
 	/* module id */
 	struct bcl_mitigation_conf main_mitigation_conf[METER_CHANNEL_MAX];
 	struct bcl_mitigation_conf sub_mitigation_conf[METER_CHANNEL_MAX];
@@ -595,5 +614,6 @@ void pwrwarn_update_start_time(struct bcl_device *bcl_dev,
 					enum CONCURRENT_PWRWARN_IRQ bin_ind);
 void pwrwarn_update_end_time(struct bcl_device *bcl_dev, int id, struct irq_duration_stats *bins,
 				enum CONCURRENT_PWRWARN_IRQ bin_ind);
+void trace_bcl_zone_stats(struct bcl_zone *zone, int value);
 
 #endif /* __BCL_DEFS_H */
