@@ -74,6 +74,7 @@ extern struct hyp_arm_smmu_v3_err *kvm_nvhe_sym(kvm_hyp_smmu_last_err);
 struct hyp_arm_smmu_v3_global_config {
 	phys_addr_t	block_region_start;
 	size_t		block_region_size;
+	bool		use_smc_s2;
 };
 
 extern struct hyp_arm_smmu_v3_global_config kvm_nvhe_sym(kvm_hyp_smmu_global_config);

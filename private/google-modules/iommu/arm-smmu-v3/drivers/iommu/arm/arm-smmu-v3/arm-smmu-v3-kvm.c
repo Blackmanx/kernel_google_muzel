@@ -97,6 +97,10 @@ module_param(atomic_pages, int, 0);
 static bool disable;
 module_param(disable, bool, 0);
 
+/* Use SMC to notify TZ about stage-2 identity map modifications. */
+static bool smc_s2;
+module_param(smc_s2, bool, 0);
+
 phys_addr_t __topup_virt_to_phys(void *virt)
 {
 	return __pa(virt);
@@ -415,15 +419,13 @@ static int kvm_arm_smmu_domain_finalize(struct kvm_arm_smmu_domain *kvm_smmu_dom
 		return 0;
 	}
 
-	kvm_smmu_domain->smmu = smmu;
-
 	if (kvm_smmu_domain->domain.type == IOMMU_DOMAIN_IDENTITY) {
 		kvm_smmu_domain->id = KVM_IOMMU_DOMAIN_IDMAP_ID;
 		/*
 		 * Identity domains doesn't use the DMA API, so no need to
 		 * set the  domain aperture.
 		 */
-		return 0;
+		goto out;
 	}
 
 	/* Default to stage-1. */
@@ -459,7 +461,13 @@ static int kvm_arm_smmu_domain_finalize(struct kvm_arm_smmu_domain *kvm_smmu_dom
 
 	ret = kvm_call_hyp_nvhe_mc(__pkvm_host_iommu_alloc_domain,
 				   kvm_smmu_domain->id, kvm_smmu_domain->type);
+	if (ret) {
+		ida_free(&kvm_arm_smmu_domain_ida, kvm_smmu_domain->id);
+		return ret;
+	}
 
+out:
+	kvm_smmu_domain->smmu = smmu;
 	return ret;
 }
 
@@ -702,6 +710,17 @@ static size_t kvm_arm_smmu_unmap_pages(struct iommu_domain *domain,
 	return total_unmapped;
 }
 
+static void kvm_arm_smmu_iotlb_sync_map(struct iommu_domain *domain,
+					unsigned long iova, size_t size)
+{
+	struct kvm_arm_smmu_domain *kvm_smmu_domain = to_kvm_smmu_domain(domain);
+	struct host_arm_smmu_device *host_smmu = smmu_to_host(kvm_smmu_domain->smmu);
+
+	if (!host_smmu->cfg_s1.coherent_walk)
+		kvm_call_hyp_nvhe(__pkvm_host_iommu_iotlb_sync_map,
+				  kvm_smmu_domain->id, iova, size);
+}
+
 static phys_addr_t kvm_arm_smmu_iova_to_phys(struct iommu_domain *domain,
 					     dma_addr_t iova)
 {
@@ -752,6 +771,7 @@ static struct iommu_ops kvm_arm_smmu_ops = {
 		.free		= kvm_arm_smmu_domain_free,
 		.map_pages	= kvm_arm_smmu_map_pages,
 		.unmap_pages	= kvm_arm_smmu_unmap_pages,
+		.iotlb_sync_map = kvm_arm_smmu_iotlb_sync_map,
 		.iova_to_phys	= kvm_arm_smmu_iova_to_phys,
 		.set_dev_pasid	= kvm_arm_smmu_set_dev_pasid,
 	}
@@ -1469,6 +1489,12 @@ static int kvm_arm_smmu_v3_init_block_region(void)
 	return 0;
 }
 
+static int kvm_arm_smmu_v3_init_global_config(void)
+{
+	kvm_hyp_smmu_global_config.use_smc_s2 = smc_s2;
+	return kvm_arm_smmu_v3_init_block_region();
+}
+
 /**
  * kvm_arm_smmu_v3_init() - Reserve the SMMUv3 for KVM
  * Return 0 if all present SMMUv3 were probed successfully, or an error.
@@ -1523,7 +1549,7 @@ static int kvm_arm_smmu_v3_init(void)
 	if (ret)
 		goto err_free_mc;
 
-	ret = kvm_arm_smmu_v3_init_block_region();
+	ret = kvm_arm_smmu_v3_init_global_config();
 	if (ret)
 		goto err_free_mc;
 

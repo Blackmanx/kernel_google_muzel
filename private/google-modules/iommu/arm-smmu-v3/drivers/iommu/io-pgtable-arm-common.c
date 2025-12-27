@@ -185,7 +185,8 @@ static bool arm_lpae_use_contpte(struct arm_lpae_io_pgtable *data,
 
 static void __arm_lpae_init_pte(struct arm_lpae_io_pgtable *data,
 				unsigned long iova, phys_addr_t paddr, arm_lpae_iopte prot,
-				int lvl, int num_entries, arm_lpae_iopte *ptep)
+				int lvl, int num_entries, arm_lpae_iopte *ptep,
+				bool may_defer_sync_pte)
 {
 	arm_lpae_iopte pte = prot;
 	struct io_pgtable_cfg *cfg = &data->iop.cfg;
@@ -201,7 +202,12 @@ static void __arm_lpae_init_pte(struct arm_lpae_io_pgtable *data,
 		ptep[i] = pte | paddr_to_iopte(paddr + i * sz, data) |
 			  (arm_lpae_use_contpte(data, iova, paddr, lvl, num_entries, i) ?
 			  ARM_LPAE_PTE_CONT : 0);
-	if (!cfg->coherent_walk)
+	/*
+	 * A sync operation can only be deferred, if it is enabled on a
+	 * per-translation table basis via cfg->defer_sync_pte, and if the
+	 * caller allows it by setting may_defer_sync_pte.
+	 */
+	if (!cfg->coherent_walk && !(may_defer_sync_pte && cfg->defer_sync_pte))
 		__arm_lpae_sync_pte(ptep, num_entries, cfg);
 }
 
@@ -232,7 +238,7 @@ int arm_lpae_init_pte(struct arm_lpae_io_pgtable *data,
 			 */
 			if (n) {
 				__arm_lpae_init_pte(data, cur_iova, cur_paddr, prot, lvl,
-						    n, &ptep[mapped_entries]);
+						    n, &ptep[mapped_entries], true);
 				arm_lpae_coalesce_contptes(data, lvl, n, &ptep[mapped_entries]);
 				mapped_entries += n;
 			}
@@ -257,7 +263,7 @@ int arm_lpae_init_pte(struct arm_lpae_io_pgtable *data,
 		iova += mapped_entries * sz;
 		__arm_lpae_init_pte(data, iova, paddr, prot, lvl,
 				    num_entries - mapped_entries,
-				    &ptep[mapped_entries]);
+				    &ptep[mapped_entries], true);
 		arm_lpae_coalesce_contptes(data, lvl, num_entries - mapped_entries,
 					   &ptep[mapped_entries]);
 	}
@@ -457,6 +463,69 @@ int arm_lpae_map_pages(struct io_pgtable_ops *ops, unsigned long iova,
 	return ret;
 }
 
+int __arm_lpae_iotlb_sync_map(struct arm_lpae_io_pgtable *data, unsigned long iova,
+			      size_t size, int lvl, arm_lpae_iopte *ptep)
+{
+	struct io_pgtable *iop = &data->iop;
+	size_t block_size = ARM_LPAE_BLOCK_SIZE(lvl, data);
+	int ret = 0, num_entries, max_entries;
+	unsigned long iova_offset, sync_idx_start, sync_idx_end;
+	int i, shift, synced_entries = 0;
+
+	shift = (ARM_LPAE_LVL_SHIFT(lvl - 1, data) + ARM_LPAE_PGD_IDX(lvl - 1, data));
+	iova_offset = iova & ((1ULL << shift) - 1);
+	sync_idx_start = ARM_LPAE_LVL_IDX(iova, lvl, data);
+	sync_idx_end = (iova_offset + size + block_size - ARM_LPAE_GRANULE(data)) >>
+			ARM_LPAE_LVL_SHIFT(lvl, data);
+	max_entries = arm_lpae_max_entries(sync_idx_start, data);
+	num_entries = min_t(unsigned long, sync_idx_end - sync_idx_start, max_entries);
+	ptep += sync_idx_start;
+
+	if (lvl < (ARM_LPAE_MAX_LEVELS - 1)) {
+		for (i = 0; i < num_entries; i++) {
+			arm_lpae_iopte pte = READ_ONCE(ptep[i]);
+			unsigned long synced;
+
+			WARN_ON(!pte);
+
+			if (iopte_type(pte) == ARM_LPAE_PTE_TYPE_TABLE) {
+				int n = i - synced_entries;
+
+				if (n) {
+					__arm_lpae_sync_pte(&ptep[synced_entries], n, &iop->cfg);
+					synced_entries += n;
+				}
+				ret = __arm_lpae_iotlb_sync_map(data, iova, size, lvl + 1,
+								iopte_deref(pte, data));
+				synced_entries++;
+			}
+			synced = block_size - (iova & (block_size - 1));
+			size -= synced;
+			iova += synced;
+		}
+	}
+
+	if (synced_entries != num_entries)
+		__arm_lpae_sync_pte(&ptep[synced_entries], num_entries - synced_entries, &iop->cfg);
+
+	return ret;
+}
+
+int arm_lpae_iotlb_sync_map(struct io_pgtable_ops *ops, unsigned long iova,
+			    size_t size)
+{
+	struct arm_lpae_io_pgtable *data = io_pgtable_ops_to_data(ops);
+	struct io_pgtable_cfg *cfg = &data->iop.cfg;
+	arm_lpae_iopte *ptep = data->pgd;
+	int lvl = data->start_level;
+	long iaext = (s64)iova >> cfg->ias;
+
+	WARN_ON(!size);
+	WARN_ON(iaext);
+
+	return __arm_lpae_iotlb_sync_map(data, iova, size, lvl, ptep);
+}
+
 void __arm_lpae_free_pgtable(struct arm_lpae_io_pgtable *data, int lvl,
 			     arm_lpae_iopte *ptep)
 {
@@ -522,7 +591,7 @@ static size_t arm_lpae_split_blk_unmap(struct arm_lpae_io_pgtable *data,
 
 	blk_paddr = iopte_to_paddr(blk_pte, data);
 	pte = iopte_prot(blk_pte);
-	__arm_lpae_init_pte(data, blk_iova, blk_paddr, pte, lvl, unmap_idx_start, tablep);
+	__arm_lpae_init_pte(data, blk_iova, blk_paddr, pte, lvl, unmap_idx_start, tablep, false);
 	for (i = unmap_idx_start, blk_paddr += split_sz * unmap_idx_start;
 	     i < unmap_idx_start + num_entries; i++, blk_paddr += split_sz) {
 		/* Unmap! */
@@ -537,7 +606,7 @@ static size_t arm_lpae_split_blk_unmap(struct arm_lpae_io_pgtable *data,
 	}
 	if (i < ptes_per_table)
 		__arm_lpae_init_pte(data, blk_iova + split_sz * i, blk_paddr, pte, lvl,
-				    ptes_per_table - i, &tablep[i]);
+				    ptes_per_table - i, &tablep[i], false);
 
 	if (blk_pte & ARM_LPAE_PTE_CONT) {
 		int lvl_idx = ARM_LPAE_LVL_IDX(iova, lvl - 1, data);
@@ -600,7 +669,7 @@ static void __arm_lpae_walk(struct arm_lpae_io_pgtable *data,
 			};
 
 			walker->cb(&ctx);
-		} else {
+		} else if (iopte_type(pte) == ARM_LPAE_PTE_TYPE_TABLE) {
 			__arm_lpae_walk(data, lvl + 1, iopte_deref(pte, data), walker);
 		}
 		ptep++;
@@ -877,6 +946,7 @@ int arm_lpae_init_pgtable(struct io_pgtable_cfg *cfg,
 	data->iop.ops = (struct io_pgtable_ops) {
 		.map_pages		= arm_lpae_map_pages,
 		.unmap_pages		= arm_lpae_unmap_pages,
+		.iotlb_sync_map		= cfg->coherent_walk ? NULL : arm_lpae_iotlb_sync_map,
 		.iova_to_phys		= arm_lpae_iova_to_phys,
 		.unmap_pages_walk	= arm_lpae_unmap_pages_walk,
 	};

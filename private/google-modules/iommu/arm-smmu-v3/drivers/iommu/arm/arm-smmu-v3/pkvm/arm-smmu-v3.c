@@ -45,6 +45,13 @@ const struct pkvm_module_ops		*mod_ops;
 #endif
 
 #define ARM_SMMU_POLL_TIMEOUT_US	100000 /* 100ms arbitrary timeout */
+/* Firmware page size is 4 KB and independent of Linux page size. */
+#define FIRMWARE_PAGE_SHIFT		12
+#define SMC_FC_OEM_SET_NS_IPA_TBL	0x8300000E
+#define SET_NS_IPA_CFG_GRANULE		GENMASK(9, 8)
+#define SET_NS_IPA_CFG_START_LVL	GENMASK(7, 6)
+#define SET_NS_IPA_CFG_T0SZ		GENMASK(5, 0)
+#define SMC_FC_OEM_INV_NS_IPA		0x8300000F
 
 size_t __ro_after_init kvm_hyp_arm_smmu_v3_count;
 struct hyp_arm_smmu_v3_device *kvm_hyp_arm_smmu_v3_smmus;
@@ -216,12 +223,6 @@ static int smmu_add_cmd(struct hyp_arm_smmu_v3_device *smmu,
 
 	for (i = 0; i < CMDQ_ENT_DWORDS; i++)
 		slot[i] = cpu_to_le64(cmd[i]);
-
-	/*
-	 * Order writes to PTEs, STE/CDs and command queue before
-	 * issuing the command to the SMMU.
-	 */
-	dma_wmb();
 
 	smmu->cmdq_prod++;
 	writel(Q_IDX(smmu, smmu->cmdq_prod) | Q_WRAP(smmu, smmu->cmdq_prod),
@@ -740,6 +741,7 @@ static void smmu_tlb_inv_range(struct kvm_hyp_iommu_domain *domain,
 	struct domain_iommu_node *iommu_node;
 	unsigned long end = iova + size;
 	struct arm_smmu_cmdq_ent cmd;
+	struct arm_smccc_res res;
 
 	cmd.tlbi.leaf = leaf;
 	if (smmu_domain->pgtable->cfg.fmt == ARM_64_LPAE_S2) {
@@ -762,6 +764,13 @@ static void smmu_tlb_inv_range(struct kvm_hyp_iommu_domain *domain,
 		WARN_ON(smmu_tlb_inv_range_smmu(smmu, domain, &cmd, iova, size, granule));
 	}
 	hyp_read_unlock(&smmu_domain->lock);
+
+	if (kvm_hyp_smmu_global_config.use_smc_s2 &&
+	    domain->domain_id == KVM_IOMMU_DOMAIN_IDMAP_ID) {
+		arm_smccc_1_1_smc(SMC_FC_OEM_INV_NS_IPA, iova >> FIRMWARE_PAGE_SHIFT,
+				  size >> FIRMWARE_PAGE_SHIFT, &res);
+		WARN_ON(res.a0 != SMCCC_RET_SUCCESS);
+	}
 }
 
 static void smmu_tlb_flush_walk(unsigned long iova, size_t size,
@@ -1033,6 +1042,7 @@ int smmu_domain_finalise(struct hyp_arm_smmu_v3_device *smmu,
 
 	data = io_pgtable_to_data(smmu_domain->pgtable);
 	data->idmapped = (domain->domain_id == KVM_IOMMU_DOMAIN_IDMAP_ID);
+	smmu_domain->pgtable->cfg.defer_sync_pte = !data->idmapped;
 	return ret;
 }
 
@@ -1115,6 +1125,25 @@ static void smmu_put_ref_domain(struct hyp_arm_smmu_v3_device *smmu,
 			return;
 		}
 	}
+}
+
+static void smmu_set_ns_ipa_tbl(struct hyp_arm_smmu_v3_domain *smmu_domain)
+{
+	struct arm_lpae_io_pgtable *data = io_pgtable_to_data(smmu_domain->pgtable);
+	u64 tbl_base = hyp_virt_to_phys(data->pgd);
+	u32 start_level = data->start_level;
+	u32 granule = smmu_domain->pgtable->cfg.arm_lpae_s2_cfg.vtcr.tg;
+	u32 t0sz = smmu_domain->pgtable->cfg.arm_lpae_s2_cfg.vtcr.tsz;
+	u32 ipa_cfg;
+	struct arm_smccc_res res;
+
+	ipa_cfg = FIELD_PREP(SET_NS_IPA_CFG_GRANULE, granule) |
+		  FIELD_PREP(SET_NS_IPA_CFG_START_LVL, start_level) |
+		  FIELD_PREP(SET_NS_IPA_CFG_T0SZ, t0sz);
+
+	arm_smccc_1_1_smc(SMC_FC_OEM_SET_NS_IPA_TBL, tbl_base >> FIRMWARE_PAGE_SHIFT, ipa_cfg,
+			  &res);
+	WARN_ON(res.a0 != SMCCC_RET_SUCCESS);
 }
 
 static int smmu_attach_dev(struct kvm_hyp_iommu *iommu, struct kvm_hyp_iommu_domain *domain,
@@ -1239,8 +1268,11 @@ out_unlock:
 	kvm_iommu_unlock(iommu);
 	hyp_write_unlock(&smmu_domain->lock);
 
-	if (init_idmap)
+	if (init_idmap) {
 		ret = kvm_iommu_snapshot_host_stage2(domain);
+		if (kvm_hyp_smmu_global_config.use_smc_s2)
+			smmu_set_ns_ipa_tbl(smmu_domain);
+	}
 
 	return ret;
 }
@@ -1292,6 +1324,12 @@ static int smmu_detach_dev(struct kvm_hyp_iommu *iommu, struct kvm_hyp_iommu_dom
 				}
 			} else {
 				cd = smmu_get_cd_ptr(cd_table, pasid);
+				if (!(cd[0] & CTXDESC_CD_0_V)) {
+					/* The device is not actually attached! */
+					ret = -ENOENT;
+					goto out_unlock;
+				}
+
 				cd[0] = 0;
 				smmu_sync_cd(smmu, cd, sid, pasid);
 				cd[1] = 0;
@@ -1303,6 +1341,11 @@ static int smmu_detach_dev(struct kvm_hyp_iommu *iommu, struct kvm_hyp_iommu_dom
 		}
 	}
 	/* For stage-2 and pasid = 0 */
+	if (!(dst[0] & STRTAB_STE_0_V)) {
+		/* The device is not actually attached! */
+		ret = -ENOENT;
+		goto out_unlock;
+	}
 	dst[0] = 0;
 	ret = smmu_sync_ste(smmu, dst, sid);
 	if (ret)
@@ -1492,9 +1535,15 @@ static void kvm_iommu_unmap_walker(struct io_pgtable_ctxt *ctxt)
 	struct kvm_iommu_paddr_cache *cache = data->cache;
 
 	/*
-	 * It is guaranteed unmap is called with max of the cache size,
-	 * see kvm_iommu_unmap_pages()
+	 * Coalesce entries when possible, this doesn't only save extra flush calls
+	 * but also will batch calls to unuse DMA.
 	 */
+	if (cache->ptr &&
+		(cache->paddr[cache->ptr - 1] + cache->pgsize[cache->ptr - 1]) == ctxt->addr) {
+		cache->pgsize[cache->ptr - 1] += ctxt->size;
+		return;
+	}
+
 	cache->paddr[cache->ptr] = ctxt->addr;
 	cache->pgsize[cache->ptr++] = ctxt->size;
 
@@ -1546,6 +1595,21 @@ static phys_addr_t smmu_iova_to_phys(struct kvm_hyp_iommu_domain *domain,
 	hyp_spin_unlock(&smmu_domain->pgt_lock);
 
 	return paddr;
+}
+
+static int smmu_iotlb_sync_map(struct kvm_hyp_iommu_domain *domain,
+			       unsigned long iova, size_t size)
+{
+	int ret = 0;
+	struct hyp_arm_smmu_v3_domain *smmu_domain = domain->priv;
+
+	hyp_spin_lock(&smmu_domain->pgt_lock);
+	if (smmu_domain->pgtable->ops.iotlb_sync_map)
+		ret = smmu_domain->pgtable->ops.iotlb_sync_map(&smmu_domain->pgtable->ops,
+							       iova, size);
+	hyp_spin_unlock(&smmu_domain->pgt_lock);
+
+	return ret;
 }
 
 /*
@@ -1675,5 +1739,6 @@ struct kvm_iommu_ops smmu_ops = {
 	.map_pages			= smmu_map_pages,
 	.unmap_pages			= smmu_unmap_pages,
 	.iova_to_phys			= smmu_iova_to_phys,
+	.iotlb_sync_map			= smmu_iotlb_sync_map,
 };
 
