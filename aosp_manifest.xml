@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <manifest>
   <remote name="aosp" fetch="https://android.googlesource.com/"/>
-  <default revision="android-gs-laguna-6.6-android16" remote="aosp" sync-c="true" sync-j="32"/>
+  <default revision="android-gs-laguna-6.6-android-canary" remote="aosp" sync-c="true" sync-j="32"/>
   <project path="aosp" name="kernel/common" groups="partner">
     <linkfile dest="common/build.config.constants" src="build.config.constants"/>
     <linkfile dest="common/modules.bzl" src="modules.bzl"/>
@@ -84,6 +84,10 @@
     <linkfile dest="build_deepspace.sh" src="build_muzel.sh"/>
     <linkfile dest=".d13.bazelrc" src="device.bazelrc"/>
   </project>
+  <project path="private/devices/google/rango" name="kernel/devices/google/rango" groups="partner">
+    <linkfile dest="build_rango.sh" src="build_rango.sh"/>
+    <linkfile dest=".d14.bazelrc" src="device.bazelrc"/>
+  </project>
   <project path="private/google-modules/amplifiers" name="kernel/google-modules/amplifiers" groups="partner"/>
   <project path="private/google-modules/aoc" name="kernel/google-modules/aoc" groups="partner"/>
   <project path="private/google-modules/aoc_ipc" name="kernel/google-modules/aoc-ipc" groups="partner"/>
@@ -93,6 +97,7 @@
   <project path="private/google-modules/display/common" name="kernel/google-modules/display/common" groups="partner"/>
   <project path="private/google-modules/display/panels/caimito" name="kernel/google-modules/display/panels/caimito" groups="partner"/>
   <project path="private/google-modules/display/panels/muzel" name="kernel/google-modules/display/panels/muzel" groups="partner"/>
+  <project path="private/google-modules/display/panels/rango" name="kernel/google-modules/display/panels/rango" groups="partner"/>
   <project path="private/google-modules/display/panels/tegu" name="kernel/google-modules/display/panels/tegu" groups="partner"/>
   <project path="private/google-modules/display/samsung" name="kernel/google-modules/display/samsung" groups="partner"/>
   <project path="private/google-modules/display/vsi-drm" name="kernel/google-modules/display/vsi-drm" groups="partner"/>
