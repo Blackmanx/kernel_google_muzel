@@ -103,7 +103,6 @@ CONFIG_TZ_PROT=m
 # private/google-modules/soc/gs/drivers/input/Kconfig
 CONFIG_INPUT_KEYDEBUG=m
 CONFIG_INPUT_STMVL53L1=m
-CONFIG_GOODIX_FINGERPRINT=m
 
 # private/google-modules/soc/gs/drivers/char/hw_random/Kconfig
 CONFIG_HW_RANDOM_EXYNOS_SWD=m

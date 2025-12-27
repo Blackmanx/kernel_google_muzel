@@ -4,6 +4,8 @@ source "$(KCONFIG_SOC_GS_PREFIX)drivers/pci/controller/dwc-whi/Kconfig"
 
 source "$(KCONFIG_SOC_GS_PREFIX)drivers/misc/Kconfig"
 
+source "$(KCONFIG_SOC_GS_PREFIX)drivers/misc/sscoredump/Kconfig"
+
 source "$(KCONFIG_SOC_GS_PREFIX)drivers/clk/gs/Kconfig"
 
 source "$(KCONFIG_SOC_GS_PREFIX)drivers/soc/google/Kconfig"
