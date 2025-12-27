@@ -24,6 +24,7 @@
 #include <linux/cpu.h>
 #include <linux/of_fdt.h>
 #include <linux/perf_event.h>
+#include <linux/proc_fs.h>
 #include <linux/of_device.h>
 #include <linux/mutex.h>
 #include <trace/hooks/cpuidle.h>
@@ -40,6 +41,89 @@
 
 static struct gs_perf_mon_config perf_mon_config;
 static struct gs_perf_mon_state perf_mon_metadata;
+
+/* Data passed to the perf_counter_show function when reading the procfs file. */
+struct proc_data {
+	unsigned int cpu;
+	unsigned int perf_idx;
+};
+
+struct exposed_counter_data {
+	unsigned int perf_idx;
+	char *name;
+};
+
+/* List of counters that will be exposed under /proc/gs_perf_mon. */
+static struct exposed_counter_data EXPOSED_COUNTERS[] = {
+	{ .perf_idx = PERF_INST_IDX, .name = "instructions" },
+	{ .perf_idx = PERF_CYCLE_IDX, .name = "cycles" }
+};
+
+static struct proc_dir_entry *proc_parent_dir;
+
+static int perf_counter_show(struct seq_file *m, void *v)
+{
+	struct proc_data *data = m->private;
+	struct cpu_perf_info *cpu_data = &perf_mon_metadata.cpu_data_arr[data->cpu];
+
+	seq_printf(m, "%lu\n", cpu_data->perf_ev_data[data->perf_idx].total);
+
+	return 0;
+}
+
+static int perf_counter_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, perf_counter_show, pde_data(inode));
+}
+
+static const struct proc_ops perf_counter_fops = {
+	.proc_open = perf_counter_open,
+	.proc_read = seq_read,
+	.proc_lseek = seq_lseek,
+	.proc_release = single_release,
+};
+
+static int create_procfs_group_for_cpu(struct device *dev, int cpu)
+{
+	struct exposed_counter_data *counter;
+	int exposed_counter_idx;
+	char name[32];
+
+	snprintf(name, sizeof(name), "cpu%d", cpu);
+
+	struct proc_dir_entry *cpu_dir = proc_mkdir(name, proc_parent_dir);
+
+	if (!cpu_dir)
+		goto out;
+
+	for (exposed_counter_idx = 0; exposed_counter_idx < ARRAY_SIZE(EXPOSED_COUNTERS);
+	     exposed_counter_idx++) {
+		counter = &EXPOSED_COUNTERS[exposed_counter_idx];
+
+		struct proc_data *data;
+
+		data = devm_kmalloc(dev, sizeof(*data), GFP_KERNEL);
+		if (!data)
+			goto data_malloc_err;
+
+		data->cpu = cpu;
+		data->perf_idx = counter->perf_idx;
+
+		if (!proc_create_data(counter->name, 0444, cpu_dir, &perf_counter_fops, data)) {
+			devm_kfree(dev, data);
+
+			goto data_malloc_err;
+		}
+	}
+
+	return 0;
+
+data_malloc_err:
+	remove_proc_entry(name, proc_parent_dir);
+out:
+	dev_warn(dev, "Failed to create procfs directory for cpu %d\n", cpu);
+	return -ENOMEM;
+}
 
 int gs_perf_mon_get_data(unsigned int cpu, struct gs_cpu_perf_data *data_dest)
 {
@@ -186,7 +270,7 @@ void gs_perf_mon_tick_update_counters(void)
 {
 	unsigned int perf_idx;
 	unsigned int cpu = raw_smp_processor_id();
-	u64 total;
+	u64 curr_count;
 	struct cpu_perf_info *cpu_data;
 	struct gs_event_data *ev_data;
 	ktime_t now = ktime_get();
@@ -216,14 +300,22 @@ void gs_perf_mon_tick_update_counters(void)
 		/* Loop over all AMU/PMU counters and read them. */
 		for (perf_idx = 0; perf_idx < PERF_NUM_COMMON_EVS; perf_idx++) {
 			ev_data = &cpu_data->perf_ev_data[perf_idx];
-			if (read_perf_event(ev_data, &total)) {
-				pr_debug("Perf event read failed on cpu=%u for event_idx=%u",
-				cpu, perf_idx);
+			if (read_perf_event(ev_data, &curr_count)) {
+				pr_debug("Perf event read failed on cpu=%u for event_idx=%u", cpu,
+					 perf_idx);
 				continue;
 			}
 			ev_data->prev_count = ev_data->curr_count;
-			ev_data->curr_count = total;
-			ev_data->last_delta = ev_data->curr_count - ev_data->prev_count;
+			ev_data->curr_count = curr_count;
+
+			// Performance counters registers have been reset.
+			// In this case, we use 0 as the previous count.
+			if (ev_data->curr_count < ev_data->prev_count)
+				ev_data->last_delta = ev_data->curr_count;
+			else
+				ev_data->last_delta = ev_data->curr_count - ev_data->prev_count;
+
+			ev_data->total += ev_data->last_delta;
 		}
 		cpu_data->time_delta_us = ktime_us_delta(now, cpu_data->last_update_ts);
 		cpu_data->last_update_ts = now;
@@ -274,7 +366,6 @@ static int init_event(struct gs_event_data *event, unsigned int cpu)
 	attr.pinned = 1;
 	attr.exclude_idle = 0;
 	attr.config = event_id;
-
 
 	/* The following allocation steps are only needed for PMU events. */
 	if (event->counter_type == PMU) {
@@ -366,7 +457,7 @@ static void disable_perf_events(int cpu)
  *		0 = PERF_CPU_IDLE_C1, 1 = PERF_CPU_IDLE_C2
 */
 static void vendor_update_event_cpu_idle_enter(void *data, int *idle_state,
-						struct cpuidle_device *dev)
+					       struct cpuidle_device *dev)
 {
 	unsigned int cpu = raw_smp_processor_id();
 	struct cpu_perf_info *cpu_data = &perf_mon_metadata.cpu_data_arr[cpu];
@@ -424,7 +515,7 @@ void gs_perf_mon_update_clients(void)
 		WRITE_ONCE(perf_mon_metadata.last_client_update_ts, now);
 
 		/* Copy over all the performance information for all cpus. */
-		for_each_possible_cpu (cpu) {
+		for_each_possible_cpu(cpu) {
 			ret = gs_perf_mon_get_data(cpu, &perf_mon_metadata.client_shared_data[cpu]);
 			if (ret)
 				perf_mon_metadata.client_shared_data[cpu].cpu_mon_on = false;
@@ -432,7 +523,7 @@ void gs_perf_mon_update_clients(void)
 		}
 
 		/* Update all clients supplying a callback pointer to monitor data. */
-		list_for_each_entry (curr_client, &perf_mon_metadata.client_list, node) {
+		list_for_each_entry(curr_client, &perf_mon_metadata.client_list, node) {
 			if (curr_client->client_callback)
 				curr_client->client_callback(perf_mon_metadata.client_shared_data,
 							     curr_client->private_data);
@@ -524,7 +615,7 @@ static int gs_perf_mon_start(void)
 		goto unlock_out;
 
 	/* Allocate and enable perf events. */
-	for_each_possible_cpu (cpu) {
+	for_each_possible_cpu(cpu) {
 		cpu_data = &perf_mon_metadata.cpu_data_arr[cpu];
 		mutex_lock(&cpu_data->perf_allocation_lock);
 		ret = enable_perf_events(cpu);
@@ -556,7 +647,7 @@ static void gs_perf_mon_stop(void)
 		goto unlock_out;
 
 	perf_mon_metadata.is_active = false;
-	for_each_possible_cpu (cpu) {
+	for_each_possible_cpu(cpu) {
 		/* Deallocate all the perf events. */
 		cpu_data = &perf_mon_metadata.cpu_data_arr[cpu];
 		mutex_lock(&cpu_data->perf_allocation_lock);
@@ -805,6 +896,7 @@ static int perf_mon_task(void *data)
 /* Driver initialization code. */
 static int gs_perf_mon_driver_probe(struct platform_device *pdev)
 {
+	unsigned int cpu;
 	struct device *dev = &pdev->dev;
 	int ret = 0;
 
@@ -856,6 +948,26 @@ static int gs_perf_mon_driver_probe(struct platform_device *pdev)
 		goto err_cpuhp_init;
 	}
 	perf_mon_metadata.perf_monitor_initialized = true;
+
+	/* Create the procfs files. */
+	proc_parent_dir = proc_mkdir("gs_perf_mon", NULL);
+	if (proc_parent_dir) {
+		for_each_possible_cpu(cpu) {
+			ret = create_procfs_group_for_cpu(dev, cpu);
+			if (ret) {
+				dev_warn(
+					dev,
+					"Failed to create procfs group for cpu %d with error code %d\n",
+					cpu, ret);
+
+				remove_proc_subtree("gs_perf_mon", NULL);
+				break;
+			}
+		}
+	} else {
+		dev_warn(dev, "Failed to create /proc/gs_perf_mon\n");
+	}
+
 	return 0;
 
 /* If any of the above steps failed, we need to free resources and unregister hooks. */
@@ -869,10 +981,9 @@ err_client_data:
 	return ret;
 }
 
-static const struct of_device_id gs_perf_mon_root_match[] = {
-	{ .compatible = "google,gs_perf_mon" },
-	{}
-};
+static const struct of_device_id gs_perf_mon_root_match[] = { { .compatible =
+									"google,gs_perf_mon" },
+							      {} };
 
 static struct platform_driver gs_perf_mon_platform_driver = {
 	.probe = gs_perf_mon_driver_probe,
@@ -903,6 +1014,9 @@ static int __init gs_perf_mon_init(void)
 static void __exit gs_perf_mon_exit(void)
 {
 	gs_perf_mon_stop();
+
+	if (proc_parent_dir)
+		remove_proc_subtree("gs_perf_mon", NULL);
 }
 
 /* A module parameter for frequency of counter updates. */

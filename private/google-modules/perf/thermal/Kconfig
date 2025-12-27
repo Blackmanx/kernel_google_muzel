@@ -47,3 +47,14 @@ config GOOGLE_THERMAL_SENSOR_STATS
 	  framework. It also provides callback functions to access CPM shared
 	  memory for data and configuration of thermal stats, including
 	  temperature residency and daily max/min temperature.
+
+config GOOGLE_THERMAL_PRESSURE_TJ
+	tristate "Google LLC tj thermal pressure driver"
+	depends on GOOGLE_THERMAL_CPM_MBOX && GOOGLE_CPU_FREQ
+	help
+	  This driver reads tj thermal pressure from shared memory and applies
+	  thermal pressure to scheduler using exported API from cpufreq. Thermal
+	  pressure indicates the frequency capping applied by tj loops to control
+	  junction temperature. Such frequency capping would result in change in
+	  CPU capacity. Applying thermal pressure lets the scheduler be aware of
+	  change in CPU capacity.

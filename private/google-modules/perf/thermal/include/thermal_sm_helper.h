@@ -15,6 +15,7 @@ enum thermal_sm_section {
 	THERMAL_SM_CDEV_STATE = 0,
 	THERMAL_SM_STATS,
 	THERMAL_SM_TRIP_COUNT,
+	THERMAL_SM_TJ_PRESSURE,
 	THERMAL_SM_MAX_SECTION,
 };
 
@@ -58,4 +59,5 @@ int thermal_sm_get_thermal_stats_metrics(struct thermal_sm_stats_metrics *data);
 int thermal_sm_get_thermal_stats_thresholds(struct thermal_sm_stats_thresholds *data);
 int thermal_sm_set_thermal_stats_thresholds(struct thermal_sm_stats_thresholds *data);
 int thermal_sm_get_tmu_trip_counter(struct thermal_sm_trip_counter_data *data);
+int thermal_sm_get_tj_pressure_data(u8 *data, u32 size);
 #endif //_THERMAL_SM_HELPER_H_

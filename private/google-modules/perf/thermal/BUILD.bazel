@@ -139,6 +139,32 @@ ddk_module(
 )
 
 ddk_module(
+    name = "google_thermal_pressure_tj",
+    srcs = glob([
+        "**/*.h",
+    ]) + [
+        "thermal_pressure_tj.c",
+        "utils/cdev_cpufreq_helper.c",
+        "utils/thermal_msg_helper.c",
+        "utils/thermal_sm_helper.c",
+    ],
+    out = "google_thermal_pressure_tj.ko",
+    includes = [
+        "include",
+    ],
+    kernel_build = "//private/devices/google/common:kernel",
+    deps = [
+        "//common:all_headers_aarch64",
+        "//private/google-modules/perf:google_pm_qos",
+        "//private/google-modules/perf/thermal:google_thermal_cpm_mbox",
+        "//private/google-modules/soc/gs:gs_soc_module",
+        "//private/google-modules/soc/gs:headers",
+        "//private/google-modules/soc/rdo:rdo_soc_headers",
+        "//private/google-modules/soc/rdo:rdo_soc_module",
+    ],
+)
+
+ddk_module(
     name = "devfreq_tj_cdev_test",
     srcs = glob([
         "include/*.h",
@@ -354,6 +380,7 @@ kernel_module_group(
         ":google_devfreq_tj_cdev",
         ":google_powercap",
         ":google_thermal_cpm_mbox",
+        ":google_thermal_pressure_tj",
         ":google_thermal_sensor",
         ":google_thermal_sensor_stats",
         ":google_thermal_uclamp",

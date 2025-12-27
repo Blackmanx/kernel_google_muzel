@@ -33,7 +33,6 @@
 
 #define GENPD_MAX_FILE_NAME_SIZE 128
 #define NS_PER_US 1000
-#define C4_DISABLE_MIN_RES_US 99999999
 
 #define DEV_ERR(dev, fmt, ...) dev_err(dev, "%s:%d: " fmt, __func__, __LINE__, ##__VA_ARGS__)
 #define DEV_INFO(dev, fmt, ...) dev_info(dev, "%s:%d: " fmt, __func__, __LINE__, ##__VA_ARGS__)
@@ -48,7 +47,8 @@
 enum gs_domain_parameter_type {
 	GS_DOMAIN_RESIDENCY,
 	GS_DOMAIN_ENTRY_LATENCY,
-	GS_DOMAIN_EXIT_LATENCY
+	GS_DOMAIN_EXIT_LATENCY,
+	GS_DOMAIN_DISABLED
 };
 
 /**
@@ -60,8 +60,8 @@ struct gs_domain_data {
 	int num_attached_policies_ids;		/* Which index is the power domain. */
 	int *attached_policies_ids;		/* List of attached cpu policies. */
 	bool is_initialized;			/* Is this domain initilalized. */
-	int c4_disable_cnt;			/* used to track enable/disable C4 */
-	s64 default_residency_ns;		/* default min residency */
+	bool power_off_disabled;		/* Disables powering off this power domain. */
+	atomic_t disable_count;			/* Refcount for requests to disable. */
 };
 
 /* Array containing gs_domain_data for each power domain. */
@@ -74,7 +74,8 @@ static int top_pwr_domain_id;
 static const char * const gs_domain_parameter_names[] = {
 	"min-residency-us",
 	"power-on-latency-us",
-	"power-off-latency-us"
+	"power-off-latency-us",
+	"disabled"
 };
 
 /**
@@ -83,7 +84,7 @@ static const char * const gs_domain_parameter_names[] = {
 struct gs_genpd_param_file {
 	struct attribute base_attr;			/* Attribute to for sysfs. */
 	struct genpd_power_state *state;		/* Idle state attached. */
-	struct generic_pm_domain *genpd;		/* Genpd containing the state. */
+	struct gs_domain_data *genpd_data;		/* Genpd containing the state. */
 	enum gs_domain_parameter_type config_type;	/* Which parameter to store. */
 	struct list_head node;
 };
@@ -112,27 +113,29 @@ void register_set_cluster_enabled_cb(void (*func)(int, int))
 EXPORT_SYMBOL_GPL(register_set_cluster_enabled_cb);
 
 /**
- * genpd_lock/unlock_spin - Synchronization helpers from domain.c
+ * genpd_lock/unlock - Synchronization helpers from domain.c
  */
-static void genpd_lock_spin(struct generic_pm_domain *genpd)
-	__acquires(&genpd->slock)
-{
-	unsigned long flags;
+struct genpd_lock_ops {
+	void (*lock)(struct generic_pm_domain *genpd);
+	void (*lock_nested)(struct generic_pm_domain *genpd, int depth);
+	void (*lock_interruptible)(struct generic_pm_domain *genpd);
+	void (*unlock)(struct generic_pm_domain *genpd);
+};
 
-	spin_lock_irqsave(&genpd->slock, flags);
-	genpd->lock_flags = flags;
+static void genpd_lock(struct generic_pm_domain *genpd)
+{
+	genpd->lock_ops->lock(genpd);
 }
 
-static void genpd_unlock_spin(struct generic_pm_domain *genpd)
-	__releases(&genpd->slock)
+static void genpd_unlock(struct generic_pm_domain *genpd)
 {
-	spin_unlock_irqrestore(&genpd->slock, genpd->lock_flags);
+	genpd->lock_ops->unlock(genpd);
 }
 
 static void gs_domain_c4_set_state(bool enable)
 {
 	struct gs_domain_data *genpd_data;
-	struct genpd_power_state *state = NULL;
+	bool disabled = true;
 
 	if (!gs_domain_idle_data_arr)
 		return;
@@ -141,35 +144,16 @@ static void gs_domain_c4_set_state(bool enable)
 		return;
 
 	genpd_data = &gs_domain_idle_data_arr[top_pwr_domain_id];
-	state = &genpd_data->genpd->states[0];
-
-	genpd_lock_spin(genpd_data->genpd);
 
 	if (enable) {
-		/* Enable C4 (decrement counter). */
-		if (genpd_data->c4_disable_cnt == 0) {
-			DEV_ERR(&genpd_data->genpd->dev, "C4 disable counter already 0\n");
-			genpd_unlock_spin(genpd_data->genpd);
-			return;
-		}
-		genpd_data->c4_disable_cnt--;
-		if (genpd_data->c4_disable_cnt == 0) {
-			DEV_INFO(&genpd_data->genpd->dev, "C4 enabled");
-			state->residency_ns = genpd_data->default_residency_ns;
-		}
-	} else {
-		/* Disable C4 (increment counter). */
-		if (genpd_data->c4_disable_cnt == 0) {
-			DEV_INFO(&genpd_data->genpd->dev, "C4 disabled\n");
-			/* on the first disable save the default residency value */
-			if (genpd_data->default_residency_ns == -1)
-				genpd_data->default_residency_ns = state->residency_ns;
-			state->residency_ns = (u64)C4_DISABLE_MIN_RES_US * NS_PER_US;
-		}
-		genpd_data->c4_disable_cnt++;
-	}
+		int prev_val = atomic_fetch_add_unless(&genpd_data->disable_count, -1, 0);
+		if (prev_val == 0)
+			DEV_ERR(&genpd_data->genpd->dev, "Disable counter already 0\n");
+		disabled = prev_val > 1;
+	} else
+		atomic_inc(&genpd_data->disable_count);
 
-	genpd_unlock_spin(genpd_data->genpd);
+	WRITE_ONCE(genpd_data->power_off_disabled, disabled);
 }
 
 /**
@@ -203,7 +187,11 @@ static ssize_t gs_genpd_state_param_show(struct kobject *kobj, struct attribute 
 	int ret = 0;
 	s64 parameter_value = 0;
 
-	genpd_lock_spin(idle_state_file->genpd);
+	if (idle_state_file->config_type == GS_DOMAIN_DISABLED)
+		return sysfs_emit(buf, "%d\n",
+				READ_ONCE(idle_state_file->genpd_data->power_off_disabled));
+
+	genpd_lock(idle_state_file->genpd_data->genpd);
 	switch (idle_state_file->config_type) {
 	case GS_DOMAIN_RESIDENCY:
 		parameter_value = idle_state_file->state->residency_ns;
@@ -214,8 +202,10 @@ static ssize_t gs_genpd_state_param_show(struct kobject *kobj, struct attribute 
 	case GS_DOMAIN_EXIT_LATENCY:
 		parameter_value = idle_state_file->state->power_off_latency_ns;
 		break;
+	default:
+		break;
 	}
-	genpd_unlock_spin(idle_state_file->genpd);
+	genpd_unlock(idle_state_file->genpd_data->genpd);
 
 	ret = sysfs_emit(buf, "%llu\n", parameter_value / NS_PER_US);
 
@@ -237,10 +227,22 @@ static ssize_t gs_genpd_state_param_store(struct kobject *kobj, struct attribute
 	unsigned long val;
 	int ret = 0;
 
+	if (idle_state_file->config_type == GS_DOMAIN_DISABLED) {
+		bool disabled_value = false;
+
+		ret = kstrtobool(buf, &disabled_value);
+		if (ret)
+			return ret;
+
+		WRITE_ONCE(idle_state_file->genpd_data->power_off_disabled, disabled_value);
+
+		return count;
+	}
+
 	ret = kstrtoul(buf, 0, &val);
 	if (ret)
 		return ret;
-	genpd_lock_spin(idle_state_file->genpd);
+	genpd_lock(idle_state_file->genpd_data->genpd);
 	switch (idle_state_file->config_type) {
 	case GS_DOMAIN_RESIDENCY:
 		idle_state_file->state->residency_ns = val * NS_PER_US;
@@ -251,8 +253,10 @@ static ssize_t gs_genpd_state_param_store(struct kobject *kobj, struct attribute
 	case GS_DOMAIN_EXIT_LATENCY:
 		idle_state_file->state->power_off_latency_ns = val * NS_PER_US;
 		break;
+	default:
+		break;
 	}
-	genpd_unlock_spin(idle_state_file->genpd);
+	genpd_unlock(idle_state_file->genpd_data->genpd);
 
 	return count;
 }
@@ -298,6 +302,9 @@ static int gs_domain_idle_cluster_notifier(struct notifier_block *nb,
 {
 	struct gs_domain_data *genpd_data = container_of(nb, struct gs_domain_data, nb);
 	int enabled;
+
+	if (READ_ONCE(genpd_data->power_off_disabled) && action == GENPD_NOTIFY_PRE_OFF)
+		return NOTIFY_BAD;
 
 	// Determine if we need to trigger cluster on or off
 	if (action == GENPD_NOTIFY_OFF)
@@ -377,7 +384,7 @@ static int gs_domain_idle_add_idle_states_sysfs(struct device *dev,
 			genpd_param->base_attr.name = param_name;
 			genpd_param->base_attr.mode = 0644;
 			genpd_param->state = &genpd->states[state_idx];
-			genpd_param->genpd = genpd;
+			genpd_param->genpd_data = genpd_data;
 			genpd_param->config_type = param_idx;
 			sysfs_attr_init(&genpd_param->base_attr);
 			ret = sysfs_create_file(&folder->base_kobj, &genpd_param->base_attr);
@@ -404,16 +411,6 @@ void gs_domain_idle_cleanup(struct device *dev)
 
 	for (cluster_idx = 0; cluster_idx < num_power_domains; cluster_idx++) {
 		struct gs_domain_data *genpd_data = &gs_domain_idle_data_arr[cluster_idx];
-		struct genpd_power_state *state;
-
-		/* Enable C4 on cleanup */
-		if (cluster_idx == top_pwr_domain_id) {
-			state = &genpd_data->genpd->states[0];
-			state->residency_ns = genpd_data->default_residency_ns;
-			genpd_data->c4_disable_cnt = 0;
-			genpd_data->default_residency_ns = -1;
-			top_pwr_domain_id = -1;
-		}
 
 		if (genpd_data->is_initialized)
 			dev_pm_genpd_remove_notifier(&genpd_data->genpd->dev);
@@ -446,6 +443,9 @@ static int gs_domain_idle_driver_probe(struct platform_device *pdev)
 		struct gs_domain_data *genpd_data = &gs_domain_idle_data_arr[power_domain_idx];
 		struct device *genpd_dev;
 		struct generic_pm_domain *genpd;
+
+		genpd_data->power_off_disabled = false;
+		atomic_set(&genpd_data->disable_count, 0);
 
 		// Modify the name to be representative of the power domain we are associating.
 		dev->init_name = power_domain_np->name;
@@ -510,8 +510,6 @@ static int gs_domain_idle_driver_probe(struct platform_device *pdev)
 
 		genpd_data->is_initialized = true;
 		power_domain_idx += 1;
-		genpd_data->c4_disable_cnt = 0;
-		genpd_data->default_residency_ns = -1;
 	}
 
 	// Restore the old device np.

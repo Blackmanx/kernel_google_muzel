@@ -258,7 +258,7 @@ static void cdev_devfreq_init_test(struct kunit *test)
 						__cdev_success_cb,
 						__cdev_failure_cb),
 			0);
-	msleep(20);
+	flush_delayed_work(&cdev->work);
 	KUNIT_EXPECT_TRUE(test, cdev_failure);
 	test_pd->nr_perf_states = CDEV_TEST_OPP_CT;
 
@@ -268,7 +268,7 @@ static void cdev_devfreq_init_test(struct kunit *test)
 						__cdev_success_cb,
 						__cdev_failure_cb),
 			0);
-	msleep(20);
+	flush_delayed_work(&cdev->work);
 	KUNIT_EXPECT_TRUE(test, cdev_success);
 	cdev_devfreq_exit(cdev);
 }

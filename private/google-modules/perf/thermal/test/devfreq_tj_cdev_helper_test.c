@@ -209,23 +209,29 @@ static void devfreq_tj_cdev_mitigation_cb_test(struct kunit *test)
 	struct devfreq_tj_data *tj = test->priv;
 	struct cdev_devfreq_data *cdev = &tj->cdev_tj.cdev;
 	int i = 0, cur_state = 0;
-	u32 data[2];
+	union thermal_cpm_message msg;
 
-	data[1] = 0;
-	__devfreq_tj_cdev_cb(&tj->cdev_tj.nb, 0, data);
+	// verify if we ignore other notification type other than throttle.
+	msg.req.type = THERMAL_STATE_NOTIFICATION;
+	__devfreq_tj_cdev_cb(&tj->cdev_tj.nb, 0, msg.data);
+	KUNIT_EXPECT_EQ(test, tj->cdev_tj.cur_cdev_state, 0);
+
+	msg.req.type = THERMAL_REQUEST_THROTTLE;
+	msg.data[1] = 0;
+	__devfreq_tj_cdev_cb(&tj->cdev_tj.nb, 0, msg.data);
 	KUNIT_EXPECT_EQ(test, tj->cdev_tj.cur_cdev_state, DEVFREQ_TEST_OPP_CT - 1);
 	KUNIT_EXPECT_EQ(test, tj->qos_freq, cdev->opp_table[0].freq);
 
 	for (i = DEVFREQ_TEST_OPP_CT - 1; i >= 0; i--) {
 		cur_state = DEVFREQ_TEST_OPP_CT - i - 1;
 		devfreq_tj_test_init(tj);
-		data[1] = cdev->opp_table[i].freq;
-		__devfreq_tj_cdev_cb(&tj->cdev_tj.nb, 0, data);
+		msg.data[1] = cdev->opp_table[i].freq;
+		__devfreq_tj_cdev_cb(&tj->cdev_tj.nb, 0, msg.data);
 		KUNIT_EXPECT_EQ(test, tj->cdev_tj.cur_cdev_state, cur_state);
 		KUNIT_EXPECT_EQ(test, tj->qos_freq, cdev->opp_table[i].freq);
 
-		data[1] = cdev->opp_table[i].freq + 1;
-		__devfreq_tj_cdev_cb(&tj->cdev_tj.nb, 0, data);
+		msg.data[1] = cdev->opp_table[i].freq + 1;
+		__devfreq_tj_cdev_cb(&tj->cdev_tj.nb, 0, msg.data);
 		KUNIT_EXPECT_EQ(test, tj->cdev_tj.cur_cdev_state, cur_state);
 		KUNIT_EXPECT_EQ(test, tj->qos_freq, cdev->opp_table[i].freq);
 	}

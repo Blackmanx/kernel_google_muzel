@@ -13,6 +13,8 @@
 
 #include "thermal_sm_mock.h"
 
+#define THERMAL_SM_TJ_PRESSURE_SIZE 13
+
 struct thermal_sm_test_data {
 	struct device *fake_dev;
 	int get_addr_ret;
@@ -26,6 +28,7 @@ struct thermal_sm_test_data {
 	struct thermal_sm_tmu_state_data cdev_states[HW_THERMAL_ZONE_MAX];
 	struct thermal_sm_stats_data thermal_stats;
 	struct thermal_sm_trip_counter_data trip_counters;
+	u8 thermal_sm_tj_pressure_data[THERMAL_SM_TJ_PRESSURE_SIZE];
 };
 
 int mock_thermal_sm_get_section_addr(u8 section, u32 *version, u32 *addr, u32 *size)
@@ -221,12 +224,42 @@ static void thermal_sm_get_trip_counter_test(struct kunit *test)
 	KUNIT_EXPECT_EQ(test, thermal_sm_get_tmu_trip_counter(NULL), -EINVAL);
 }
 
+static void thermal_sm_tj_pressure_test(struct kunit *test)
+{
+	struct thermal_sm_test_data *sm_data = test->priv;
+	u8 data[THERMAL_SM_TJ_PRESSURE_SIZE];
+
+	for (int i = 0; i < sizeof(sm_data->thermal_sm_tj_pressure_data); ++i)
+		sm_data->thermal_sm_tj_pressure_data[i] = get_random_u8();
+
+	sm_data->mock_addr = get_random_u32();
+	sm_data->remap_addr = &sm_data->thermal_sm_tj_pressure_data;
+	sm_data->size = sizeof(sm_data->thermal_sm_tj_pressure_data);
+
+	// uninitialized sm section
+	KUNIT_EXPECT_EQ(test, thermal_sm_get_tj_pressure_data(data, sizeof(data)), -ENODEV);
+
+	// init tj pressure section
+	KUNIT_EXPECT_EQ(
+		test, thermal_sm_initialize_section(sm_data->fake_dev, THERMAL_SM_TJ_PRESSURE), 0);
+
+	// uninitialized input arguments
+	KUNIT_EXPECT_EQ(test, thermal_sm_get_tj_pressure_data(NULL, sizeof(data)), -EINVAL);
+	KUNIT_EXPECT_EQ(test, thermal_sm_get_tj_pressure_data(data, sizeof(data) + 1), -EINVAL);
+
+	// success for complete buffer read
+	KUNIT_EXPECT_EQ(test, thermal_sm_get_tj_pressure_data(data, sizeof(data)), 0);
+	KUNIT_EXPECT_MEMEQ(test, data, sm_data->thermal_sm_tj_pressure_data, sizeof(data));
+
+	// success for partial read
+	KUNIT_EXPECT_EQ(test, thermal_sm_get_tj_pressure_data(data, sizeof(data) - 1), 0);
+	KUNIT_EXPECT_MEMEQ(test, data, sm_data->thermal_sm_tj_pressure_data, sizeof(data) - 1);
+}
+
 static struct kunit_case thermal_sm_helper_test[] = {
-	KUNIT_CASE(thermal_sm_init_failure_test),
-	KUNIT_CASE(thermal_sm_get_tmu_cdev_state_test),
-	KUNIT_CASE(thermal_sm_thermal_stats_test),
-	KUNIT_CASE(thermal_sm_get_trip_counter_test),
-	{},
+	KUNIT_CASE(thermal_sm_init_failure_test),  KUNIT_CASE(thermal_sm_get_tmu_cdev_state_test),
+	KUNIT_CASE(thermal_sm_thermal_stats_test), KUNIT_CASE(thermal_sm_get_trip_counter_test),
+	KUNIT_CASE(thermal_sm_tj_pressure_test),   {},
 };
 
 static int thermal_sm_test_init(struct kunit *test)

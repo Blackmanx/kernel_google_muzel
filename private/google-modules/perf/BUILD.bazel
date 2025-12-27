@@ -70,7 +70,7 @@ ddk_module(
     kernel_build = "//private/devices/google/common:kernel",
     visibility = [
         "//private/devices/google:__subpackages__",
-        "//private/google-modules/display/vsi-drm/verisilicon:__pkg__",
+        "//private/google-modules/display:__subpackages__",
         "//private/google-modules/gxp:__subpackages__",
         "//private/google-modules/lwis:__subpackages__",
         "//private/google-modules/perf:__subpackages__",

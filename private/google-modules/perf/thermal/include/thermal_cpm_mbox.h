@@ -91,7 +91,20 @@ enum thermal_mailbox_request_id {
 	THERMAL_RESERVED = 0x0,
 	THERMAL_REQUEST_THROTTLE,
 	THERMAL_NTC_REQUEST,
+	THERMAL_STATE_NOTIFICATION,
 	NUM_THERMAL_MAILBOX_REQUESTS,
+};
+
+enum thermal_cpm_trip_id {
+	THERMAL_CPM_TRIP_COLD_COMP,
+	THERMAL_CPM_TRIP_SWITCH_ON,
+	THERMAL_CPM_TRIP_EARLY_THROTTLE,
+	THERMAL_CPM_TRIP_CONTROL,
+	THERMAL_CPM_TRIP_ALERT,
+	THERMAL_CPM_TRIP_SW_MAX,
+	THERMAL_CPM_TRIP_DFS,
+	THERMAL_CPM_TRIP_RESERVED,
+	THERMAL_CPM_TRIP_MAX
 };
 
 /*
@@ -187,6 +200,17 @@ struct thermal_cpm_mbox_driver_data {
 	struct thermal_cpm_mbox_rx_work rx_work[HW_DEV_MAX];
 	/* TODO: move away from static array to dynamic list */
 };
+
+
+static inline bool is_thermal_cpm_throttle_message(void *data)
+{
+	struct thermal_cpm_mbox_response *resp = (struct thermal_cpm_mbox_response *)data;
+
+	if (!resp)
+		return false;
+
+	return resp->type == THERMAL_REQUEST_THROTTLE;
+}
 
 /*
  * thermal_cpm_send_mbox_req - send a thermal request to CPM host.

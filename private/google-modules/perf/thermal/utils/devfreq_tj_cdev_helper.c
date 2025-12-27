@@ -62,6 +62,9 @@ int __devfreq_tj_cdev_cb(struct notifier_block *nb, unsigned long val, void *dat
 	unsigned long freq;
 	u32 *freq_req = data;
 
+	if (!is_thermal_cpm_throttle_message(data))
+		return 0;
+
 	mutex_lock(&cdev_tj->lock);
 	for (i = 1; i < cdev_tj->cdev.num_opps; i++) {
 		if (cdev_tj->cdev.opp_table[i].freq > freq_req[1])

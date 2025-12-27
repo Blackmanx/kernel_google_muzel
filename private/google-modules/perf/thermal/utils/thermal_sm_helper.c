@@ -9,11 +9,11 @@
 #include "thermal_sm_helper.h"
 #include "thermal_sm_mock.h"
 
-
 static const u8 support_section_ver[THERMAL_SM_MAX_SECTION] = {
 	[THERMAL_SM_CDEV_STATE] = 1,
 	[THERMAL_SM_STATS] = 1,
 	[THERMAL_SM_TRIP_COUNT] = 0,
+	[THERMAL_SM_TJ_PRESSURE] = 0,
 };
 
 static struct thermal_sm_section_data thermal_sm_sections[THERMAL_SM_MAX_SECTION];
@@ -117,23 +117,43 @@ int thermal_sm_get_tmu_cdev_state(enum hw_dev_type cdev_id, u8 *cdev_state)
 }
 
 /*
- * get_valid_section_data - get validated pointer to data of a thermal shared memory section
+ * get_data_from_sm_section - Copy data from shared memory section
  *
  * @section: thermal shared memory section
+ * @offset : offset from shared memory section start position
+ * @size : size of the data to copy
+ * @data : destination buffer to copy data
  *
- * Return: non NULL pointer on success
- *	   NULL: section is not initialized properly
+ * Return: 0 on success
+ *	-EINVAL: invalid arguments
+ *	-ENODEV: shared memory section isn't initialized properly
  */
-static struct thermal_sm_section_data *get_valid_section_data(enum thermal_sm_section section)
+static int get_data_from_sm_section(enum thermal_sm_section section, u32 offset, u32 size, u8 *data)
 {
-	struct thermal_sm_section_data *section_data = &thermal_sm_sections[section];
+	struct thermal_sm_section_data *section_data;
 
+	if (!data || section >= THERMAL_SM_MAX_SECTION)
+		return -EINVAL;
+
+	if (!size)
+		return 0;
+
+	section_data = &thermal_sm_sections[section];
 	if (section_data->size == 0 || !section_data->addr) {
 		pr_err("thermal shared memory init error: section=%d addr=%lld, size=%d",
 		       section, (u64)section_data->addr, section_data->size);
-		return NULL;
+		return -ENODEV;
 	}
-	return section_data;
+
+	if (offset + size > section_data->size) {
+		pr_err("Invalid offset or size: offset=%d, size=%d, section_size=%d", offset, size,
+		       section_data->size);
+		return -EINVAL;
+	}
+
+	thermal_sm_memcpy_fromio(data, section_data->addr, offset, size);
+
+	return 0;
 }
 
 /*
@@ -142,24 +162,28 @@ static struct thermal_sm_section_data *get_valid_section_data(enum thermal_sm_se
  * @data: pointer to the thermal_stats metrics data structure destination
  *
  * Return: 0 on success
- *	-EINVAL: invalid arguments
- *	-ENODEV: shared memory section isn't initialized properly
+ *	error-code: error returned by get_data_from_sm_section()
  */
 int thermal_sm_get_thermal_stats_metrics(struct thermal_sm_stats_metrics *data)
 {
-	struct thermal_sm_section_data *thermal_stats_sm;
 	int metrics_offset = offsetof(struct thermal_sm_stats_data, metrics);
 
-	if (!data)
-		return -EINVAL;
+	return get_data_from_sm_section(THERMAL_SM_STATS, metrics_offset, sizeof(*data),
+					(u8 *)data);
+}
 
-	thermal_stats_sm = get_valid_section_data(THERMAL_SM_STATS);
-	if (!thermal_stats_sm)
-		return -ENODEV;
-
-	thermal_sm_memcpy_fromio(data, thermal_stats_sm->addr, metrics_offset, sizeof(*data));
-
-	return 0;
+/*
+ * thermal_sm_get_tj_pressure_data - copy tj thermal pressure data from shared memory
+ *
+ * @data: pointer to the destination buffer
+ * @size: number of bytes to read
+ *
+ * Return: 0 on success
+ *	error-code: error returned by get_data_from_sm_section()
+ */
+int thermal_sm_get_tj_pressure_data(u8 *data, u32 size)
+{
+	return get_data_from_sm_section(THERMAL_SM_TJ_PRESSURE, 0, size, data);
 }
 
 /*
@@ -168,24 +192,14 @@ int thermal_sm_get_thermal_stats_metrics(struct thermal_sm_stats_metrics *data)
  * @data: pointer to the thermal_stats thresholds destination
  *
  * Return: 0 on success
- *	-EINVAL: invalid arguments
- *	-ENODEV: shared memory section isn't initialized properly
+ *	error-code: error returned by get_data_from_sm_section()
  */
 int thermal_sm_get_thermal_stats_thresholds(struct thermal_sm_stats_thresholds *data)
 {
-	struct thermal_sm_section_data *thermal_stats_sm;
 	int thresholds_offset = offsetof(struct thermal_sm_stats_data, thresholds);
 
-	if (!data)
-		return -EINVAL;
-
-	thermal_stats_sm = get_valid_section_data(THERMAL_SM_STATS);
-	if (!thermal_stats_sm)
-		return -ENODEV;
-
-	thermal_sm_memcpy_fromio(data, thermal_stats_sm->addr, thresholds_offset, sizeof(*data));
-
-	return 0;
+	return get_data_from_sm_section(THERMAL_SM_STATS, thresholds_offset, sizeof(*data),
+					(u8 *)data);
 }
 
 /*
@@ -194,24 +208,14 @@ int thermal_sm_get_thermal_stats_thresholds(struct thermal_sm_stats_thresholds *
  * @data: pointer to the thermal_stats thresholds source
  *
  * Return: 0 on success
- *	-EINVAL: invalid arguments
- *	-ENODEV: shared memory section isn't initialized properly
+ *	error-code: error returned by get_data_from_sm_section()
  */
 int thermal_sm_set_thermal_stats_thresholds(struct thermal_sm_stats_thresholds *data)
 {
-	struct thermal_sm_section_data *thermal_stats_sm;
 	int thresholds_offset = offsetof(struct thermal_sm_stats_data, thresholds);
 
-	if (!data)
-		return -EINVAL;
-
-	thermal_stats_sm = get_valid_section_data(THERMAL_SM_STATS);
-	if (!thermal_stats_sm)
-		return -ENODEV;
-
-	thermal_sm_memcpy_toio(thermal_stats_sm->addr, data, thresholds_offset, sizeof(*data));
-
-	return 0;
+	return get_data_from_sm_section(THERMAL_SM_STATS, thresholds_offset, sizeof(*data),
+					(u8 *)data);
 }
 
 /*
@@ -220,20 +224,9 @@ int thermal_sm_set_thermal_stats_thresholds(struct thermal_sm_stats_thresholds *
  * @data: pointer to shared memory trip counter section data structure
  *
  * Return: 0 on success
- * 	-EINVAL: NULL trip_counters
- * 	-ENODEV: invalid section
+ *	error-code: error returned by get_data_from_sm_section()
  */
 int thermal_sm_get_tmu_trip_counter(struct thermal_sm_trip_counter_data *data)
 {
-	struct thermal_sm_section_data *trip_count_section;
-
-	if (!data)
-		return -EINVAL;
-
-	trip_count_section = get_valid_section_data(THERMAL_SM_TRIP_COUNT);
-	if (!trip_count_section)
-		return -ENODEV;
-
-	thermal_sm_memcpy_fromio(data, trip_count_section->addr, 0, sizeof(*data));
-	return 0;
+	return get_data_from_sm_section(THERMAL_SM_TRIP_COUNT, 0, sizeof(*data), (u8 *)data);
 }

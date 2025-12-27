@@ -100,7 +100,7 @@ static void cpm_mbox_rx_worker(struct work_struct *work)
 {
 	struct thermal_cpm_mbox_rx_work *rx = container_of(work, struct thermal_cpm_mbox_rx_work,
 							   work);
-	u32 payload[GOOG_MBA_PAYLOAD_SIZE];
+	u32 payload[GOOG_MBA_PAYLOAD_SIZE] = {0};
 	struct thermal_cpm_mbox_request *req;
 	unsigned long flags;
 
@@ -111,6 +111,7 @@ static void cpm_mbox_rx_worker(struct work_struct *work)
 		payload[0] = req->tzid;
 		payload[1] = req->req_rsvd0;
 		break;
+	case THERMAL_STATE_NOTIFICATION:
 	case THERMAL_REQUEST_THROTTLE:
 	default:
 		memcpy(payload, rx->data, sizeof(payload));
@@ -135,16 +136,17 @@ void cpm_mbox_rx_callback(u32 context, void *msg, void *priv_data)
 
 	switch (resp->type) {
 	case THERMAL_REQUEST_THROTTLE:
+	case THERMAL_STATE_NOTIFICATION:
 		ret = tzid_to_rx_cb_type(drv_data, resp->tzid, &hw_rx_cb_type);
 		if (ret) {
-			dev_err(drv_data->dev, "Invalid tzid: %u from CPM: ret=%d\n",
-				resp->tzid, ret);
+			dev_err(drv_data->dev, "Invalid tzid: %u type: %u from CPM: ret=%d\n",
+				resp->tzid, resp->type, ret);
 			return;
 		}
 		break;
 	case THERMAL_NTC_REQUEST:
 		hw_rx_cb_type = HW_RX_CB_NTC;
-		dev_err(drv_data->dev, "Received NTC IRQ.\n");
+		dev_dbg(drv_data->dev, "Received NTC IRQ.\n");
 		break;
 	default:
 		dev_err(drv_data->dev, "Invalid type:%d.\n", resp->type);
