@@ -76,6 +76,21 @@ int aoc_compr_offload_reset_io_sample_base(struct aoc_alsa_stream *alsa_stream)
 	return err;
 }
 
+int aoc_compr_offload_reset_decorder_base(struct aoc_alsa_stream *alsa_stream)
+{
+	int err = 0;
+
+	err = aoc_compr_get_decoder_position(alsa_stream,
+		&alsa_stream->compr_pcm_decoder_base);
+	if (err < 0) {
+		pr_err("ERR: fail to get audio playback samples, err = %d\n", err);
+		return err;
+	}
+	pr_info("%s: compr_pcm_decoder_base = %llu\n",
+		__func__, alsa_stream->compr_pcm_decoder_base);
+	return err;
+}
+
 void aoc_compr_offload_isr(struct aoc_service_dev *dev)
 {
 	struct aoc_alsa_stream *alsa_stream;
@@ -359,8 +374,7 @@ static int aoc_compr_playback_open(struct snd_compr_stream *cstream)
 	alsa_stream->eof_reach = 0;
 	alsa_stream->gapless_offload_enable = chip->gapless_offload_enable;
 
-	if (!IS_ENABLED(CONFIG_SOC_GS101) && !IS_ENABLED(CONFIG_SOC_GS201) &&
-	    chip->mmap_offload_enable)
+	if (!chip->skip_mmap_offload && chip->mmap_offload_enable)
 		alsa_stream->stream_type = MMAPED;
 
 	snd_compr_use_pause_in_draining(cstream);
@@ -584,6 +598,30 @@ static int aoc_compr_trigger(struct snd_soc_component *component, struct snd_com
 	}
 out:
 	return err;
+}
+
+int aoc_compr_get_decoder_position(struct aoc_alsa_stream *alsa_stream, uint64_t *position)
+{
+	uint64_t current_decoder_frame = 0;
+
+	if (position == NULL) {
+		pr_err("%s: invalid position\n", __func__);
+		return -EINVAL;
+	}
+
+	if (alsa_stream->stream_type != MMAPED)
+		return 0;
+
+	if (aoc_compr_offload_get_decoder_frames(alsa_stream, &current_decoder_frame) < 0) {
+		pr_err("%s: failed to get playback decoder frames\n", __func__);
+		return -EINVAL;
+	}
+
+	*position = current_decoder_frame - alsa_stream->compr_pcm_decoder_base;
+
+	pr_debug("%s: current_decoder_frame=%llu base=%llu, position=%llu\n", __func__,
+			current_decoder_frame, alsa_stream->compr_pcm_decoder_base, *position);
+	return 0;
 }
 
 int aoc_compr_get_position(struct aoc_alsa_stream *alsa_stream, uint64_t *position)

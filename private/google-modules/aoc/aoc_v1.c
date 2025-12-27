@@ -392,7 +392,9 @@ EXPORT_SYMBOL_GPL(aoc_configure_ssmt);
 
 void platform_specific_remove(struct platform_device *pdev, struct aoc_prvdata *prvdata)
 {
+	acpm_ipc_release_channel(pdev->dev.of_node, prvdata->acpm_async_id);
 }
+
 void configure_crash_interrupts(struct aoc_prvdata *prvdata, bool enable)
 {
 	if (prvdata->first_fw_load) {

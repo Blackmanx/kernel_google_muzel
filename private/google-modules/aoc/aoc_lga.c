@@ -273,6 +273,8 @@ int platform_specific_probe(struct platform_device *pdev, struct aoc_prvdata *pr
 	if (sswrp_power)
 		iowrite32(0x0, sswrp_power);
 
+	lga_prvdata->wake_reasons = NULL;
+
 	/* Properly initialize count for genpd */
 	pm_runtime_get_noresume(dev);
 	pm_runtime_set_active(dev);
@@ -573,10 +575,13 @@ int platform_specific_aoc_offline(void)
 		devm_free_irq(lga_prvdata->aoc_dev, lga_prvdata->irqs[i], lga_prvdata->aoc_prvdata);
 	lga_prvdata->wake_reasons_ap_unlocked_size = 0;
 
-	for (i = 0; i < lga_prvdata->wake_reasons_size; i++)
+	for (i = 0; i < lga_prvdata->wake_reasons_size; i++) {
 		kfree(lga_prvdata->wake_reasons[i]);
+		lga_prvdata->wake_reasons[i] = NULL;
+	}
 	lga_prvdata->wake_reasons_size = 0;
 	kfree(lga_prvdata->wake_reasons);
+	lga_prvdata->wake_reasons = NULL;
 
 	return 0;
 }

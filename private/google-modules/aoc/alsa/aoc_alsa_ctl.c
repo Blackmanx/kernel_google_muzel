@@ -956,6 +956,45 @@ static int audio_offload_position_ctl_set(struct snd_kcontrol *kcontrol,
 	return err;
 }
 
+static int audio_offload_decoder_position_ctl_get(struct snd_kcontrol *kcontrol,
+					  struct snd_ctl_elem_value *ucontrol)
+{
+	struct aoc_chip *chip = snd_kcontrol_chip(kcontrol);
+	uint64_t current_decoder_position = 0;
+	int err = 0;
+
+	if (mutex_lock_interruptible(&chip->audio_mutex))
+		return -EINTR;
+
+	if (chip->compr_offload_stream != NULL) {
+		err = aoc_compr_get_decoder_position(
+			chip->compr_offload_stream, &current_decoder_position);
+		if (err == 0)
+			memcpy(ucontrol->value.bytes.data, &current_decoder_position,
+				sizeof(uint64_t));
+	}
+
+	mutex_unlock(&chip->audio_mutex);
+
+	return err;
+}
+
+static int audio_offload_decoder_position_ctl_set(struct snd_kcontrol *kcontrol,
+					       struct snd_ctl_elem_value *ucontrol)
+{
+	struct aoc_chip *chip = snd_kcontrol_chip(kcontrol);
+	int err = 0;
+
+	if (mutex_lock_interruptible(&chip->audio_mutex))
+		return -EINTR;
+
+	if (chip->compr_offload_stream != NULL)
+		err = aoc_compr_offload_reset_decorder_base(chip->compr_offload_stream);
+
+	mutex_unlock(&chip->audio_mutex);
+	return err;
+}
+
 static int sidetone_enable_ctl_set(struct snd_kcontrol *kcontrol,
 				   struct snd_ctl_elem_value *ucontrol)
 {
@@ -2481,7 +2520,8 @@ static const char *bt_mode_texts[] = { "Unconfigured", "SCO",
 				       "A2DP_ENC_SBC", "A2DP_ENC_AAC",
 				       "A2DP_ENC_LC3", "BLE_ENC_LC3",
 				       "BLE_CONVERSATION", "A2DP_ENC_OPUS",
-				       "A2DP_RAW",     "ESCO_LC3" };
+				       "A2DP_RAW",     "ESCO_LC3",
+				       "A2DP_ENC", "BLE_MEDIA" };
 static SOC_ENUM_SINGLE_DECL(bt_mode_enum, 1, SINK_BT, bt_mode_texts);
 
 static const char *usb_mode_texts[] = { "Unconfigured", "USB",
@@ -2916,6 +2956,18 @@ static struct snd_kcontrol_new snd_aoc_ctl[] = {
 		.info = snd_aoc_ctl_info,
 		.get = audio_offload_position_ctl_get,
 		.put = audio_offload_position_ctl_set,
+		.count = 1,
+	},
+
+	{
+		.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
+		.name = "Offload Decoder Position",
+		.index = 0,
+		.access = SNDRV_CTL_ELEM_ACCESS_READWRITE,
+		.private_value = OFFLOAD_POSITION,
+		.info = snd_aoc_ctl_info,
+		.get = audio_offload_decoder_position_ctl_get,
+		.put = audio_offload_decoder_position_ctl_set,
 		.count = 1,
 	},
 

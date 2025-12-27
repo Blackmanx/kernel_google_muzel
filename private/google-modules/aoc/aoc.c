@@ -1542,7 +1542,7 @@ static void aoc_did_become_online(struct work_struct *work)
 				dev_name(&prvdata->services[i]->dev), ret);
 	}
 
-	if (!IS_ENABLED(CONFIG_SOC_GS101) && !IS_ENABLED(CONFIG_SOC_GS201))
+	if (!of_property_read_bool(prvdata->dev->of_node, "skip-mmap-offload"))
 		if ((!prvdata->audio_offload_heap_base) && (!aoc_set_dma_buf_as_ring(prvdata)))
 			dev_err(dev, "failed to set the dma-buf heap as ring buffer\n");
 
@@ -2675,7 +2675,7 @@ bool aoc_set_dma_buf_as_ring(struct aoc_prvdata *prvdata)
 								phy_ring_base, OFFLOAD_HEAP_SIZE);
 	prvdata->audio_offload_heap_base = phy_ring_base;
 
-	return IS_ERR(prvdata->audio_offload_heap);
+	return !IS_ERR(prvdata->audio_offload_heap);
 }
 
 /* Returns true if `base` is located within the aoc dram carveout */
@@ -2693,6 +2693,7 @@ long aoc_unlocked_ioctl_handle_ion_fd(unsigned int cmd, unsigned long arg)
 	struct aoc_ion_handle handle;
 	struct dma_buf *dmabuf;
 	struct samsung_dma_buffer *dma_heap_buf;
+	bool is_aoc_buf;
 
 	struct ion_physical_heap *phys_heap;
 	phys_addr_t base;
@@ -2722,10 +2723,10 @@ long aoc_unlocked_ioctl_handle_ion_fd(unsigned int cmd, unsigned long arg)
 		base = phys_heap->base;
 	}
 
-	if (!(is_aoc_dma_buf(prvdata, base)))
-		return ret;
-
+	is_aoc_buf = is_aoc_dma_buf(prvdata, base);
 	dma_buf_put(dmabuf);
+	if (!is_aoc_buf)
+		return ret;
 
 	if (!copy_to_user((struct aoc_ion_handle *)arg, &handle, _IOC_SIZE(cmd)))
 		ret = 0;
@@ -3017,7 +3018,6 @@ static int aoc_platform_remove(struct platform_device *pdev)
 
 	platform_specific_remove(pdev, prvdata);
 
-	acpm_ipc_release_channel(pdev->dev.of_node, prvdata->acpm_async_id);
 	for (i = 0; i < prvdata->sensor_power_count; i++) {
 		if (prvdata->sensor_regulator[i]) {
 			regulator_put(prvdata->sensor_regulator[i]);
