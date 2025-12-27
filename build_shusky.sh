@@ -1,7 +1,1 @@
-#!/bin/bash
-# SPDX-License-Identifier: GPL-2.0
-
-exec tools/bazel run \
-    --config=stamp \
-    --config=shusky \
-    //private/devices/google/shusky:zuma_shusky_dist "$@"
+private/devices/google/shusky/build_shusky.sh
