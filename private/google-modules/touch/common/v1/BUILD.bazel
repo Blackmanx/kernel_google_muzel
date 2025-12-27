@@ -1,0 +1,81 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+
+load("//build/kernel/kleaf:kernel.bzl", "checkpatch", "ddk_headers")
+
+checkpatch(
+    name = "checkpatch",
+    checkpatch_pl = "//common:scripts/checkpatch.pl",
+)
+
+ddk_headers(
+    name = "ddk_headers",
+    hdrs = glob([
+        "**/*.h",
+    ]),
+    includes = [
+        ".",
+        "include",
+    ],
+    visibility = [
+        "//private/google-modules/touch/common:__subpackages__",
+    ],
+)
+
+filegroup(
+    name = "touch.common.uapi_headers",
+    srcs = glob([
+        "include/uapi/**/*.h",
+    ]),
+    visibility = [
+        "//private/google-modules/touch/common:__subpackages__",
+    ],
+)
+
+filegroup(
+    name = "touch.common.touch_bus_negotiator",
+    srcs = glob([
+        "**/*.h",
+    ]) + [
+        "touch_bus_negotiator.c",
+    ],
+    visibility = [
+        "//private/google-modules/touch/common:__subpackages__",
+    ],
+)
+
+filegroup(
+    name = "touch.common.heatmap",
+    srcs = glob([
+        "**/*.h",
+    ]) + [
+        "heatmap.c",
+    ],
+    visibility = [
+        "//private/google-modules/touch/common:__subpackages__",
+    ],
+)
+
+filegroup(
+    name = "touch.common.touch_offload",
+    srcs = glob([
+        "**/*.h",
+    ]) + [
+        "touch_offload.c",
+    ],
+    visibility = [
+        "//private/google-modules/touch/common:__subpackages__",
+    ],
+)
+
+filegroup(
+    name = "touch.common.goog_touch_interface",
+    srcs = glob([
+        "**/*.h",
+    ]) + [
+        "goog_touch_interface.c",
+        "sim.c",
+    ],
+    visibility = [
+        "//private/google-modules/touch/common:__subpackages__",
+    ],
+)

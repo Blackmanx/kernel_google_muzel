@@ -4446,6 +4446,7 @@ static int sec_ts_fw_init(struct sec_ts_data *ts)
 	ts->dex_name = "";
 
 	ts->input_dev->name = "sec_touchscreen";
+	ts->input_dev->uniq = "google_touchscreen";
 	sec_ts_set_input_prop(ts, ts->input_dev, INPUT_PROP_DIRECT);
 #ifdef USE_OPEN_CLOSE
 	ts->input_dev->open = sec_ts_input_open;

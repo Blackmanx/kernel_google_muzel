@@ -392,6 +392,11 @@ static void syna_dev_restore_feature_setting(struct syna_tcm *tcm, unsigned int 
 			tcm->hw_if->grip_border_threshold,
 			delay_ms_resp);
 
+	syna_tcm_set_dynamic_config(tcm->tcm_dev,
+			DC_HIGH_SENSITIVIRY_MODE,
+			tcm->high_sensitivity_mode,
+			delay_ms_resp);
+
 	if (tcm->hw_if->dynamic_report_rate) {
 		syna_tcm_set_dynamic_config(tcm->tcm_dev,
 				DC_REPORT_RATE_SWITCH,

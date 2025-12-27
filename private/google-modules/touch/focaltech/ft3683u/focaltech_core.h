@@ -259,6 +259,47 @@ enum SS_TYPE {
     SS_WATER,
 };
 
+struct STTWParams {
+  uint8_t reg_addr;
+  uint16_t min_x;
+  uint16_t min_y;
+  uint16_t max_x;
+  uint16_t max_y;
+  uint16_t max_frame_count;
+  uint8_t min_frame_count;
+  uint8_t jitter;
+  uint8_t max_touch_size;
+} __attribute__((packed));
+
+struct LPTWParamsPart1 {
+  uint8_t reg_addr;
+  uint16_t min_x;
+  uint16_t min_y;
+  uint16_t max_x;
+  uint16_t max_y;
+  uint8_t min_frame_count;
+  uint8_t jitter;
+  uint8_t max_touch_size;
+} __attribute__((packed));
+
+struct LPTWParamsPart2And3 {
+  uint8_t reg_addr;
+  uint16_t motion_boundary;
+  uint16_t int2_deassert_min_x;
+  uint16_t int2_deassert_min_y;
+  uint16_t int2_deassert_max_x;
+  uint16_t int2_deassert_max_y;
+  uint16_t marginal_min_x;
+  uint16_t marginal_min_y;
+  uint16_t marginal_max_x;
+  uint16_t marginal_max_y;
+  uint8_t monitor_channel_min_tx;
+  uint8_t monitor_channel_max_tx;
+  uint8_t monitor_channel_min_rx;
+  uint8_t monitor_channel_max_rx;
+  uint8_t min_node_count;
+} __attribute__((packed));
+
 struct fts_ts_data {
     struct i2c_client *client;
     struct spi_device *spi;

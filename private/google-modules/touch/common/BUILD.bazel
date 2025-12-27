@@ -8,6 +8,20 @@ checkpatch(
     checkpatch_pl = "//common:scripts/checkpatch.pl",
 )
 
+string_flag(
+    name = "api_version",
+    build_setting_default = "1",
+    values = [
+        "1",
+        "2",
+    ],
+)
+
+config_setting(
+    name = "is_v2",
+    flag_values = {":api_version": "2"},
+)
+
 filegroup(
     name = "touch.common.kconfig",
     srcs = [
@@ -51,9 +65,10 @@ config_setting(
 
 ddk_headers(
     name = "ddk_headers",
-    hdrs = glob([
-        "**/*.h",
-    ]),
+    hdrs = select({
+        "is_v2": ["//private/google-modules/touch/common/v2:ddk_headers"],
+        "//conditions:default": ["//private/google-modules/touch/common/v1:ddk_headers"],
+    }),
     includes = [
         ".",
         "include",
@@ -67,9 +82,10 @@ ddk_headers(
 
 ddk_uapi_headers(
     name = "uapi_headers",
-    srcs = glob([
-        "include/uapi/**/*.h",
-    ]),
+    srcs = select({
+        "is_v2": ["//private/google-modules/touch/common/v2:touch.common.uapi_headers"],
+        "//conditions:default": ["//private/google-modules/touch/common/v1:touch.common.uapi_headers"],
+    }),
     out = "touch.common-uapi-headers.tar.gz",
     kernel_build = "//private/devices/google/common:kernel",
     visibility = [
@@ -79,14 +95,13 @@ ddk_uapi_headers(
 
 ddk_module(
     name = "touch_bus_negotiator",
-    srcs = glob([
-        "**/*.h",
-    ]) + [
-        "touch_bus_negotiator.c",
-    ],
+    srcs = select({
+        "is_v2": ["//private/google-modules/touch/common/v2:touch.common.touch_bus_negotiator"],
+        "//conditions:default": ["//private/google-modules/touch/common/v1:touch.common.touch_bus_negotiator"],
+    }),
     out = "touch_bus_negotiator.ko",
     defconfig = "defconfig_touch_bus_negotiator",
-    kconfig = "Kconfig",
+    kconfig = ":touch.common.kconfig",
     kernel_build = "//private/devices/google/common:kernel",
     local_defines = [
         "DYNAMIC_DEBUG_MODULE",
@@ -106,14 +121,13 @@ ddk_module(
 
 ddk_module(
     name = "heatmap",
-    srcs = glob([
-        "**/*.h",
-    ]) + [
-        "heatmap.c",
-    ],
+    srcs = select({
+        "is_v2": ["//private/google-modules/touch/common/v2:touch.common.heatmap"],
+        "//conditions:default": ["//private/google-modules/touch/common/v1:touch.common.heatmap"],
+    }),
     out = "heatmap.ko",
     defconfig = "defconfig_heatmap",
-    kconfig = "Kconfig",
+    kconfig = ":touch.common.kconfig",
     kernel_build = "//private/devices/google/common:kernel",
     local_defines = [
         "DYNAMIC_DEBUG_MODULE",
@@ -132,14 +146,13 @@ ddk_module(
 
 ddk_module(
     name = "touch_offload",
-    srcs = glob([
-        "**/*.h",
-    ]) + [
-        "touch_offload.c",
-    ],
+    srcs = select({
+        "is_v2": ["//private/google-modules/touch/common/v2:touch.common.touch_offload"],
+        "//conditions:default": ["//private/google-modules/touch/common/v1:touch.common.touch_offload"],
+    }),
     out = "touch_offload.ko",
     defconfig = "defconfig_touch_offload",
-    kconfig = "Kconfig",
+    kconfig = ":touch.common.kconfig",
     kernel_build = "//private/devices/google/common:kernel",
     local_defines = [
         "DYNAMIC_DEBUG_MODULE",
@@ -158,14 +171,13 @@ ddk_module(
 
 ddk_module(
     name = "goog_touch_interface",
-    srcs = glob([
-        "**/*.h",
-    ]) + [
-        "goog_touch_interface.c",
-    ],
+    srcs = select({
+        "is_v2": ["//private/google-modules/touch/common/v2:touch.common.goog_touch_interface"],
+        "//conditions:default": ["//private/google-modules/touch/common/v1:touch.common.goog_touch_interface"],
+    }),
     out = "goog_touch_interface.ko",
     defconfig = "defconfig_goog_touch_interface",
-    kconfig = "Kconfig",
+    kconfig = ":touch.common.kconfig",
     kernel_build = "//private/devices/google/common:kernel",
     local_defines = [
         "DYNAMIC_DEBUG_MODULE",

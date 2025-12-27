@@ -851,12 +851,10 @@ static void fts_update_abnormal_reset(struct fts_ts_data *data,
           break;
         case 6:
           FTS_ERROR("Touch ic reset: 6");
-          fts_update_feature_setting(data);
-          break;
+          return;
         case 7:
           FTS_ERROR("Touch ic reset: 7");
-          fts_update_feature_setting(data);
-          break;
+          return;
         default:
           return;
     }
@@ -1127,7 +1125,13 @@ static int fts_read_parse_touchdata(struct fts_ts_data *data)
 	}
 
 #if GOOGLE_REPORT_TIMESTAMP_MODE
-    data->timestamp = (u32)((buf[84] << 24) + (buf[85] << 16) + (buf[86] << 8) + buf[87]);
+    u32 current_timestamp = (u32)((buf[84] << 24) + (buf[85] << 16) + (buf[86] << 8) + buf[87]);
+    if (current_timestamp == data->timestamp) {
+        FTS_WARN("Duplicate frame data detected, dropping frame. Timestamp: %u", current_timestamp);
+        return -EALREADY;
+    }
+
+    data->timestamp = current_timestamp;
 #endif // GOOGLE_REPORT_TIMESTAMP_MODE
 
     if (data->touch_point == 0) {

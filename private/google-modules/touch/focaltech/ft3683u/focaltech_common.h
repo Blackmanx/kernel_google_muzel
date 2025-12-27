@@ -235,6 +235,7 @@ enum FW_HEATMAP_MODE {
 #define FTS_FUNC_EXIT()
 #endif
 
+#define FTS_WARN(fmt, ...) pr_warn(fmt, ##__VA_ARGS__)
 #define FTS_INFO(fmt, ...) pr_info(fmt, ##__VA_ARGS__)
 #define FTS_ERROR(fmt, ...) pr_err(fmt, ##__VA_ARGS__)
 #define PR_LOGD(fmt, ...) pr_debug(fmt, ##__VA_ARGS__)

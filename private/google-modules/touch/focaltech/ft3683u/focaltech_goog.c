@@ -1073,6 +1073,8 @@ static int gti_get_mutual_or_self_sensor_data(void *private_data, struct gti_sen
     fts_set_irq_report_onoff(DISABLE);
     msleep(10);
 
+    fts_release_all_finger();
+
     base_raw = fts_malloc(base_raw_size);
     if (!base_raw) {
       FTS_ERROR("Failed to allocate memory for base_raw");
@@ -1224,6 +1226,312 @@ static int gti_set_coord_filter_enabled(void *private_data, struct gti_coord_fil
     return ret;
 }
 
+static uint16_t endian_swap(uint16_t value) {
+  return (value << 8) | (value >> 8);
+}
+
+static void check_gesture_config_change(struct gti_gesture_config_cmd *cmd,
+                                        bool *is_sttw_changed,
+                                        bool *is_lptw_part1_changed,
+                                        bool *is_lptw_part2_and3_changed,
+                                        bool *is_gesture_type_changed) {
+  int i = 0;
+  for (i = 0; i < GTI_GESTURE_PARAMS_MAX; i++) {
+    if (!cmd->updating_params[i]) continue;
+
+    switch (i) {
+      case GTI_STTW_MIN_X:
+      case GTI_STTW_MAX_X:
+      case GTI_STTW_MIN_Y:
+      case GTI_STTW_MAX_Y:
+      case GTI_STTW_MIN_FRAME:
+      case GTI_STTW_MAX_FRAME:
+      case GTI_STTW_JITTER:
+      case GTI_STTW_MAX_TOUCH_SIZE:
+        *is_sttw_changed = true;
+        break;
+      case GTI_LPTW_MIN_X:
+      case GTI_LPTW_MAX_X:
+      case GTI_LPTW_MIN_Y:
+      case GTI_LPTW_MAX_Y:
+      case GTI_LPTW_MIN_FRAME:
+      case GTI_LPTW_JITTER:
+      case GTI_LPTW_MAX_TOUCH_SIZE:
+        *is_lptw_part1_changed = true;
+        break;
+      case GTI_LPTW_MARGINAL_MIN_X:
+      case GTI_LPTW_MARGINAL_MAX_X:
+      case GTI_LPTW_MARGINAL_MIN_Y:
+      case GTI_LPTW_MARGINAL_MAX_Y:
+      case GTI_LPTW_MONITOR_CH_MIN_TX:
+      case GTI_LPTW_MONITOR_CH_MAX_TX:
+      case GTI_LPTW_MONITOR_CH_MIN_RX:
+      case GTI_LPTW_MONITOR_CH_MAX_RX:
+      case GTI_LPTW_NODE_COUNT_MIN:
+      case GTI_LPTW_MOTION_BOUNDARY:
+        *is_lptw_part2_and3_changed = true;
+        break;
+      case GTI_GESTURE_TYPE:
+        *is_gesture_type_changed = true;
+    }
+  }
+}
+
+static int update_sttw_config(struct gti_gesture_config_cmd *cmd) {
+  int i = 0;
+  int ret = 0;
+  struct STTWParams sttw_params = {};
+  sttw_params.reg_addr = FTS_STTW_REG_SET_E5;
+  ret = fts_read(&sttw_params.reg_addr, 1, (u8 *)&sttw_params + 1,
+                 FTS_STTW_E5_BUF_LEN - 1);
+  if (ret < 0) {
+    FTS_ERROR("Failed to read STTW reg: %02X, ret: %d", sttw_params.reg_addr,
+              ret);
+    return ret;
+  }
+
+  for (i = 0; i < GTI_GESTURE_PARAMS_MAX; i++) {
+    if (!cmd->updating_params[i]) continue;
+
+    switch (i) {
+      case GTI_STTW_MIN_X:
+        sttw_params.min_x = endian_swap(cmd->params[i] * 16 / 10);
+        break;
+      case GTI_STTW_MAX_X:
+        sttw_params.max_x = endian_swap(cmd->params[i] * 16 / 10);
+        break;
+      case GTI_STTW_MIN_Y:
+        sttw_params.min_y = endian_swap(cmd->params[i] * 16 / 10);
+        break;
+      case GTI_STTW_MAX_Y:
+        sttw_params.max_y = endian_swap(cmd->params[i] * 16 / 10);
+        break;
+      case GTI_STTW_MIN_FRAME:
+        sttw_params.min_frame_count = cmd->params[i];
+        break;
+      case GTI_STTW_MAX_FRAME:
+        sttw_params.max_frame_count = endian_swap(cmd->params[i]);
+        break;
+      case GTI_STTW_JITTER:
+        sttw_params.jitter = cmd->params[i];
+        break;
+      case GTI_STTW_MAX_TOUCH_SIZE:
+        sttw_params.max_touch_size = cmd->params[i];
+        break;
+    }
+  }
+
+  ret = fts_write((u8 *)&sttw_params, sizeof(struct STTWParams));
+  if (ret < 0) {
+    FTS_ERROR("Failed to write STTW config, %d", ret);
+  } else {
+    FTS_DEBUG("Updated STTW config successfully");
+  }
+  return ret;
+}
+
+static int update_lptw_part1_config(struct gti_gesture_config_cmd *cmd) {
+  int i = 0;
+  int ret = 0;
+  struct LPTWParamsPart1 lptw_params_part1 = {};
+  lptw_params_part1.reg_addr = FTS_LPTW_REG_SET_E3;
+  ret = fts_read(&lptw_params_part1.reg_addr, 1, (u8 *)&lptw_params_part1 + 1,
+                 FTS_LPTW_E3_BUF_LEN - 1);
+  if (ret < 0) {
+    FTS_ERROR("Failed to read LPTW part 1 reg: %02X, ret: %d",
+              lptw_params_part1.reg_addr, ret);
+    return ret;
+  }
+
+  for (i = 0; i < GTI_GESTURE_PARAMS_MAX; i++) {
+    if (!cmd->updating_params[i]) continue;
+
+    switch (i) {
+      case GTI_LPTW_MIN_X:
+        lptw_params_part1.min_x = endian_swap(cmd->params[i] * 16 / 10);
+        break;
+      case GTI_LPTW_MAX_X:
+        lptw_params_part1.max_x = endian_swap(cmd->params[i] * 16 / 10);
+        break;
+      case GTI_LPTW_MIN_Y:
+        lptw_params_part1.min_y = endian_swap(cmd->params[i] * 16 / 10);
+        break;
+      case GTI_LPTW_MAX_Y:
+        lptw_params_part1.max_y = endian_swap(cmd->params[i] * 16 / 10);
+        break;
+      case GTI_LPTW_MIN_FRAME:
+        lptw_params_part1.min_frame_count = cmd->params[i];
+        break;
+      case GTI_LPTW_JITTER:
+        lptw_params_part1.jitter = cmd->params[i];
+        break;
+      case GTI_LPTW_MAX_TOUCH_SIZE:
+        lptw_params_part1.max_touch_size = cmd->params[i];
+        break;
+    }
+  }
+
+  ret = fts_write((u8 *)&lptw_params_part1, sizeof(struct LPTWParamsPart1));
+  if (ret < 0) {
+    FTS_ERROR("Failed to write LPTW part 1 config, %d", ret);
+  } else {
+    FTS_DEBUG("Updated LPTW part 1 config successfully");
+  }
+  return ret;
+}
+
+static int update_lptw_part2_and3_config(struct gti_gesture_config_cmd *cmd) {
+  int i = 0;
+  int ret = 0;
+  struct LPTWParamsPart2And3 lptw_params_part2_and_3 = {};
+  lptw_params_part2_and_3.reg_addr = FTS_LPTW_REG_SET_E4;
+  ret = fts_read(&lptw_params_part2_and_3.reg_addr, 1,
+                 (u8 *)&lptw_params_part2_and_3 + 1, FTS_LPTW_E4_BUF_LEN - 1);
+  if (ret < 0) {
+    FTS_ERROR("Failed to read LPTW part 2 and 3 reg: %02X, ret: %d",
+              lptw_params_part2_and_3.reg_addr, ret);
+    return ret;
+  }
+
+  for (i = 0; i < GTI_GESTURE_PARAMS_MAX; i++) {
+    if (!cmd->updating_params[i]) continue;
+
+    switch (i) {
+      case GTI_LPTW_MARGINAL_MIN_X:
+        lptw_params_part2_and_3.marginal_min_x =
+            endian_swap(cmd->params[i] * 16 / 10);
+        break;
+      case GTI_LPTW_MARGINAL_MAX_X:
+        lptw_params_part2_and_3.marginal_max_x =
+            endian_swap(cmd->params[i] * 16 / 10);
+        break;
+      case GTI_LPTW_MARGINAL_MIN_Y:
+        lptw_params_part2_and_3.marginal_min_y =
+            endian_swap(cmd->params[i] * 16 / 10);
+        break;
+      case GTI_LPTW_MARGINAL_MAX_Y:
+        lptw_params_part2_and_3.marginal_max_y =
+            endian_swap(cmd->params[i] * 16 / 10);
+        break;
+      case GTI_LPTW_MONITOR_CH_MIN_TX:
+        lptw_params_part2_and_3.monitor_channel_min_tx = cmd->params[i];
+        break;
+      case GTI_LPTW_MONITOR_CH_MAX_TX:
+        lptw_params_part2_and_3.monitor_channel_max_tx = cmd->params[i];
+        break;
+      case GTI_LPTW_MONITOR_CH_MIN_RX:
+        lptw_params_part2_and_3.monitor_channel_min_rx = cmd->params[i];
+        break;
+      case GTI_LPTW_MONITOR_CH_MAX_RX:
+        lptw_params_part2_and_3.monitor_channel_max_rx = cmd->params[i];
+        break;
+      case GTI_LPTW_NODE_COUNT_MIN:
+        lptw_params_part2_and_3.min_node_count = cmd->params[i];
+        break;
+      case GTI_LPTW_MOTION_BOUNDARY:
+        lptw_params_part2_and_3.motion_boundary =
+            endian_swap(cmd->params[i] / 10);
+        break;
+    }
+  }
+
+  ret = fts_write((u8 *)&lptw_params_part2_and_3,
+                  sizeof(struct LPTWParamsPart2And3));
+  if (ret < 0) {
+    FTS_ERROR("Failed to write LPTW part 2 and 3 config, %d", ret);
+  } else {
+    FTS_DEBUG("Updated LPTW part 2 and 3 config successfully");
+  }
+  return ret;
+}
+
+static int update_gesture_type(void *private_data,
+                               struct gti_gesture_config_cmd *cmd) {
+  int i = 0;
+  int ret = 0;
+  struct fts_ts_data *ts_data = private_data;
+  int gesture_mode = 0;
+  int gesture_en = 0;
+
+  for (i = 0; i < GTI_GESTURE_PARAMS_MAX; i++) {
+    if (!cmd->updating_params[i]) continue;
+
+    switch (i) {
+      case GTI_GESTURE_TYPE:
+        switch (cmd->params[i]) {
+          case GTI_GESTURE_DISABLE:
+            gesture_mode = 0;
+            gesture_en = 0;
+            break;
+          case GTI_GESTURE_STTW:
+            gesture_mode = 1;
+            gesture_en = 1;
+            break;
+          case GTI_GESTURE_LPTW:
+            gesture_mode = 2;
+            gesture_en = 1;
+            break;
+          case GTI_GESTURE_STTW_AND_LPTW:
+            gesture_mode = 3;
+            gesture_en = 1;
+            break;
+        }
+    }
+  }
+
+  ret = fts_write_reg_safe(FTS_REG_GESTURE_SWITCH, gesture_mode);
+  if (ret < 0) {
+    FTS_ERROR("Failed to switch gesture mode to %d, %d", gesture_mode, ret);
+    return ret;
+  }
+  ret = fts_write_reg_safe(FTS_REG_GESTURE_EN, gesture_en);
+  if (ret < 0) {
+    FTS_ERROR("Failed to enable gesture mode to %d, %d", gesture_en, ret);
+    return ret;
+  }
+
+  if (gesture_en) {
+    ts_data->gesture_mode = ENABLE;
+    FTS_DEBUG("Gesture enabled");
+  } else {
+    ts_data->gesture_mode = DISABLE;
+    FTS_DEBUG("Gesture disabled");
+  }
+
+  return ret;
+}
+
+static int gti_set_gesture_config(void *private_data,
+                                  struct gti_gesture_config_cmd *cmd) {
+  int ret = 0;
+  bool is_sttw_changed = false;
+  bool is_lptw1_changed = false;
+  bool is_lptw2_and_3_changed = false;
+  bool is_gesture_type_changed = false;
+
+  check_gesture_config_change(cmd, &is_sttw_changed, &is_lptw1_changed,
+                              &is_lptw2_and_3_changed,
+                              &is_gesture_type_changed);
+  if (is_sttw_changed) {
+    ret = update_sttw_config(cmd);
+    if (ret < 0) return ret;
+  }
+  if (is_lptw1_changed) {
+    ret = update_lptw_part1_config(cmd);
+    if (ret < 0) return ret;
+  }
+  if (is_lptw2_and_3_changed) {
+    ret = update_lptw_part2_and3_config(cmd);
+    if (ret < 0) return ret;
+  }
+  if (is_gesture_type_changed) {
+    ret = update_gesture_type(private_data, cmd);
+    if (ret < 0) return ret;
+  }
+
+  return ret;
+}
+
 static void goog_register_options(struct gti_optional_configuration *options,
     struct fts_ts_data *ts)
 {
@@ -1245,7 +1553,7 @@ static void goog_register_options(struct gti_optional_configuration *options,
     options->selftest = gti_selftest;
     options->set_continuous_report = gti_set_continuous_report;
     options->set_coord_filter_enabled = gti_set_coord_filter_enabled;
-    //options->set_gesture_config = syna_set_gesture_config;
+    options->set_gesture_config = gti_set_gesture_config;
     options->set_grip_mode = gti_set_grip_mode;
     options->set_irq_mode = gti_set_irq_mode;
     options->set_palm_mode = gti_set_palm_mode;

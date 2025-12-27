@@ -2123,6 +2123,7 @@ static int fts_chip_init(struct fts_ts_info *info)
 		if (!(res & ERROR_FILE_NOT_FOUND))
 			return res;
 	}
+
 	if (force_burn.panel_init) {
 		pr_info("%s: [2]: MP TEST..\n", __func__);
 		res = fts_production_test_main(info->test_limits_name,
@@ -2242,6 +2243,18 @@ static int fts_chip_init(struct fts_ts_info *info)
 #endif
 
 	pr_info("%s: [3]: TOUCH INIT..\n", __func__);
+
+	res = input_register_device(info->input_dev);
+	if (res) {
+		pr_err("%s: [3]: No such input device\n", __func__);
+		res = -ENODEV;
+		return res;
+	}
+
+#if IS_ENABLED(CONFIG_GOOG_TOUCH_INTERFACE)
+	gti_sysfs_create_vendor_input_link(info->gti);
+#endif
+
 	res = fts_init_sensing(info);
 	if (res != OK) {
 		pr_err("%s: [3]: TOUCH INIT FAILED.. res = %d\n", __func__, res);
@@ -2776,7 +2789,6 @@ static int fts_probe(struct spi_device *client)
 	struct device_node *dp = client->dev.of_node;
 	int ret_val;
 	u16 bus_type;
-	u8 input_dev_free_flag = 0;
 
 	pr_info("%s: driver probe begin!\n", __func__);
 	pr_info("%s: driver ver. %s\n", __func__, FTS_TS_DRV_VERSION);
@@ -2869,8 +2881,7 @@ static int fts_probe(struct spi_device *client)
 	mutex_init(&info->mutex_read_write);
 	mutex_init(&info->mutex_read_write_buf);
 
-	pr_info("%s: SET Input Device Property:\n", __func__);
-	dev_info(info->dev, "SET Pinctrl:\n");
+	pr_info("%s: SET Pinctrl:\n", __func__);
 	ret_val = fts_pinctrl_get(info, true);
 	if (!ret_val)
 		fts_pinctrl_setup(info, true);
@@ -2926,13 +2937,6 @@ static int fts_probe(struct spi_device *client)
 #if !IS_ENABLED(CONFIG_GOOG_TOUCH_INTERFACE)
 	mutex_init(&(info->input_report_mutex));
 #endif
-	error = input_register_device(info->input_dev);
-	if (error) {
-		pr_err("%s: ERROR: No such input device\n", __func__);
-		error = -ENODEV;
-		goto probe_error_exit_4;
-	}
-	input_dev_free_flag = 1;
 
 	info->resume_bit = 1;
 	ret_val = fts_init(info);
@@ -2942,7 +2946,7 @@ static int fts_probe(struct spi_device *client)
 			error = -EPROBE_DEFER;
 		else
 			error = -EIO;
-		goto probe_error_exit_5;
+		goto probe_error_exit_4;
 	}
 
 	ret_val = fts_proc_init(info);
@@ -2954,7 +2958,7 @@ static int fts_probe(struct spi_device *client)
 	if (ret_val < OK) {
 		pr_err("%s: Flashing FW/Production Test/Touch Init Failed..\n",
 			__func__);
-		goto probe_error_exit_5;
+		goto probe_error_exit_4;
 	}
 #else
 	pr_info("%s: SET Auto Fw Update:\n", __func__);
@@ -2962,7 +2966,7 @@ static int fts_probe(struct spi_device *client)
 					      WQ_HIGHPRI | WQ_CPU_INTENSIVE, 1);
 	if (!info->fwu_workqueue) {
 		pr_err("%s: ERROR: Cannot create fwu work thread\n", __func__);
-		goto probe_error_exit_5;
+		goto probe_error_exit_4;
 	}
 	INIT_DELAYED_WORK(&info->fwu_work, flash_update_auto);
 #endif
@@ -2974,11 +2978,7 @@ static int fts_probe(struct spi_device *client)
 	pr_info("%s: Probe Finished!\n", __func__);
 	return OK;
 
-probe_error_exit_5:
-	input_unregister_device(info->input_dev);
 probe_error_exit_4:
-	if (!input_dev_free_flag)
-		input_free_device(info->input_dev);
 #if !IS_ENABLED(CONFIG_GOOG_TOUCH_INTERFACE)
 	mutex_destroy(&info->input_report_mutex);
 #endif

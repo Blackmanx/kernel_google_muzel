@@ -32,6 +32,10 @@
 /*****************************************************************************
 * 1.Included header files
 *****************************************************************************/
+#if IS_ENABLED(CONFIG_GOOG_TOUCH_INTERFACE)
+#include <goog_touch_interface.h>
+#endif
+
 #include "focaltech_core.h"
 
 /******************************************************************************
@@ -181,6 +185,9 @@ static int fts_create_gesture_sysfs(struct device *dev)
 int fts_gesture_readdata(struct fts_ts_data *ts_data)
 {
     struct fts_gesture_st *gesture = &fts_data->fts_gesture_data;
+#if IS_ENABLED(CONFIG_GOOG_TOUCH_INTERFACE)
+    struct gti_fw_status_data data;
+#endif
     u8 cmd[2] = { 0 };
 
     cmd[0] = FTS_GESTURE_MAJOR_MINOR;
@@ -196,16 +203,38 @@ int fts_gesture_readdata(struct fts_ts_data *ts_data)
     }
 
     if (ts_data->log_level >= 1) {
-        FTS_ERROR("gesture_id=0x%x, point_num=%d, x=%d, y=%d,"
-                  "major=%d, minor=%d, orientation=%d\n",
-            gesture->gesture_id, gesture->point_num,
-            get_gesture_coordinate(gesture->coordinate_x_msb,
-                                   gesture->coordinate_x_lsb),
-            get_gesture_coordinate(gesture->coordinate_y_msb,
-                                   gesture->coordinate_y_lsb),
-            gesture->major, gesture->minor,
-            gesture->orientation);
-   }
+      FTS_ERROR(
+          "gesture_id=0x%x, point_num=%d, x=%d, y=%d,"
+          "major=%d, minor=%d, orientation=%d\n",
+          gesture->gesture_id, gesture->point_num,
+          get_gesture_coordinate(gesture->coordinate_x_msb,
+                                 gesture->coordinate_x_lsb),
+          get_gesture_coordinate(gesture->coordinate_y_msb,
+                                 gesture->coordinate_y_lsb),
+          gesture->major, gesture->minor, gesture->orientation);
+    }
+
+#if IS_ENABLED(CONFIG_GOOG_TOUCH_INTERFACE)
+    data.gesture_event.x = get_gesture_coordinate(gesture->coordinate_x_msb,
+                                                  gesture->coordinate_x_lsb);
+    data.gesture_event.y = get_gesture_coordinate(gesture->coordinate_y_msb,
+                                                  gesture->coordinate_y_lsb);
+    data.gesture_event.major = gesture->major;
+    data.gesture_event.minor = gesture->minor;
+    data.gesture_event.angle = gesture->orientation;
+    switch (gesture->gesture_id) {
+      case FTS_GESTURE_ID_STTW:
+        data.gesture_event.type = GTI_GESTURE_STTW;
+        goog_notify_fw_status_changed(ts_data->gti, GTI_FW_STATUS_GESTURE_EVENT,
+                                      &data);
+        break;
+      case FTS_GESTURE_ID_LPTW_DOWN:
+        data.gesture_event.type = GTI_GESTURE_LPTW;
+        goog_notify_fw_status_changed(ts_data->gti, GTI_FW_STATUS_GESTURE_EVENT,
+                                      &data);
+        break;
+    }
+#endif
 
     return 0;
 }

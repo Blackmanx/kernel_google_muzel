@@ -1116,7 +1116,7 @@ static void syna_set_continuous_report_work(struct work_struct *work)
 		syna_tcm_set_dynamic_config(tcm->tcm_dev,
 				DC_HOST_CONTINUOUSLY_REPORT,
 				1,
-				CMD_RESPONSE_IN_POLLING);
+				CMD_RESPONSE_IN_ATTN);
 	}
 
 	syna_tcm_set_dynamic_config(tcm->tcm_dev,
@@ -3197,7 +3197,12 @@ static void syna_check_normal_scan_mode(struct syna_tcm *tcm, unsigned int resp_
 			fallthrough;
 		case SCAN_LPWG_IDLE:
 		case SCAN_LPWG_ACTIVE:
-			ret = syna_dev_enable_lowpwr_gesture(tcm, false, resp_handling);
+			tcm->tcm_dev->msg_data.enable_response_log = true;
+			ret = syna_tcm_set_dynamic_config(tcm->tcm_dev,
+					DC_ENABLE_WAKEUP_GESTURE_MODE,
+					0,
+					resp_handling);
+			tcm->tcm_dev->msg_data.enable_response_log = false;
 			break;
 		default:
 			LOGE("Invalid scan mode %d", scan_mode);
@@ -3205,6 +3210,11 @@ static void syna_check_normal_scan_mode(struct syna_tcm *tcm, unsigned int resp_
 			break;
 		}
 		msleep(20);
+	}
+
+	if (scan_mode != SCAN_NORMAL_IDLE && scan_mode != SCAN_NORMAL_ACTIVE) {
+		LOGW("Trigger reset for unexpected scan_mode %d!", scan_mode);
+		tcm->hw_if->ops_hw_reset(tcm->hw_if);
 	}
 }
 #endif

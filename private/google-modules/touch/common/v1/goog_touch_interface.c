@@ -2381,12 +2381,12 @@ static void panel_bridge_mode_set(struct drm_bridge *bridge,
 		GOOG_INFO(gti, "panel %s AOD_MODE_LP from aod_mode 0x%x.\n",
 				panel_is_lp_mode ? "enter" : "exit", gti->aod_mode);
 
+		gti->aod_mode = panel_is_lp_mode ? AOD_MODE_LP : AOD_MODE_DISABLED;
+
 		if (panel_is_lp_mode)
 			goog_set_display_state(gti, GTI_DISPLAY_STATE_OFF);
 		else
 			goog_set_display_state(gti, GTI_DISPLAY_STATE_ON);
-
-		gti->aod_mode = panel_is_lp_mode ? AOD_MODE_LP : AOD_MODE_DISABLED;
 	}
 
 	if (mode) {
@@ -2422,12 +2422,12 @@ static int panel_bridge_atomic_check(struct drm_bridge *bridge,
 		GOOG_INFO(gti, "panel %s AOD_MODE_MP from aod_mode 0x%x.\n",
 				panel_is_mp_mode ? "enter" : "exit", gti->aod_mode);
 
+		gti->aod_mode = panel_is_mp_mode ? AOD_MODE_MP : AOD_MODE_DISABLED;
+
 		if (panel_is_mp_mode)
 			goog_set_display_state(gti, GTI_DISPLAY_STATE_OFF);
 		else
 			goog_set_display_state(gti, GTI_DISPLAY_STATE_ON);
-
-		gti->aod_mode = panel_is_mp_mode ? AOD_MODE_MP : AOD_MODE_DISABLED;
 	}
 
 	return 0;
@@ -2930,8 +2930,15 @@ bool goog_v4l2_read_frame_cb(struct v4l2_heatmap *v4l2)
 void goog_v4l2_read(struct goog_touch_interface *gti, ktime_t timestamp, u64 frame_index)
 {
 	if (gti->v4l2_enabled) {
+		/*
+		 * In android framework, the default value of resample latency is 5 milliseconds.
+		 * For this solution, we need to add the compensation of resample latency to event
+		 * time. So the result is equal to adjusting the resample latency to the new value.
+		 */
+		ktime_t latency_comp = ktime_sub(gti->resample_latency, RESAMPLE_LATENCY_DEFAULT);
+
 		gti->v4l2.frame_index = frame_index;
-		heatmap_read(&gti->v4l2, ktime_to_ns(timestamp));
+		heatmap_read(&gti->v4l2, ktime_to_ns(ktime_add(timestamp, latency_comp)));
 	}
 }
 
@@ -3570,6 +3577,7 @@ void goog_offload_input_report(void *handle,
 			input_mt_report_slot_state(gti->vendor_input_dev, MT_TOOL_FINGER, 0);
 		}
 	}
+	ATRACE_INT("Input slot bit active", slot_bit_active);
 	input_report_key(gti->vendor_input_dev, BTN_TOUCH, touch_down);
 	input_sync(gti->vendor_input_dev);
 	goog_input_unlock(gti);
@@ -3865,23 +3873,12 @@ void goog_offload_remove(struct goog_touch_interface *gti)
 	heatmap_remove(&gti->v4l2);
 	devm_kfree(gti->vendor_dev, gti->heatmap_buf);
 }
-
-static void goog_input_flush_offload_fingers(struct goog_touch_interface *gti)
+static void goog_input_coordinate_report(struct goog_touch_interface *gti,
+					 struct TouchOffloadCoord *coords)
 {
 	int i;
-	struct TouchOffloadCoord *coords;
-	ktime_t timestamp;
 	int touch_down = 0;
 
-	goog_input_lock(gti);
-	coords = gti->offload.coords;
-	if (gti->input_timestamp_changed) {
-		timestamp = gti->input_timestamp;
-	} else {
-		GOOG_WARN(gti, "No timestamp set by vendor driver before input report!");
-		timestamp = ktime_get();
-	}
-	gti_input_set_timestamp(gti, timestamp);
 	for (i = 0; i < MAX_SLOTS; i++) {
 		input_mt_slot(gti->vendor_input_dev, i);
 		if (coords[i].status != COORD_STATUS_INACTIVE) {
@@ -3908,6 +3905,22 @@ static void goog_input_flush_offload_fingers(struct goog_touch_interface *gti)
 	}
 	input_report_key(gti->vendor_input_dev, BTN_TOUCH, touch_down);
 	input_sync(gti->vendor_input_dev);
+}
+
+static void goog_input_flush_offload_fingers(struct goog_touch_interface *gti)
+{
+	ktime_t timestamp;
+
+	goog_input_lock(gti);
+	if (gti->input_timestamp_changed) {
+		timestamp = gti->input_timestamp;
+	} else {
+		GOOG_WARN(gti, "No timestamp set by vendor driver before input report!");
+		timestamp = ktime_get();
+	}
+	gti_input_set_timestamp(gti, timestamp);
+	goog_input_coordinate_report(gti, gti->offload.coords);
+
 	goog_input_unlock(gti);
 }
 
@@ -3926,7 +3939,13 @@ int goog_input_process(struct goog_touch_interface *gti, bool reset_data)
 		return -EPERM;
 
 	mutex_lock(&gti->input_process_lock);
-	gti->frame_index++;
+	/*
+	 * Increase the frame index after the offload running successfully once.
+	 * This is to ignore the dummy offload frame before offload driver
+	 * configuration complete.
+	 */
+	if (likely(gti->frame_index != 0) || (gti->offload.offload_running == true))
+		gti->frame_index++;
 
 	/*
 	 * Increase the input index when any slot bit changed which
@@ -4046,6 +4065,8 @@ void goog_input_set_timestamp(
 	s64 max_dt = 100 * NSEC_PER_MSEC;
 	s64 u_limit = 100 * NSEC_PER_USEC;
 
+	ATRACE_INT("Vendor input timestamp", timestamp);
+
 	if (!gti) {
 		input_set_timestamp(dev, timestamp);
 		return;
@@ -4098,6 +4119,7 @@ void goog_input_set_timestamp(
 			}
 
 			timestamp = timestamp_corrected;
+			ATRACE_INT("Corrected timestamp", timestamp);
 		}
 		ATRACE_END();
 	}
@@ -4873,9 +4895,12 @@ static void goog_pm_suspend(struct gti_pm *pm)
 			struct goog_touch_interface, pm);
 	int ret = 0;
 
+	ATRACE_BEGIN(__func__);
+
 	/* exit directly if device is already in suspend state */
 	if (pm->state == GTI_PM_SUSPEND) {
 		GOOG_WARN(gti, "GTI already suspended!\n");
+		ATRACE_END();
 		return;
 	}
 
@@ -4894,17 +4919,20 @@ static void goog_pm_suspend(struct gti_pm *pm)
 	}
 #endif
 
+	gti_debug_healthcheck_dump(gti);
+	gti_debug_input_dump(gti);
+
+	goog_reset_fw_status(gti);
+	goog_input_release_all_fingers(gti);
+
 	if (gti->tbn_register_mask) {
 		ret = tbn_release_bus(gti->tbn_register_mask);
 		if (ret)
 			GOOG_ERR(gti, "tbn_release_bus failed, ret %d!\n", ret);
 	}
-	gti_debug_healthcheck_dump(gti);
-	gti_debug_input_dump(gti);
-
-	goog_input_release_all_fingers(gti);
 
 	pm_relax(gti->dev);
+	ATRACE_END();
 }
 
 static void goog_pm_resume(struct gti_pm *pm)
@@ -4913,9 +4941,12 @@ static void goog_pm_resume(struct gti_pm *pm)
 			struct goog_touch_interface, pm);
 	int ret = 0;
 
+	ATRACE_BEGIN(__func__);
+
 	/* exit directly if device isn't in suspend state */
 	if (pm->state == GTI_PM_RESUME) {
 		GOOG_WARN(gti, "GTI already resumed!\n");
+		ATRACE_END();
 		return;
 	}
 
@@ -4951,6 +4982,7 @@ static void goog_pm_resume(struct gti_pm *pm)
 	gti->mf_state = GTI_MF_STATE_FILTERED;
 	pm->state = GTI_PM_RESUME;
 
+	ATRACE_END();
 	return;
 
 err_tbn:
@@ -4961,6 +4993,7 @@ err_tbn:
 	}
 
 	pm_relax(gti->dev);
+	ATRACE_END();
 }
 
 void goog_pm_state_update_work(struct work_struct *work) {
@@ -5006,6 +5039,21 @@ int goog_pm_unregister_notification(struct goog_touch_interface *gti)
 }
 EXPORT_SYMBOL_GPL(goog_pm_unregister_notification);
 
+void goog_reset_fw_status(struct goog_touch_interface *gti)
+{
+	if (gti->fw_status.water_mode != 0) {
+		GOOG_INFO(gti, "Exit water mode\n");
+		gti->fw_status.water_mode = 0;
+		gti->context_changed.water_mode = 1;
+	}
+
+	if (gti->fw_status.noise_level != 0) {
+		GOOG_INFO(gti, "Exit noise mode\n");
+		gti->fw_status.noise_level = 0;
+		gti->context_changed.noise_state = 1;
+	}
+}
+
 void goog_notify_fw_status_changed(struct goog_touch_interface *gti,
 		enum gti_fw_status status, struct gti_fw_status_data* data)
 {
@@ -5022,6 +5070,7 @@ void goog_notify_fw_status_changed(struct goog_touch_interface *gti,
 		 * could base on up-to-date mf_mode to change accordingly.
 		 */
 		gti->mf_state = GTI_MF_STATE_FILTERED;
+		goog_reset_fw_status(gti);
 		goog_input_release_all_fingers(gti);
 		goog_update_fw_settings(gti, true);
 
@@ -5344,9 +5393,11 @@ static void gti_input_set_timestamp(struct goog_touch_interface *gti, ktime_t ti
 		 * For this solution, we need to add the compensation of resample latency to event
 		 * time. So the result is equal to adjusting the resample latency to the new value.
 		 */
-		ktime_t latency_comp = ktime_sub(gti->resample_latency, RESAMPLE_LATENCY_DEFAULT);
-
-		input_set_timestamp(gti->vendor_input_dev, ktime_add(timestamp, latency_comp));
+		ktime_t final_timestamp = ktime_add(
+			timestamp,
+			ktime_sub(gti->resample_latency, RESAMPLE_LATENCY_DEFAULT));
+		input_set_timestamp(gti->vendor_input_dev, final_timestamp);
+		ATRACE_INT("Input subsystem timestamp", final_timestamp);
 		gti->input_dev_mono_ktime = timestamp;
 	}
 }
@@ -5420,28 +5471,41 @@ static irqreturn_t gti_irq_thread_fn(int irq, void *data)
 	return ret;
 }
 
-int goog_devm_request_threaded_irq(struct goog_touch_interface *gti,
-		struct device *dev, unsigned int irq,
-		irq_handler_t handler, irq_handler_t thread_fn,
-		unsigned long irqflags, const char *devname,
-		void *dev_id)
+int goog_devm_request_threaded_irq(struct goog_touch_interface *gti, struct device *dev,
+				   unsigned int irq, irq_handler_t handler, irq_handler_t thread_fn,
+				   unsigned long irqflags, const char *devname, void *cookie)
 {
 	int ret;
 
 	if (gti) {
-		gti->vendor_irq_cookie = dev_id;
+		gti->vendor_irq_cookie = cookie;
 		gti->vendor_irq_handler = handler;
 		gti->vendor_irq_thread_fn = thread_fn;
 		ret = devm_request_threaded_irq(dev, irq, gti_irq_handler, gti_irq_thread_fn,
 				irqflags, devname, gti);
 	} else {
-		ret = devm_request_threaded_irq(dev, irq, handler, thread_fn,
-				irqflags, devname, dev_id);
+		ret = devm_request_threaded_irq(dev, irq, handler, thread_fn, irqflags, devname,
+						cookie);
 	}
 
 	return ret;
 }
 EXPORT_SYMBOL_GPL(goog_devm_request_threaded_irq);
+
+int gti_sysfs_create_vendor_input_link(struct goog_touch_interface *gti)
+{
+	int ret = 0;
+
+	if (gti->vendor_input_dev != NULL) {
+		ret = sysfs_create_link(&gti->dev->kobj, &gti->vendor_input_dev->dev.kobj,
+			"vendor_input");
+		if (ret)
+			GOOG_ERR(gti, "sysfs_create_link() failed for vendor_input, ret=%d!\n",
+				ret);
+	}
+	return ret;
+}
+EXPORT_SYMBOL_GPL(gti_sysfs_create_vendor_input_link);
 
 void goog_devm_free_irq(struct goog_touch_interface *gti,
 		struct device *dev, unsigned int irq)
@@ -5450,25 +5514,216 @@ void goog_devm_free_irq(struct goog_touch_interface *gti,
 }
 EXPORT_SYMBOL(goog_devm_free_irq);
 
-int goog_request_threaded_irq(struct goog_touch_interface *gti,
-		unsigned int irq, irq_handler_t handler, irq_handler_t thread_fn,
-		unsigned long irqflags, const char *devname, void *dev_id)
+int goog_request_threaded_irq(struct goog_touch_interface *gti, unsigned int irq,
+			      irq_handler_t handler, irq_handler_t thread_fn,
+			      unsigned long irqflags, const char *devname, void *cookie)
 {
 	int ret;
 
 	if (gti) {
-		gti->vendor_irq_cookie = dev_id;
+		gti->vendor_irq_cookie = cookie;
 		gti->vendor_irq_handler = handler;
 		gti->vendor_irq_thread_fn = thread_fn;
 		ret = request_threaded_irq(irq, gti_irq_handler, gti_irq_thread_fn,
 				irqflags, devname, gti);
 	} else {
-		ret = request_threaded_irq(irq, handler, thread_fn, irqflags, devname, dev_id);
+		ret = request_threaded_irq(irq, handler, thread_fn, irqflags, devname, cookie);
 	}
 
 	return ret;
 }
 EXPORT_SYMBOL_GPL(goog_request_threaded_irq);
+
+// Reference: goog_offload_populate_frame
+static void touch_sim_populate_frame(struct goog_touch_interface *gti,
+				     struct touch_offload_frame *offload_frame, char *buf,
+				     size_t count)
+{
+	size_t handle_count = 0;
+	int i = 0;
+	struct TouchOffloadChannelHeader *channel_header;
+
+	offload_frame->header.index = gti->frame_index;
+	offload_frame->header.timestamp = gti->input_timestamp;
+
+	buf += sizeof(struct TouchOffloadFrameHeader);
+	handle_count += sizeof(struct TouchOffloadFrameHeader);
+
+	while (handle_count < count) {
+		channel_header = (struct TouchOffloadChannelHeader *)buf;
+		u32 channel_size = channel_header->channel_size;
+		u32 channel_type = channel_header->channel_type;
+
+		for (i = 0; i < offload_frame->num_channels; i++) {
+			if (channel_type != (u32)offload_frame->channel_type[i])
+				continue;
+
+			if (channel_size != offload_frame->channel_data_size[i]) {
+				GOOG_ERR(gti, "Channel size not match !! %d %d with type %d",
+					 channel_size, offload_frame->channel_data_size[i],
+					 channel_type);
+				break;
+			}
+
+			memcpy(offload_frame->channel_data[i], buf, channel_size);
+
+			if (channel_type == CONTEXT_CHANNEL_TYPE_DRIVER_STATUS) {
+				struct TouchOffloadDriverStatus *ds =
+					(struct TouchOffloadDriverStatus *)
+						offload_frame->channel_data[i];
+				ds->contents.offload_timestamp = ktime_get();
+				ds->offload_timestamp = ktime_get();
+			}
+			break;
+		}
+
+		buf += channel_size;
+		handle_count += channel_size;
+	}
+}
+
+static void touch_sim_input_flush_offload_fingers(struct goog_touch_interface *gti, char *buf,
+						  size_t count)
+{
+	size_t handle_count = 0;
+
+	goog_input_lock(gti);
+
+	struct TouchOffloadChannelHeader *channel_header;
+	struct TouchOffloadDataCoord *dc;
+
+	buf += sizeof(struct TouchOffloadFrameHeader);
+	handle_count += sizeof(struct TouchOffloadFrameHeader);
+
+	while (handle_count < count) {
+		channel_header = (struct TouchOffloadChannelHeader *)buf;
+		u32 channel_size = channel_header->channel_size;
+		u32 channel_type = channel_header->channel_type;
+
+		if (channel_type == TOUCH_DATA_TYPE_COORD) {
+			dc = (struct TouchOffloadDataCoord *)buf;
+			goog_input_coordinate_report(gti, dc->coords);
+			break;
+		}
+
+		buf += channel_size;
+		handle_count += channel_size;
+	}
+	goog_input_unlock(gti);
+}
+
+static int touch_sim_input_process(void *gti_self, char *buf, size_t count, ktime_t timestamp)
+{
+	if (gti_self == NULL || buf == NULL)
+		return -EINVAL;
+
+	struct goog_touch_interface *gti = gti_self;
+	struct touch_offload_frame **frame = &gti->offload_frame;
+	int ret = 0;
+
+	goog_input_set_timestamp(gti, gti->vendor_input_dev, timestamp);
+	mutex_lock(&gti->input_process_lock);
+	gti->frame_index++;
+
+	if (gti->offload_enabled) {
+		ret = touch_offload_reserve_frame(&gti->offload, frame);
+		if (ret != 0 || frame == NULL) {
+			GOOG_WARN(gti,
+				  "offload: No buffers available in touch_sim, ret=%d IDX=%llu!\n",
+				  ret, gti->frame_index);
+			ret = -EBUSY;
+			goto exit;
+		}
+
+		touch_sim_populate_frame(gti, *frame, buf, count);
+		ret = touch_offload_queue_frame(&gti->offload, *frame);
+		if (ret)
+			GOOG_WARN(gti, "Fail to queue frame, ret=%d IDX=%llu!\n", ret,
+				  gti->frame_index);
+		else
+			gti->offload_frame = NULL;
+
+	} else {
+		touch_sim_input_flush_offload_fingers(gti, buf, count);
+	}
+
+exit:
+	mutex_unlock(&gti->input_process_lock);
+	return ret;
+}
+
+struct touch_sim *touch_sim_probe(struct goog_touch_interface *gti)
+{
+	int ret = 0;
+	struct touch_sim *sim;
+	char *name;
+
+	if (gti->sim)
+		return gti->sim;
+
+	gti->touch_sim_enabled =
+		of_property_read_bool(gti->vendor_dev->of_node, "goog,touch-sim-enabled");
+	if (!gti->touch_sim_enabled)
+		return NULL;
+
+	sim = devm_kzalloc(gti->dev, sizeof(struct touch_sim), GFP_KERNEL);
+	if (!sim) {
+		GOOG_ERR(gti, "Failed to allocate memory for touch_sim\n");
+		return NULL;
+	}
+
+	atomic_set(&sim->device_is_locked, 0);
+	sim->pop_data_cb = touch_sim_input_process;
+	sim->private_data = gti;
+	init_waitqueue_head(&sim->event_wait_queue);
+
+	name = kasprintf(GFP_KERNEL, "touch_sim.%d", gti->dev_id);
+	if (!name) {
+		GOOG_ERR(gti, "Failed to kasprintf() for touch_sim!\n");
+		goto err_touch_sim_probe;
+	}
+
+	ret = alloc_chrdev_region(&sim->devt, 0, 1, name);
+	if (ret) {
+		GOOG_ERR(gti, "Failed to alloc_chrdev_region() for %s!\n", name);
+		goto err_touch_sim_probe;
+	}
+
+	sim->dev = device_create(gti_class, gti->dev, sim->devt, sim, name);
+	if (IS_ERR_OR_NULL(sim->dev)) {
+		GOOG_ERR(gti, "Failed to create %s device\n", name);
+		goto err_touch_sim_probe;
+	}
+
+	cdev_init(&sim->cdev, &touch_sim_fops);
+	sim->cdev.owner = THIS_MODULE;
+	if (cdev_add(&sim->cdev, sim->dev->devt, 1)) {
+		GOOG_ERR(gti, "Failed to add touch_sim cdev\n");
+		device_destroy(gti_class, sim->dev->devt);
+		goto err_touch_sim_probe;
+	}
+
+	gti->sim = sim;
+	GOOG_LOGI(gti, "device create \"%s\".\n", name);
+	kfree(name);
+	return sim;
+
+err_touch_sim_probe:
+	devm_kfree(gti->dev, sim);
+	kfree(name);
+	return NULL;
+}
+
+void touch_sim_remove(struct goog_touch_interface *gti)
+{
+	if (gti->sim) {
+		touch_sim_stop(gti->sim);
+		device_destroy(gti_class, gti->sim->dev->devt);
+		cdev_del(&gti->sim->cdev);
+		devm_kfree(gti->dev, gti->sim);
+		gti->sim = NULL;
+	}
+}
 
 struct goog_touch_interface *goog_touch_interface_probe(
 		void *private_data,
@@ -5518,20 +5773,18 @@ struct goog_touch_interface *goog_touch_interface_probe(
 		gti_class = class_create(GTI_NAME);
 
 	if (gti && gti_class) {
-		u32 dev_id = gti_dev_num;
+		gti->dev_id = gti_dev_num;
 		char *name;
 
 		if (gti->vendor_dev) {
 			struct device_node *np = gti->vendor_dev->of_node;
 
-			of_property_read_u32(np, "goog,dev-id", &dev_id);
+			of_property_read_u32(np, "goog,dev-id", &gti->dev_id);
 		}
-		name = kasprintf(GFP_KERNEL, "gti.%d", dev_id);
+		name = kasprintf(GFP_KERNEL, "gti.%d", gti->dev_id);
 
-		if (name &&
-			!alloc_chrdev_region(&gti->dev_id, 0, 1, name)) {
-			gti->dev = device_create(gti_class, NULL,
-					gti->dev_id, gti, name);
+		if (name && !alloc_chrdev_region(&gti->devt, 0, 1, name)) {
+			gti->dev = device_create(gti_class, NULL, gti->devt, gti, name);
 			if (gti->dev) {
 				gti_dev_num++;
 				GOOG_LOGI(gti, "device create \"%s\".\n", name);
@@ -5543,14 +5796,7 @@ struct goog_touch_interface *goog_touch_interface_probe(
 							ret);
 					}
 				}
-				if (gti->vendor_input_dev) {
-					ret = sysfs_create_link(&gti->dev->kobj,
-						&gti->vendor_input_dev->dev.kobj, "vendor_input");
-					if (ret) {
-						GOOG_ERR(gti, "sysfs_create_link() failed for vendor_input, ret=%d!\n",
-							 ret);
-					}
-				}
+				gti_sysfs_create_vendor_input_link(gti);
 			}
 		}
 		kfree(name);
@@ -5572,6 +5818,8 @@ struct goog_touch_interface *goog_touch_interface_probe(
 		ret = sysfs_create_group(&gti->dev->kobj, &goog_attr_group);
 		if (ret)
 			GOOG_ERR(gti, "sysfs_create_group() failed, ret= %d!\n", ret);
+
+		touch_sim_probe(gti);
 	}
 
 	return gti;
@@ -5602,13 +5850,13 @@ int goog_touch_interface_remove(struct goog_touch_interface *gti)
 			sysfs_remove_link(&gti->dev->kobj, "vendor");
 		if (gti->vendor_input_dev)
 			sysfs_remove_link(&gti->dev->kobj, "vendor_input");
-		device_destroy(gti_class, gti->dev_id);
+		device_destroy(gti_class, gti->devt);
 		gti->dev = NULL;
 		gti_dev_num--;
 	}
 
 	if (gti_class) {
-		unregister_chrdev_region(gti->dev_id, 1);
+		unregister_chrdev_region(gti->devt, 1);
 		if (!gti_dev_num) {
 			proc_remove(gti_proc_dir_root);
 			gti_proc_dir_root = NULL;
@@ -5617,6 +5865,7 @@ int goog_touch_interface_remove(struct goog_touch_interface *gti)
 		}
 	}
 
+	touch_sim_remove(gti);
 	devm_kfree(gti->vendor_dev, gti);
 
 	return 0;

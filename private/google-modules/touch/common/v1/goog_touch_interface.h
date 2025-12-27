@@ -18,6 +18,7 @@
 #include "heatmap.h"
 #include "touch_offload.h"
 #include "uapi/input/touch_offload.h"
+#include "sim.h"
 
 #define GTI_NAME "goog_touch_interface"
 #define GOOG_LOG_NAME(gti) ((gti && gti->dev) ? dev_name(gti->dev) : "gti")
@@ -102,6 +103,9 @@
 
 /* Resample latency */
 #define RESAMPLE_LATENCY_DEFAULT (5 * NSEC_PER_MSEC)
+
+/* Buffer size for GTI driver */
+#define GTI_BUFFER_SIZE 4096
 
 /*-----------------------------------------------------------------------------
  * enums.
@@ -458,7 +462,7 @@ const static char *gesture_params_list[GTI_GESTURE_PARAMS_MAX] = {
 
 struct gti_calibrate_cmd {
 	enum gti_calibrate_result result;
-	char buffer[PAGE_SIZE];
+	char buffer[GTI_BUFFER_SIZE];
 };
 
 struct gti_context_changed {
@@ -595,7 +599,7 @@ struct gti_screen_protector_mode_cmd {
 
 struct gti_selftest_cmd {
 	enum gti_selftest_result result;
-	char buffer[PAGE_SIZE];
+	char buffer[GTI_BUFFER_SIZE];
 	bool is_ical;
 };
 
@@ -892,6 +896,7 @@ struct pid_controller {
  * @late_sense_on_enabled: enable flag for late sense-on.
  * @panel_map_from_tic: enable flag for readiing panel id from tic.
  * @tbn_protection_enabled: enable flag for bus protection.
+ * @touch_sim_enabled: enable flag for touch simulation.
  * @lptw_track_min_x: minimum x of tracking area.
  * @lptw_track_max_x: maximum x of tracking area.
  * @lptw_track_min_y: minimum y of tracking area.
@@ -910,7 +915,8 @@ struct pid_controller {
  * @slot_bit_active: bitmap of active slot during GTI lifecycle.
  * @slot_bit_lptw_track: bitmap of lptw suppressed fingers.
  * @panel_op_hz: the operating rate of display panel.
- * @dev_id: dev_t used for google interface driver.
+ * @devt: dev_t used for google interface driver.
+ * @dev_id: dev_id used for identify a GTI driver, e.g., gti.%d
  * @panel_id: id of the display panel.
  * @charger_state: indicates a USB charger is connected.
  * @charger_notifier: notifier for power_supply updates.
@@ -932,6 +938,7 @@ struct pid_controller {
  * @debug_fifo_input: kfifo struct to track input report.
  * @debug_healthcheck: struct that used for the health check.
  * @debug_fifo_healthcheck: kfifo struct to track touch interrupt information.
+ * @sim: struct that used for touch simulation.
  */
 
 struct goog_touch_interface {
@@ -1015,6 +1022,7 @@ struct goog_touch_interface {
 	bool late_sense_on_enabled;
 	bool panel_map_from_tic;
 	bool tbn_protection_enabled;
+	bool touch_sim_enabled;
 	u32 lptw_track_min_x;
 	u32 lptw_track_max_x;
 	u32 lptw_track_min_y;
@@ -1049,7 +1057,8 @@ struct goog_touch_interface {
 	unsigned long slot_bit_active;
 	unsigned long slot_bit_lptw_track;
 	unsigned int panel_op_hz;
-	dev_t dev_id;
+	dev_t devt;
+	u32 dev_id;
 	int panel_id;
 	char fw_name[64];
 	char config_name[64];
@@ -1085,6 +1094,7 @@ struct goog_touch_interface {
 	struct gti_debug_healthcheck debug_healthcheck_history[GTI_DEBUG_HEALTHCHECK_KFIFO_LEN];
 	DECLARE_KFIFO(debug_fifo_healthcheck, struct gti_debug_healthcheck,
 		GTI_DEBUG_HEALTHCHECK_KFIFO_LEN);
+	struct touch_sim *sim;
 };
 
 /*-----------------------------------------------------------------------------
@@ -1114,16 +1124,16 @@ inline void goog_input_report_key(
 		struct goog_touch_interface *gti,
 		struct input_dev *dev, unsigned int code, int value);
 inline void goog_input_sync(struct goog_touch_interface *gti, struct input_dev *dev);
-inline int goog_devm_request_threaded_irq(struct goog_touch_interface *gti,
-		struct device *dev, unsigned int irq,
-		irq_handler_t handler, irq_handler_t thread_fn,
-		unsigned long irqflags, const char *devname,
-		void *dev_id);
+inline int goog_devm_request_threaded_irq(struct goog_touch_interface *gti, struct device *dev,
+					  unsigned int irq, irq_handler_t handler,
+					  irq_handler_t thread_fn, unsigned long irqflags,
+					  const char *devname, void *cookie);
+inline int gti_sysfs_create_vendor_input_link(struct goog_touch_interface *gti);
 void goog_devm_free_irq(struct goog_touch_interface *gti,
 		struct device *dev, unsigned int irq);
-inline int goog_request_threaded_irq(struct goog_touch_interface *gti,
-		unsigned int irq, irq_handler_t handler, irq_handler_t thread_fn,
-		unsigned long irqflags, const char *devname, void *dev_id);
+inline int goog_request_threaded_irq(struct goog_touch_interface *gti, unsigned int irq,
+				     irq_handler_t handler, irq_handler_t thread_fn,
+				     unsigned long irqflags, const char *devname, void *cookie);
 
 int goog_process_vendor_cmd(struct goog_touch_interface *gti, enum gti_cmd_type cmd_type);
 int goog_input_process(struct goog_touch_interface *gti, bool reset_data);
@@ -1151,6 +1161,7 @@ int goog_pm_register_notification(struct goog_touch_interface *gti,
 		const struct dev_pm_ops* ops);
 int goog_pm_unregister_notification(struct goog_touch_interface *gti);
 
+void goog_reset_fw_status(struct goog_touch_interface *gti);
 void goog_notify_fw_status_changed(struct goog_touch_interface *gti,
 		enum gti_fw_status status, struct gti_fw_status_data* data);
 void gti_debug_healthcheck_dump(struct goog_touch_interface *gti);
