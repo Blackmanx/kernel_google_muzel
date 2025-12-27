@@ -52,7 +52,6 @@ CONFIG_ODPM=m
 # private/google-modules/soc/gs/drivers/input/Kconfig
 CONFIG_INPUT_KEYDEBUG=m
 CONFIG_INPUT_STMVL53L1=m
-CONFIG_GOODIX_FINGERPRINT=m
 CONFIG_KEYBOARD_S2MPG14=m
 
 # private/google-modules/soc/gs/drivers/iommu/Kconfig
