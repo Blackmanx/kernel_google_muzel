@@ -991,13 +991,11 @@ static struct tipc_msg_buf *dn_handle_msg(void *data,
 			list_add_tail(&rxbuf->node, &dn->rx_msg_queue);
 			wake_up_interruptible(&dn->readq);
 		} else {
-			/*
-			 * return an old buffer effectively discarding
-			 * incoming message
-			 */
+			/* cannot return a new buffer */
 			dev_err(&dn->chan->vds->vdev->dev,
-				"%s: discard incoming message\n", __func__);
-			newbuf = rxbuf;
+				"%s: message buffer loss: empty=%d\n",
+				__func__, list_empty(&dn->rx_msg_queue));
+
 		}
 	}
 	mutex_unlock(&dn->lock);

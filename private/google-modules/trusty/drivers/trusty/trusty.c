@@ -386,11 +386,9 @@ int trusty_transfer_memory(struct device *dev, u64 *id,
 	total_len = cons_mrd_offset + nents * sizeof(*cons_mrd);
 	sg = sglist;
 	while (count) {
-		size_t lcount =
-			min_t(size_t, count, (PAGE_SIZE - cons_mrd_offset) /
-			      sizeof(*cons_mrd));
-		size_t fragment_len = lcount * sizeof(*cons_mrd) +
-				      cons_mrd_offset;
+		const size_t lcount = min_t(size_t, count, (PAGE_SIZE - cons_mrd_offset) /
+					sizeof(*cons_mrd));
+		const size_t fragment_len = lcount * sizeof(*cons_mrd) + cons_mrd_offset;
 		unsigned long smc;
 
 		for (i = 0; i < lcount; i++) {
@@ -400,6 +398,8 @@ int trusty_transfer_memory(struct device *dev, u64 *id,
 			sg = sg_next(sg);
 		}
 		count -= lcount;
+
+		/* Call Trusty */
 		if (cons_mrd_offset) {
 			smc = lend ? SMC_FC_FFA_MEM_LEND :
 					 SMC_FC_FFA_MEM_SHARE;
@@ -416,6 +416,8 @@ int trusty_transfer_memory(struct device *dev, u64 *id,
 					      fragment_len, 0, 0, 0, 0);
 			trace_trusty_smc_done(smc_ret.r0);
 		}
+
+		/* Check the result */
 		if (smc_ret.r0 == SMC_FC_FFA_MEM_FRAG_RX) {
 			cookie_low = smc_ret.r1;
 			cookie_high = smc_ret.r2;
@@ -453,6 +455,12 @@ int trusty_transfer_memory(struct device *dev, u64 *id,
 			dev_err(s->dev, "%s: fragment_len %zu/%zu, SMC(0x%lx) failed 0x%lx 0x%lx 0x%lx",
 				__func__, fragment_len, total_len,
 				smc, smc_ret.r0, smc_ret.r1, smc_ret.r2);
+
+			for (i = 0; i < lcount; i++) {
+				dev_err(s->dev, "%s: 0x%llx x %u", __func__, cons_mrd[i].address,
+						cons_mrd[i].page_count);
+			}
+
 			ret = -EIO;
 			break;
 		}
