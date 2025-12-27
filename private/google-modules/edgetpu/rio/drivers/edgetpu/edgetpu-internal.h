@@ -26,6 +26,7 @@
 
 #include <gcip/gcip-dma-fence.h>
 #include <gcip/gcip-firmware.h>
+#include <gcip/gcip-memory.h>
 #include <gcip/gcip-thermal.h>
 #include <iif/iif-manager.h>
 
@@ -55,15 +56,6 @@
 
 typedef u64 tpu_addr_t;
 
-/* "Coherent memory" allocated in iremap region. */
-struct edgetpu_coherent_mem {
-	void *vaddr;		/* kernel VA, no allocation if NULL */
-	dma_addr_t dma_addr;	/* TPU DMA address (default domain) */
-	u64 host_addr;		/* address mapped on host for debugging */
-	u64 phys_addr;		/* physical address, if available */
-	size_t size;
-};
-
 struct edgetpu_device_group;
 struct edgetpu_dev_iface;
 struct edgetpu_soc_data;
@@ -75,6 +67,9 @@ struct edgetpu_soc_data;
 struct edgetpu_client {
 	pid_t pid;
 	pid_t tgid;
+	/* PID and TGID for a limited interface to this client. -1 if no such interface. */
+	pid_t limited_pid;
+	pid_t limited_tgid;
 	/* Reference count */
 	refcount_t count;
 	/* protects group. */
@@ -84,11 +79,6 @@ struct edgetpu_client {
 	 * client doesn't belong to any group.
 	 */
 	struct edgetpu_device_group *group;
-	/*
-	 * This client is the idx-th member of @group.
-	 * It's meaningless if this client doesn't belong to a group.
-	 */
-	uint idx;
 	/* the device opened by this client */
 	struct edgetpu_dev *etdev;
 	/* the interface from which this client was opened */
@@ -97,6 +87,21 @@ struct edgetpu_client {
 	struct edgetpu_wakelock wakelock;
 	/* Bit field of registered per die events */
 	u64 perdie_events;
+	/* Protects @limited_interface */
+	struct mutex limited_interface_lock;
+	/* Pointer to the limited interface to this client, if any. */
+	struct file *limited_interface;
+};
+
+/*
+ * The internal state of a limited driver interface, opened from the *-limited device node and
+ * paired to a full interface's client using EDGETPU_ADD_LIMITED_INTERFACE.
+ *
+ * This struct is used as the ->private_data of any struct file representing a limited interface.
+ */
+struct limited_interface_data {
+	struct rw_semaphore lock;
+	struct edgetpu_client *client;
 };
 
 /* Configurable parameters for an edgetpu interface */
@@ -106,6 +111,8 @@ struct edgetpu_iface_params {
 	 * May be NULL for the default interface (etdev->dev_name will be used)
 	 */
 	const char *name;
+	/* Whether the iface only supports the limited ioctl set. */
+	bool limited;
 };
 
 /* edgetpu_dev#clients list entry. */
@@ -124,7 +131,6 @@ struct edgetpu_mailbox_manager;
 struct edgetpu_kci;
 struct edgetpu_ikv;
 struct edgetpu_pm;
-struct edgetpu_telemetry_ctx;
 struct edgetpu_mempool;
 struct gcip_kci_response_element;
 
@@ -160,12 +166,6 @@ struct edgetpu_dev_prop {
 /* a mark to know whether we read valid versions from the firmware header */
 #define EDGETPU_INVALID_KCI_VERSION (~0u)
 
-enum edgetpu_vii_format {
-	EDGETPU_VII_FORMAT_UNKNOWN,
-	EDGETPU_VII_FORMAT_FLATBUFFER,
-	EDGETPU_VII_FORMAT_LITEBUF,
-};
-
 struct edgetpu_dev {
 	struct device *dev;	   /* platform/pci bus device */
 	uint num_ifaces;		   /* Number of device interfaces */
@@ -190,6 +190,8 @@ struct edgetpu_dev {
 	/* SoC-specific data */
 	struct edgetpu_soc_data *soc_data;
 	struct dentry *d_entry;    /* debugfs dir for this device */
+	/* Built-in client for debugfs wakelock */
+	struct edgetpu_client *debugfs_wakelock_client;
 	struct mutex state_lock;   /* protects state of this device */
 	enum edgetpu_dev_state state;
 	struct mutex groups_lock;
@@ -197,7 +199,7 @@ struct edgetpu_dev {
 
 	struct list_head groups;
 	uint n_groups;		   /* number of entries in @groups */
-	bool group_join_lockout;   /* disable group join while reinit */
+	bool group_create_lockout; /* disable group creation while reinit */
 	u32 vcid_pool;		   /* bitmask of VCID to be allocated */
 
 	/* end of fields protected by @groups_lock */
@@ -208,9 +210,11 @@ struct edgetpu_dev {
 	struct edgetpu_mailbox_manager *mailbox_manager;
 	struct edgetpu_kci *etkci;
 	struct edgetpu_ikv *etikv;
+	struct edgetpu_iif *etiif;
 	struct edgetpu_firmware *firmware; /* firmware management */
 	struct gcip_fw_tracing *fw_tracing; /* firmware tracing */
-	struct edgetpu_telemetry_ctx *telemetry;
+	struct gcip_telemetry *telemetry_log;
+	struct gcip_telemetry *telemetry_trace;
 	struct gcip_thermal *thermal;
 	struct gcip_devfreq *devfreq;
 	struct edgetpu_usage_stats *usage_stats; /* usage stats private data */
@@ -221,27 +225,33 @@ struct edgetpu_dev {
 	struct gcip_dma_fence_manager *gfence_mgr; /* DMA sync fences manager */
 	/* version read from the firmware binary file */
 	struct edgetpu_fw_version fw_version;
-	/*
-	 * When a client opens the device, the open handler must acquire this lock and ensure
-	 * `vii_format` is not EDGETPU_VII_FORMAT_UNKNOWN. If it is, the handler must attempt to
-	 * load firmware to initialize `vii_format`.
-	 */
-	struct mutex vii_format_uninitialized_lock;
-	enum edgetpu_vii_format vii_format;
-	atomic_t job_count;	/* times joined to a device group */
+	atomic_t job_count;	/* # times a device group has been created for this device */
 	/* To save device properties */
 	struct edgetpu_dev_prop device_prop;
+
+	/* Length of @mailbox_irq */
+	int n_mailbox_irq;
+	/* Array of mailbox IRQ numbers */
+	int *mailbox_irq;
 
 	/* counts of error events */
 	uint firmware_crash_count;
 	uint watchdog_timeout_count;
 
-	/* Inter-IP fence manager. */
-	struct iif_manager *iif_mgr;
-	struct device *iif_dev;
-
 	/* Firmware debug service */
 	struct edgetpu_fw_debug_mem fw_debug_mem;
+
+	/*
+	 * Whether the firmware CPU is running (reset-signal released) or is being held in reset.
+	 *
+	 * This field must only be accessed while holding a PM reference (edgetpu_pm_get()) or
+	 * inside of the gcip_pm power_up/power_down handlers, which are called when the PM
+	 * ref-count goes changes from or to 0 respectively.
+	 */
+	bool firmware_cpu_on;
+
+	struct mutex first_open_lock;
+	bool is_first_open;
 };
 
 struct edgetpu_dev_iface {
@@ -315,6 +325,9 @@ void edgetpu_handle_job_lockup(struct edgetpu_dev *etdev, u16 vcid);
 
 /* Handle an individual client entering an unrecoverable state in firmware */
 void edgetpu_handle_client_fatal_error_notify(struct edgetpu_dev *etdev, u32 client_id);
+
+/* Handle a client inactivity timeout notification from firmware */
+void edgetpu_handle_client_inactivity_timeout(struct edgetpu_dev *etdev, u32 client_id);
 
 /* Bus (Platform/PCI) <-> Core API */
 

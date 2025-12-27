@@ -7,12 +7,14 @@
 
 #include <linux/debugfs.h>
 #include <linux/fs.h>
+#include <linux/pm_runtime.h>
 #include <linux/slab.h>
 #include <linux/uaccess.h>
 
 #include <gcip/gcip-fault-injection.h>
 #include <gcip/gcip-kci.h>
 #include <gcip/gcip-pm.h>
+#include <gcip/gcip-status-code.h>
 
 static int gcip_fault_inject_send_locked(struct gcip_fault_inject *injection)
 {
@@ -38,7 +40,7 @@ static int gcip_fault_inject_send_locked(struct gcip_fault_inject *injection)
 	ret = injection->send_kci(injection);
 	if (!ret) {
 		injection->fw_support_status = GCIP_FAULT_INJECT_STATUS_SUPPORTED;
-	} else if (ret == GCIP_KCI_ERROR_UNIMPLEMENTED) {
+	} else if (ret == GCIP_STATUS_CODE_UNIMPLEMENTED) {
 		injection->fw_support_status = GCIP_FAULT_INJECT_STATUS_UNSUPPORTED;
 	} else {
 		injection->fw_support_status = GCIP_FAULT_INJECT_STATUS_ERROR;
@@ -68,13 +70,18 @@ static ssize_t gcip_fault_injection_set(struct file *filp, const char __user *bu
 					loff_t *offp)
 {
 	struct gcip_fault_inject *injection = filp->f_inode->i_private;
-	bool mcu_ready = !gcip_pm_get_if_powered(injection->pm, false);
+	bool mcu_ready;
 	char *input = NULL;
 	int ret;
 	int i;
 	int start = 0;
 	uint32_t val;
 	int consume;
+
+	if (injection->pm)
+		mcu_ready = !gcip_pm_get_if_powered(injection->pm, false);
+	else
+		mcu_ready = (pm_runtime_get_if_in_use(injection->dev) > 0);
 
 	if (*offp || (count + 1 >= FAULT_INJECT_BUF_SIZE)) {
 		ret = -EINVAL;
@@ -121,7 +128,7 @@ out:
 	kfree(input);
 
 	if (mcu_ready)
-		gcip_pm_put(injection->pm);
+		injection->pm ? gcip_pm_put(injection->pm) : pm_runtime_put(injection->dev);
 
 	return ret;
 }

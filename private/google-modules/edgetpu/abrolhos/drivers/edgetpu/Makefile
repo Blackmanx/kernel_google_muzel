@@ -12,8 +12,8 @@ include $(KERNEL_SRC)/../private/google-modules/soc/gs/Makefile.include
 # ddk_module.
 EXTRA_SYMBOLS	+= $(OUT_DIR)/../private/google-modules/power/mitigation/google_bcl_Module.symvers
 
-ifneq ("$(wildcard $(OUT_DIR)/../private/google-modules/soc/gs/drivers/soc/google/gsa/Module.symvers)","")
-EXTRA_SYMBOLS	+= $(OUT_DIR)/../private/google-modules/soc/gs/drivers/soc/google/gsa/Module.symvers
+ifneq ("$(wildcard $(OUT_DIR)/../private/google-modules/soc/gs/drivers/soc/google/gsa/gsa_ko_Module.symvers)","")
+EXTRA_SYMBOLS	+= $(OUT_DIR)/../private/google-modules/soc/gs/drivers/soc/google/gsa/gsa_ko_Module.symvers
 endif
 
 modules modules_install clean compile_commands.json:

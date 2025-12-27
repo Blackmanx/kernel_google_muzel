@@ -18,13 +18,20 @@
  *
  * @arg->device_address will be set as the mapped TPU VA on success.
  *
+ * @limited must be true if being called on behalf of a limited interface.
+ *
  * Returns zero on success or a negative errno on error.
  */
 int edgetpu_map_dmabuf(struct edgetpu_device_group *group,
-		       struct edgetpu_map_dmabuf_ioctl *arg);
-/* unmap the dma-buf backed buffer from a device group */
+		       struct edgetpu_map_dmabuf_ioctl *arg, bool limited);
+/*
+ * Unmap the dma-buf backed buffer from a device group.
+ *
+ * @limited must be true if being called on behalf of a limited interface. If the mapping pointed
+ * to by @tpu_addr was not mapped with @limited == true, the unmap will fail and return -EINVAL.
+ */
 int edgetpu_unmap_dmabuf(struct edgetpu_device_group *group,
-			 tpu_addr_t tpu_addr);
+			 tpu_addr_t tpu_addr, bool limited);
 /* Creates a DMA sync fence manager. */
 int edgetpu_sync_fence_manager_create(struct edgetpu_dev *etdev);
 /* Create a DMA sync fence via ioctl */

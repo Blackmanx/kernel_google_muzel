@@ -71,6 +71,8 @@ struct gcip_fault_inject {
 /**
  * struct gcip_fault_inject_args - The parameters for fault injection initialization.
  * @parent_dentry: The parent dentry where the "fault_injection" DebugFS node will be created.
+ * @pm: GCIP PM object for checking device powering status. Optional. If NULL is passed,
+ *      pm_runtime_*() on @dev is used for power status.
  *
  * Except @parent_dentry, all the other fields are identical to the struct gcip_fault_inject.
  */

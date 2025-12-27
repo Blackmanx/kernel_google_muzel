@@ -5,8 +5,8 @@
  * Copyright (C) 2023 Google LLC
  */
 
-#ifndef __GCIP_FAULT_INJECTION_H__
-#define __GCIP_FAULT_INJECTION_H__
+#ifndef __GCIP_FAULT_INJECT_H__
+#define __GCIP_FAULT_INJECT_H__
 
 #include <linux/dcache.h>
 #include <linux/device.h>
@@ -15,7 +15,7 @@
 
 #include <gcip/gcip-pm.h>
 
-#define DEBUGFS_FAULT_INJECTION "fault_injection"
+#define GCIP_FAULT_INJECT_NAME_SIZE 32
 #define GCIP_FAULT_INJECT_OPAQUE_SIZE 16
 #define FAULT_INJECT_BUF_SIZE 256
 
@@ -71,8 +71,13 @@ struct gcip_fault_inject {
 /**
  * struct gcip_fault_inject_args - The parameters for fault injection initialization.
  * @parent_dentry: The parent dentry where the "fault_injection" DebugFS node will be created.
+ * @pm: GCIP PM object for checking device powering status. Optional. If NULL is passed,
+ *      pm_runtime_*() on @dev is used for power status.
+ * @send_kci: The function to send the fault injection KCI.
+ * @kci_data: The private data that will be passed to the @send_kci function.
+ * @name: The name of debugfs node.
  *
- * Except @parent_dentry, all the other fields are identical to the struct gcip_fault_inject.
+ * Except @parent_dentry and @name, all the other fields are passed to the struct gcip_fault_inject.
  */
 struct gcip_fault_inject_args {
 	struct device *dev;
@@ -80,6 +85,7 @@ struct gcip_fault_inject_args {
 	struct gcip_pm *pm;
 	int (*send_kci)(struct gcip_fault_inject *injection);
 	void *kci_data;
+	char name[GCIP_FAULT_INJECT_NAME_SIZE];
 };
 
 /**
@@ -112,4 +118,4 @@ void gcip_fault_inject_destroy(struct gcip_fault_inject *injection);
  */
 int gcip_fault_inject_send(struct gcip_fault_inject *injection);
 
-#endif /* __GCIP_FAULT_INJECTION_H__ */
+#endif /* __GCIP_FAULT_INJECT_H__ */

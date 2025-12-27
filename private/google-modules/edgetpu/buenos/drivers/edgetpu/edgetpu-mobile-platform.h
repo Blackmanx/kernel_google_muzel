@@ -32,11 +32,6 @@ struct edgetpu_mobile_platform_dev {
 	struct mutex tz_mailbox_lock;
 	/* TZ mailbox client */
 	struct edgetpu_client *secure_client;
-
-	/* Length of @mailbox_irq */
-	int n_mailbox_irq;
-	/* Array of mailbox IRQ numbers */
-	int *mailbox_irq;
 };
 
 #endif /* __EDGETPU_MOBILE_PLATFORM_H__ */

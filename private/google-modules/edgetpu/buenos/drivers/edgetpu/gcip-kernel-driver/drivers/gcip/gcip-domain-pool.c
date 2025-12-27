@@ -2,10 +2,11 @@
 /*
  * GCIP IOMMU domain allocator.
  *
- * Copyright (C) 2022 Google LLC
+ * Copyright (C) 2022-2025 Google LLC
  */
 
 #include <linux/device.h>
+#include <linux/err.h>
 #include <linux/idr.h>
 #include <linux/iommu.h>
 #include <linux/vmalloc.h>
@@ -40,11 +41,13 @@ int gcip_domain_pool_init(struct device *dev, struct gcip_domain_pool *pool, uns
 	}
 	for (i = 0; i < size; i++) {
 		domain = iommu_domain_alloc(dev->bus);
-		if (!domain) {
+		if (!domain)
+			domain = ERR_PTR(-ENOMEM);
+		if (IS_ERR(domain)) {
 			dev_err(pool->dev, "Failed to allocate iommu domain %d of %u\n", i + 1,
 				size);
 			gcip_domain_pool_destroy(pool);
-			return -ENOMEM;
+			return PTR_ERR(domain);
 		}
 
 		pool->array[i] = domain;
@@ -61,7 +64,6 @@ struct iommu_domain *gcip_domain_pool_alloc(struct gcip_domain_pool *pool)
 		ddomain = vzalloc(sizeof(*ddomain));
 		if (!ddomain)
 			return NULL;
-
 		ddomain->domain = iommu_domain_alloc(pool->dev->bus);
 		if (!ddomain->domain) {
 			vfree(ddomain);

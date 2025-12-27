@@ -2,7 +2,7 @@
 /*
  * Manages GCIP IOMMU domains and allocates/maps IOVAs.
  *
- * Copyright (C) 2023 Google LLC
+ * Copyright (C) 2023-2025 Google LLC
  */
 
 #include <linux/bitops.h>
@@ -17,6 +17,7 @@
 #include <linux/log2.h>
 #include <linux/math.h>
 #include <linux/mm.h>
+#include <linux/mutex.h>
 #include <linux/of.h>
 #include <linux/scatterlist.h>
 #include <linux/sched/mm.h>
@@ -524,11 +525,10 @@ static void gcip_iommu_mapping_unmap_dma_buf(struct gcip_iommu_mapping *mapping)
 	kfree(dmabuf_mapping);
 }
 
-/**
- * gcip_iommu_mapping_unmap_buffer() - Revert gcip_iommu_domain_map_buffer
- * @mapping: The target mapping that should be unmapped.
+/*
+ * For buffer unmap and trim operations, sync, unpin, and free the sgt.
  */
-static void gcip_iommu_mapping_unmap_buffer(struct gcip_iommu_mapping *mapping)
+static void gcip_iommu_mapping_buffer_flush_sgt(struct gcip_iommu_mapping *mapping)
 {
 	struct sg_page_iter sg_iter;
 	struct page *page;
@@ -537,23 +537,37 @@ static void gcip_iommu_mapping_unmap_buffer(struct gcip_iommu_mapping *mapping)
 	struct mm_struct *owning_mm = mapping->owning_mm;
 	enum dma_data_direction dir = GCIP_MAP_FLAGS_GET_DMA_DIRECTION(mapping->gcip_map_flags);
 
-	gcip_iommu_domain_unmap_sgt_free_iova(mapping->domain, mapping->sgt,
-					      !mapping->user_specified_daddr,
-					      mapping->gcip_map_flags);
+	if (!sgt)
+		return;
 
+	gcip_iommu_domain_unmap_sgt_free_iova(mapping->domain, sgt, false, mapping->gcip_map_flags);
 	for_each_sg_page(sgt->sgl, &sg_iter, sgt->orig_nents, 0) {
 		page = sg_page_iter_page(&sg_iter);
 		if (dir == DMA_FROM_DEVICE || dir == DMA_BIDIRECTIONAL)
 			set_page_dirty(page);
-
 		unpin_user_page(page);
 		num_pages++;
 	}
 
 	atomic64_sub(num_pages, &owning_mm->pinned_vm);
-	mmdrop(owning_mm);
 	sg_free_table(sgt);
 	kfree(sgt);
+	mapping->sgt = NULL;
+}
+
+/**
+ * gcip_iommu_mapping_unmap_buffer() - Revert gcip_iommu_domain_map_buffer
+ * @mapping: The target mapping that should be unmapped.
+ */
+static void gcip_iommu_mapping_unmap_buffer(struct gcip_iommu_mapping *mapping)
+{
+	gcip_iommu_mapping_buffer_flush_sgt(mapping);
+
+	if (!mapping->user_specified_daddr)
+		gcip_iommu_free_iova(mapping->domain, mapping->alloced_iova, mapping->size);
+
+	mmdrop(mapping->owning_mm);
+	mutex_destroy(&mapping->sync_lock);
 	kfree(mapping);
 }
 
@@ -629,8 +643,10 @@ static int gcip_pin_user_pages(struct device *dev, struct page **pages, unsigned
 	 * reference counts from the LRU cache.
 	 */
 	for (tried = 0; tried < 5; tried++) {
-		if (tried > 0)
+		if (tried > 0) {
+			dev_info(dev, "Retrying mapping with LRU cache disabled (tries=%d)", tried);
 			lru_cache_disable();
+		}
 		if (pin_user_pages_lock)
 			mutex_lock(pin_user_pages_lock);
 		mmap_read_lock(current->mm);
@@ -847,6 +863,43 @@ struct gcip_iommu_domain *gcip_iommu_get_domain_for_dev(struct device *dev)
 	return gdomain;
 }
 
+struct gcip_iommu_domain *
+gcip_iommu_get_domain_for_dev_from_pool(struct device *dev, struct gcip_iommu_domain_pool *pool)
+{
+	struct gcip_iommu_domain *gdomain;
+	int ret;
+
+	gdomain = gcip_iommu_get_domain_for_dev(dev);
+	if (IS_ERR(gdomain))
+		return gdomain;
+
+	gdomain->domain_pool = pool;
+	switch (pool->domain_type) {
+	case GCIP_IOMMU_DOMAIN_TYPE_IOVAD:
+		gdomain->ops = &iovad_ops;
+		break;
+	case GCIP_IOMMU_DOMAIN_TYPE_MEM_POOL:
+		gdomain->ops = &mem_pool_ops;
+		break;
+	default:
+		ret = -EINVAL;
+		goto err_free_domain;
+	}
+
+	ret = gdomain->ops->initialize_domain(gdomain);
+	if (ret)
+		goto err_free_domain;
+
+	if (pool->best_fit)
+		gdomain->ops->enable_best_fit_algo(gdomain);
+
+	return gdomain;
+
+err_free_domain:
+	devm_kfree(dev, gdomain);
+	return ERR_PTR(ret);
+}
+
 u64 gcip_iommu_encode_gcip_map_flags(enum dma_data_direction dir, bool coherent,
 				     unsigned long dma_attrs, bool restrict_iova)
 {
@@ -860,10 +913,11 @@ u64 gcip_iommu_encode_gcip_map_flags(enum dma_data_direction dir, bool coherent,
 static void entry_show_dma_addrs(struct gcip_iommu_mapping *mapping, struct seq_file *s)
 {
 	struct sg_table *sgt = mapping->sgt;
-	struct scatterlist *sg = sgt->sgl;
+	struct scatterlist *sg;
 	uint i;
 
-	if (sgt->nents > 1) {
+	if (sgt && sgt->nents > 1) {
+		sg = sgt->sgl;
 		seq_puts(s, " dma=[");
 		for (i = 0; i < sgt->nents; i++) {
 			if (i)
@@ -887,6 +941,22 @@ void gcip_iommu_dmabuf_map_show(struct gcip_iommu_mapping *mapping, struct seq_f
 		   dmabuf_mapping->dma_buf->exp_name,
 		   &sg_dma_address(dmabuf_mapping->sgt_default->sgl));
 	entry_show_dma_addrs(mapping, s);
+}
+
+size_t gcip_iommu_dmabuf_hiorder_size(struct gcip_iommu_mapping *mapping)
+{
+	struct gcip_iommu_dma_buf_mapping *dmabuf_mapping =
+		container_of(mapping, struct gcip_iommu_dma_buf_mapping, mapping);
+	struct scatterlist *sgl;
+	int i;
+	size_t ret = 0;
+
+	for_each_sg(dmabuf_mapping->sgt_default->sgl, sgl, dmabuf_mapping->sgt_default->orig_nents,
+		    i)
+		if (sgl->length >= SZ_2M)
+			ret += sgl->length;
+
+	return ret;
 }
 
 /**
@@ -1037,7 +1107,6 @@ err_pin_read_only:
  *                                      target IOMMU domain.
  * @domain: The desired IOMMU domain where the sgt should be mapped.
  * @sgt: The scatter-gather table to map to the target IOMMU domain.
- * @orig_dir: The original DMA direction that user try to map.
  * @offset: The offset of the start address.
  * @iova: The target IOVA to map @sgt. If it is 0, this function allocates an IOVA space.
  * @gcip_map_flags: The flags used to create the mapping, which can be encoded with
@@ -1048,7 +1117,6 @@ err_pin_read_only:
  */
 static struct gcip_iommu_mapping *gcip_iommu_domain_map_buffer_sgt(struct gcip_iommu_domain *domain,
 								   struct sg_table *sgt,
-								   enum dma_data_direction orig_dir,
 								   ulong offset, dma_addr_t iova,
 								   u64 gcip_map_flags)
 {
@@ -1065,6 +1133,7 @@ static struct gcip_iommu_mapping *gcip_iommu_domain_map_buffer_sgt(struct gcip_i
 	mapping->sgt = sgt;
 	mapping->type = GCIP_IOMMU_MAPPING_BUFFER;
 	mapping->user_specified_daddr = iova;
+	mutex_init(&mapping->sync_lock);
 
 	ret = gcip_iommu_domain_map_sgt_to_iova(domain, sgt, iova, &gcip_map_flags);
 	if (!ret) {
@@ -1076,6 +1145,8 @@ static struct gcip_iommu_mapping *gcip_iommu_domain_map_buffer_sgt(struct gcip_i
 	mmgrab(current->mm);
 	mapping->owning_mm = current->mm;
 	mapping->device_address = sg_dma_address(sgt->sgl) + offset;
+	if (!mapping->user_specified_daddr)
+		mapping->alloced_iova = sg_dma_address(sgt->sgl);
 	mapping->gcip_map_flags = gcip_map_flags;
 	mapping->dir = GCIP_MAP_FLAGS_GET_DMA_DIRECTION(gcip_map_flags);
 	mapping->size = 0;
@@ -1096,7 +1167,6 @@ err_map_sgt:
  * @dmabuf: The shared dma-buf object.
  * @attachment: The device attachment of @dmabuf.
  * @sgt: The scatter-gather table to map to the target IOMMU domain.
- * @orig_dir: The original DMA direction that user try to map.
  * @iova: The target IOVA to map @sgt. If it is 0, this function allocates an IOVA space.
  * @gcip_map_flags: The flags used to create the mapping, which can be encoded with
  *                  gcip_iommu_encode_gcip_map_flags() or `GCIP_MAP_FLAGS_DMA_*_TO_FLAGS` macros.
@@ -1107,8 +1177,7 @@ err_map_sgt:
 static struct gcip_iommu_mapping *
 gcip_iommu_domain_map_dma_buf_sgt(struct gcip_iommu_domain *domain, struct dma_buf *dmabuf,
 				  struct dma_buf_attachment *attachment, struct sg_table *sgt,
-				  enum dma_data_direction orig_dir, dma_addr_t iova,
-				  u64 gcip_map_flags)
+				  dma_addr_t iova, u64 gcip_map_flags)
 {
 	struct gcip_iommu_dma_buf_mapping *dmabuf_mapping;
 	struct gcip_iommu_mapping *mapping;
@@ -1166,12 +1235,20 @@ err_dma_buf_put:
 	return ERR_PTR(ret);
 }
 
-struct gcip_iommu_mapping *gcip_iommu_domain_map_buffer_to_iova(struct gcip_iommu_domain *domain,
-								u64 host_address, size_t size,
-								dma_addr_t iova, u64 gcip_map_flags,
-								struct mutex *pin_user_pages_lock)
+/*
+ * Common code for buffer map and remap.
+ * @mapping = NULL for a new mapping.  Function returns a pointer to the new mapping or error.
+ * @mapping != NULL points to an existing mapping being remapped.  Function returns the same
+ *                  mapping or error.
+ */
+
+static struct gcip_iommu_mapping *__gcip_iommu_domain_map_buffer(struct gcip_iommu_domain *domain,
+								 u64 host_address, size_t size,
+								 dma_addr_t iova,
+								 u64 gcip_map_flags,
+								 struct gcip_iommu_mapping *mapping,
+								 struct mutex *pin_user_pages_lock)
 {
-	struct gcip_iommu_mapping *mapping;
 	enum dma_data_direction orig_dir = GCIP_MAP_FLAGS_GET_DMA_DIRECTION(gcip_map_flags);
 	uint num_pages = 0;
 	struct page **pages;
@@ -1179,7 +1256,7 @@ struct gcip_iommu_mapping *gcip_iommu_domain_map_buffer_to_iova(struct gcip_iomm
 	int ret, i;
 	struct sg_table *sgt;
 	uint gup_flags;
-	enum gcip_map_debug_flags map_debug_flags = 0;
+	enum gcip_map_debug_flags map_debug_flags = mapping ? mapping->map_debug_flags : 0;
 
 	if (!valid_dma_direction(orig_dir))
 		return ERR_PTR(-EINVAL);
@@ -1231,17 +1308,32 @@ struct gcip_iommu_mapping *gcip_iommu_domain_map_buffer_to_iova(struct gcip_iomm
 		goto err_free_table;
 	}
 
-	mapping = gcip_iommu_domain_map_buffer_sgt(domain, sgt, orig_dir, offset, iova,
-						   gcip_map_flags);
-	if (IS_ERR(mapping)) {
-		ret = PTR_ERR(mapping);
-		goto err_free_table;
+	if (!mapping) {
+		/* Map the sgt and create a new gcip_iommu_mapping struct for the mapping. */
+		mapping = gcip_iommu_domain_map_buffer_sgt(domain, sgt, offset, iova,
+							   gcip_map_flags);
+		if (IS_ERR(mapping)) {
+			ret = PTR_ERR(mapping);
+			goto err_free_table;
+		}
+	} else {
+		/* Remap the sgt and save it in the existing gcip_iommu_mapping struct. */
+		ret = gcip_iommu_domain_map_sgt_to_iova(domain, sgt, mapping->device_address,
+							&mapping->gcip_map_flags);
+		if (!ret) {
+			ret = -ENOSPC;
+			dev_err(domain->dev, "remap buffer iova %pad failed to map sgt (%d)\n",
+				&mapping->device_address, ret);
+			goto err_free_table;
+		}
+
+		mapping->sgt = sgt;
 	}
 
 	atomic64_add(num_pages, &current->mm->pinned_vm);
 	kvfree(pages);
+	mapping->host_address = host_address;
 	mapping->map_debug_flags = map_debug_flags;
-
 	return mapping;
 
 err_free_table:
@@ -1259,6 +1351,15 @@ err_unpin_page:
 	return ERR_PTR(ret);
 }
 
+struct gcip_iommu_mapping *gcip_iommu_domain_map_buffer_to_iova(struct gcip_iommu_domain *domain,
+								u64 host_address, size_t size,
+								dma_addr_t iova, u64 gcip_map_flags,
+								struct mutex *pin_user_pages_lock)
+{
+	return __gcip_iommu_domain_map_buffer(domain, host_address, size, iova, gcip_map_flags,
+					      NULL, pin_user_pages_lock);
+}
+
 struct gcip_iommu_mapping *gcip_iommu_domain_map_buffer(struct gcip_iommu_domain *domain,
 							u64 host_address, size_t size,
 							u64 gcip_map_flags,
@@ -1266,6 +1367,26 @@ struct gcip_iommu_mapping *gcip_iommu_domain_map_buffer(struct gcip_iommu_domain
 {
 	return gcip_iommu_domain_map_buffer_to_iova(domain, host_address, size, 0, gcip_map_flags,
 						    pin_user_pages_lock);
+}
+
+static int gcip_iommu_mapping_remap_buffer(struct gcip_iommu_mapping *mapping,
+					   struct mutex *pin_user_pages_lock)
+{
+	struct gcip_iommu_mapping *mapbuf_ret;
+
+	if (mapping->sgt) {
+		dev_err(mapping->domain->dev, "remap buffer iova %pad not trimmed",
+			&mapping->device_address);
+		return -EBUSY;
+	}
+
+	mapbuf_ret = __gcip_iommu_domain_map_buffer(mapping->domain, mapping->host_address,
+						    mapping->size, mapping->device_address,
+						    mapping->gcip_map_flags, mapping,
+						    pin_user_pages_lock);
+	if (IS_ERR(mapbuf_ret))
+		return PTR_ERR(mapbuf_ret);
+	return 0;
 }
 
 struct gcip_iommu_mapping *gcip_iommu_domain_map_dma_buf_to_iova(struct gcip_iommu_domain *domain,
@@ -1310,7 +1431,7 @@ struct gcip_iommu_mapping *gcip_iommu_domain_map_dma_buf_to_iova(struct gcip_iom
 		goto err_map_attachment;
 	}
 
-	mapping = gcip_iommu_domain_map_dma_buf_sgt(domain, dmabuf, attachment, sgt, orig_dir, iova,
+	mapping = gcip_iommu_domain_map_dma_buf_sgt(domain, dmabuf, attachment, sgt, iova,
 						    gcip_map_flags);
 	if (IS_ERR(mapping)) {
 		ret = PTR_ERR(mapping);
@@ -1348,6 +1469,118 @@ void gcip_iommu_mapping_unmap(struct gcip_iommu_mapping *mapping)
 
 	if (ops && ops->after_unmap)
 		ops->after_unmap(data);
+}
+
+int gcip_iommu_mapping_sync(struct gcip_iommu_mapping *mapping, struct device *dev, u64 offset,
+			    u64 size, bool for_cpu)
+{
+	struct scatterlist *cur_sg, *start_sg = NULL, *end_sg = NULL;
+	int nelems = 0, ret = 0, i;
+	size_t cur_offset = 0;
+	u64 start, end;
+	unsigned int start_diff = 0, end_diff = 0;
+
+	if (mapping->type != GCIP_IOMMU_MAPPING_BUFFER)
+		return -EINVAL;
+
+	if (!mapping->host_address || !mapping->sgt)
+		return -EINVAL;
+
+	/*
+	 * Valid input requires:
+	 * - size > 0 (offset + size != offset)
+	 * - offset + size does not overflow (offset + size > offset)
+	 * - the mapped range falls within [0 : mapping->size]
+	 */
+	if (offset + size <= offset || offset + size > mapping->size)
+		return -EINVAL;
+
+	/* Ensure only one sync at a time as the scatterlist will be modified. */
+	mutex_lock(&mapping->sync_lock);
+
+	/*
+	 * Mappings are created at a PAGE_SIZE granularity, however other data which is not part of
+	 * the mapped buffer may be present in the first and last pages of the buffer's
+	 * scattergather list.
+	 *
+	 * To ensure only the intended data is actually synced, iterate through the scattergather
+	 * list, to find the first and last `scatterlist`s which contain the range of the buffer to
+	 * sync.
+	 *
+	 * After those links are found, change their offset/lengths so that `dma_map_sg_for_*()`
+	 * will only sync the requested region.
+	 */
+	start = offset_in_page(mapping->host_address) + offset;
+	end = start + size;
+
+	for_each_sg(mapping->sgt->sgl, cur_sg, mapping->sgt->orig_nents, i) {
+		/* Check if the scatterlist contains the start of the range to sync. */
+		if (cur_offset <= start && start < cur_offset + cur_sg->length) {
+			start_sg = cur_sg;
+			start_diff = start - cur_offset;
+		}
+
+		if (start_sg)
+			nelems++;
+
+		/* Check if the scatterlist contains the end of the range to sync. */
+		if (cur_offset < end && end <= cur_offset + cur_sg->length) {
+			end_sg = cur_sg;
+			end_diff = cur_offset + cur_sg->length - end;
+			break;
+		}
+
+		cur_offset += cur_sg->length;
+	}
+
+	/* Make sure the valid start/end SGs were found. */
+	if (!start_sg || !end_sg) {
+		ret = -EINVAL;
+		goto out_unlock;
+	}
+
+	start_sg->offset += start_diff;
+	start_sg->dma_address += start_diff;
+	start_sg->length -= start_diff;
+	start_sg->dma_length -= start_diff;
+	end_sg->length -= end_diff;
+	end_sg->dma_length -= end_diff;
+
+	if (for_cpu)
+		dma_sync_sg_for_cpu(dev, start_sg, nelems, mapping->dir);
+	else
+		dma_sync_sg_for_device(dev, start_sg, nelems, mapping->dir);
+
+	/* Revert the start and end scatterlist list. */
+	end_sg->length += end_diff;
+	end_sg->dma_length += end_diff;
+	start_sg->offset -= start_diff;
+	start_sg->dma_address -= start_diff;
+	start_sg->length += start_diff;
+	start_sg->dma_length += start_diff;
+
+out_unlock:
+	mutex_unlock(&mapping->sync_lock);
+
+	return ret;
+}
+
+static void gcip_iommu_mapping_trim_buffer(struct gcip_iommu_mapping *mapping)
+{
+	gcip_iommu_mapping_buffer_flush_sgt(mapping);
+}
+
+void gcip_iommu_mapping_trim(struct gcip_iommu_mapping *mapping)
+{
+	if (mapping->type == GCIP_IOMMU_MAPPING_BUFFER)
+		gcip_iommu_mapping_trim_buffer(mapping);
+}
+
+int gcip_iommu_mapping_remap(struct gcip_iommu_mapping *mapping, struct mutex *pin_user_pages_lock)
+{
+	if (mapping->type == GCIP_IOMMU_MAPPING_BUFFER)
+		return gcip_iommu_mapping_remap_buffer(mapping, pin_user_pages_lock);
+	return -EINVAL;
 }
 
 dma_addr_t gcip_iommu_alloc_iova(struct gcip_iommu_domain *domain, size_t size, u64 gcip_map_flags)

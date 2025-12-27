@@ -64,7 +64,7 @@ struct edgetpu_iif {
  * Initializes the IIF mailbox (if supported), obtain references to the system @iif_mgr and
  * @iif_dev, and start @unblocked_work.
  */
-int edgetpu_iif_init(struct edgetpu_mailbox_manager *mgr, struct edgetpu_iif *etiif);
+int edgetpu_iif_init(struct edgetpu_dev *etdev, struct edgetpu_iif *etiif);
 
 /*
  * Releases resources allocated by @etiif.
@@ -82,7 +82,7 @@ void edgetpu_iif_release(struct edgetpu_iif *etiif);
  *
  * If the platform does not support an IIF mailbox, this function returns success immediately.
  */
-int edgetpu_iif_init_mailbox(struct edgetpu_mailbox_manager *mgr, struct edgetpu_iif *etiif);
+int edgetpu_iif_init_mailbox(struct edgetpu_dev *etdev, struct edgetpu_iif *etiif);
 
 /*
  * Releases resources used by the IIF mailbox.
@@ -97,10 +97,8 @@ void edgetpu_iif_release_mailbox(struct edgetpu_iif *etiif);
  *
  * This function is used when the TPU device is reset, it re-programs CSRs related to the IIF
  * mailbox.
- *
- * Returns 0 on success, -errno on error.
  */
-int edgetpu_iif_reinit_mailbox(struct edgetpu_iif *etiif);
+void edgetpu_iif_reinit_mailbox(struct edgetpu_iif *etiif);
 
 
 /*

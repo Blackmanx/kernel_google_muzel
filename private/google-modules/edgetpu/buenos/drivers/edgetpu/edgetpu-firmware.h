@@ -1,9 +1,10 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * EdgeTPU firmware loader.
  *
- * Copyright (C) 2020-2022,2024 Google, Inc.
+ * Copyright (C) 2019-2025 Google LLC
  */
+
 #ifndef __EDGETPU_FIRMWARE_H__
 #define __EDGETPU_FIRMWARE_H__
 
@@ -17,10 +18,12 @@
 #include "edgetpu-internal.h"
 #include "edgetpu-mmu.h"
 
-#define MAX_IOMMU_MAPPINGS 23
-#define MAX_NS_IOMMU_MAPPINGS 5
-
-#define EDGETPU_FW_HEADER_SIZE SZ_4K
+/*
+ * This is the kernel driver version provided to the firmware during boot.
+ * This version is bumped when the kernel driver has behavior changes that firmware needs to be
+ * aware of.
+ */
+#define EDGETPU_DRIVER_FW_INTERFACE_VERSION 1
 
 /* Value of magic field above: 'TPUF' as a 32-bit LE int */
 #define EDGETPU_FW_MAGIC	0x46555054
@@ -58,6 +61,9 @@
 
 /* Firmware client_id realm IDs. */
 #define CLIENT_REALM_NS		0	/* kHostVmId  */
+
+/* The name of the fault injection debugfs node. */
+#define EDGETPU_FAULT_INJECT_NAME "fault_inject"
 
 /*
  * Load and run firmware.
@@ -159,16 +165,18 @@ void edgetpu_firmware_shared_mappings_context_unmap(struct edgetpu_dev *etdev,
 int edgetpu_firmware_reset_cpu(struct edgetpu_dev *etdev, bool assert_reset);
 
 /*
- * Setup firmware region carveout and iremap pool for device.
+ * Setup firmware carveout and (initial) iremap pool for device.
  * Allocates device firmware private data.  Must be called before edgetpu_firmware_create.
  *
- * @etdev: device for which to setup firmware region.
- * @fw_region_paddr: phys addr of firmware region (as from device tree)
+ * @etdev: device for which to setup firmware carveout.
+ * @fw_carveout_paddr: phys addr of firmware carveout (from device tree).
+ * @fw_carveout_size: size in bytes of firmware carveout (from device tree).
  */
-int edgetpu_firmware_setup_fw_region(struct edgetpu_dev *etdev, phys_addr_t fw_region_paddr);
+int edgetpu_firmware_setup_fw_carveout(struct edgetpu_dev *etdev, phys_addr_t fw_carveout_paddr,
+				       size_t fw_carveout_size);
 
-/* Cleanup firmware region carveout and iremap pool, free firmware private data. */
-void edgetpu_firmware_cleanup_fw_region(struct edgetpu_dev *etdev);
+/* Cleanup firmware carveout and iremap pool, free firmware private data. */
+void edgetpu_firmware_cleanup_fw_carveout(struct edgetpu_dev *etdev);
 
 /* Return KVA of FW shared data area. */
 void *edgetpu_firmware_shared_data_vaddr(struct edgetpu_dev *etdev);
@@ -187,6 +195,9 @@ phys_addr_t edgetpu_firmware_fw_region_paddr(struct edgetpu_dev *etdev);
 
 /* Return size of entire FW remap region. */
 size_t edgetpu_firmware_fw_region_size(struct edgetpu_dev *etdev);
+
+/* Tell firmware to log state. */
+void edgetpu_firmware_log_state(struct edgetpu_dev *etdev);
 
 #if IS_ENABLED(CONFIG_EDGETPU_TEST)
 /* Used by unit tests to set a mocked GSA device. */

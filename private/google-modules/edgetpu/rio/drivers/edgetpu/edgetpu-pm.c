@@ -1,8 +1,8 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * EdgeTPU power management interface.
  *
- * Copyright (C) 2020 Google, Inc.
+ * Copyright (C) 2020-2025 Google LLC
  */
 
 #include <linux/atomic.h>
@@ -10,14 +10,16 @@
 #include <linux/module.h>
 #include <linux/mutex.h>
 #include <linux/pm_runtime.h>
+#include <linux/pm_wakeup.h>
 
 #include <gcip/gcip-pm.h>
+#include <gcip/gcip-status-code.h>
 #include <gcip/gcip-thermal.h>
-
 
 #include "edgetpu-config.h"
 #include "edgetpu-firmware.h"
 #include "edgetpu-gsa.h"
+#include "edgetpu-iif.h"
 #include "edgetpu-ikv.h"
 #include "edgetpu-internal.h"
 #include "edgetpu-kci.h"
@@ -64,9 +66,9 @@ static int mobile_pwr_update_freq_limits_locked(struct edgetpu_dev *etdev)
 
 	ret = edgetpu_kci_set_freq_limits(etdev->etkci, etdev->pm->min_freq, etdev->pm->max_freq);
 	switch (ret) {
-	case GCIP_KCI_ERROR_OK:
+	case GCIP_STATUS_CODE_OK:
 		return 0;
-	case GCIP_KCI_ERROR_INVALID_ARGUMENT:
+	case GCIP_STATUS_CODE_INVALID_ARGUMENT:
 		dev_err(etdev->dev,
 			"No valid values within debugfs frequency limits: (%u, %u)\n",
 			etdev->pm->min_freq, etdev->pm->max_freq);
@@ -104,7 +106,12 @@ int edgetpu_pm_set_freq_limits(struct edgetpu_dev *etdev, u32 *min_freq, u32 *ma
 		limits_updated = true;
 	}
 
-	if (limits_updated && (edgetpu_always_on() || !edgetpu_soc_pm_is_block_off(etdev)))
+	/*
+	 * We already hold PM lock.  Check if a power-up req is already active and update if so.
+	 * If no NS client is holding device powered then don't update limits, device is either off
+	 * or will soon power down.
+	 */
+	if (limits_updated && edgetpu_pm_is_powered(etdev))
 		ret = mobile_pwr_update_freq_limits_locked(etdev);
 
 	mutex_unlock(&etdev->pm->freq_limits_lock);
@@ -112,72 +119,17 @@ int edgetpu_pm_set_freq_limits(struct edgetpu_dev *etdev, u32 *min_freq, u32 *ma
 	return ret;
 }
 
-static int mobile_pwr_state_set_locked(struct edgetpu_dev *etdev, u64 val)
+static int edgetpu_pm_debugfs_state_get(void *data, u64 *val)
 {
-	int ret = 0;
-	struct device *dev = etdev->dev;
+	struct edgetpu_dev *etdev = data;
 
-	dev_dbg(dev, "Power state to %llu\n", val);
-
-	if (val > EDGETPU_OFF_STATE &&
-	    (edgetpu_always_on() || !edgetpu_soc_pm_is_block_off(etdev))) {
-		ret = pm_runtime_get_sync(dev);
-		if (ret) {
-			pm_runtime_put_noidle(dev);
-			dev_err(dev, "pm_runtime_get_sync returned %d\n", ret);
-			return ret;
-		}
-	}
-
-	/* TODO(b/308903519): Implement set rate code. */
-
-	if (val == EDGETPU_OFF_STATE &&
-	    (edgetpu_always_on() || !edgetpu_soc_pm_is_block_off(etdev))) {
-		ret = pm_runtime_put_sync(dev);
-		if (ret) {
-			dev_err(dev, "%s: pm_runtime_put_sync returned %d\n", __func__, ret);
-			return ret;
-		}
-	}
-
-	return ret;
-}
-
-static int mobile_pwr_state_get_locked(void *data, u64 *val)
-{
-	struct edgetpu_dev *etdev = (typeof(etdev))data;
-	struct device *dev = etdev->dev;
-
-	*val = edgetpu_soc_pm_get_rate(etdev, 0);
-	dev_dbg(dev, "current tpu state: %llu\n", *val);
-
+	mutex_lock(&etdev->pm->state_lock);
+	*val = edgetpu_pm_get_count(etdev);
+	mutex_unlock(&etdev->pm->state_lock);
 	return 0;
 }
 
-static int mobile_pwr_state_set(void *data, u64 val)
-{
-	struct edgetpu_dev *etdev = (typeof(etdev))data;
-	int ret = 0;
-
-	mutex_lock(&etdev->pm->state_lock);
-	etdev->pm->requested_state = val;
-	ret = mobile_pwr_state_set_locked(etdev, val);
-	mutex_unlock(&etdev->pm->state_lock);
-	return ret;
-}
-
-static int mobile_pwr_state_get(void *data, u64 *val)
-{
-	struct edgetpu_dev *etdev = (typeof(etdev))data;
-	int ret;
-
-	mutex_lock(&etdev->pm->state_lock);
-	ret = mobile_pwr_state_get_locked(etdev, val);
-	mutex_unlock(&etdev->pm->state_lock);
-	return ret;
-}
-
-DEFINE_DEBUGFS_ATTRIBUTE(fops_tpu_pwr_state, mobile_pwr_state_get, mobile_pwr_state_set, "%llu\n");
+DEFINE_DEBUGFS_ATTRIBUTE(fops_tpu_pwr_state, edgetpu_pm_debugfs_state_get, NULL, "%llu\n");
 
 static int mobile_pwr_policy_set(void *data, u64 val)
 {
@@ -215,65 +167,67 @@ static int mobile_pwr_policy_get(void *data, u64 *val)
 DEFINE_DEBUGFS_ATTRIBUTE(fops_tpu_pwr_policy, mobile_pwr_policy_get, mobile_pwr_policy_set,
 			 "%llu\n");
 
-static int mobile_pwr_min_freq_set(void *data, u64 val)
-{
-	struct edgetpu_dev *etdev = (typeof(etdev))data;
-	u32 min_freq;
-
-	if (val > UINT_MAX) {
-		dev_err(etdev->dev, "Requested debugfs min freq %llu must be <= %u (UINT_MAX)\n",
-			val, UINT_MAX);
-		return -EINVAL;
-	}
-
-	min_freq = (u32)val;
-
-	return edgetpu_pm_set_freq_limits(etdev, &min_freq, NULL);
-}
-
-static int mobile_pwr_min_freq_get(void *data, u64 *val)
-{
-	struct edgetpu_dev *etdev = (typeof(etdev))data;
-
-	mutex_lock(&etdev->pm->freq_limits_lock);
-	*val = etdev->pm->min_freq;
-	mutex_unlock(&etdev->pm->freq_limits_lock);
-	return 0;
-}
-
-DEFINE_DEBUGFS_ATTRIBUTE(fops_tpu_pwr_min_freq, mobile_pwr_min_freq_get, mobile_pwr_min_freq_set,
-			 "%llu\n");
-
-static int mobile_pwr_max_freq_set(void *data, u64 val)
-{
-	struct edgetpu_dev *etdev = (typeof(etdev))data;
-	u32 max_freq;
-
-	if (val > UINT_MAX) {
-		dev_err(etdev->dev, "Requested debugfs max freq %llu must be <= %u (UINT_MAX)\n",
-			val, UINT_MAX);
-		return -EINVAL;
-	}
-
-	max_freq = (u32)val;
-
-	return edgetpu_pm_set_freq_limits(etdev, NULL, &max_freq);
-}
-
-static int mobile_pwr_max_freq_get(void *data, u64 *val)
-{
-	struct edgetpu_dev *etdev = (typeof(etdev))data;
-
-	mutex_lock(&etdev->pm->freq_limits_lock);
-	*val = etdev->pm->max_freq;
-	mutex_unlock(&etdev->pm->freq_limits_lock);
-	return 0;
-}
-
-DEFINE_DEBUGFS_ATTRIBUTE(fops_tpu_pwr_max_freq, mobile_pwr_max_freq_get, mobile_pwr_max_freq_set,
-			 "%llu\n");
-
 static int mobile_power_down(void *data);
+
+
+/*
+ * Disable mailbox IRQs during the power up sequence just in case old firmware is still
+ * running, avoid potential RFW access violation during state restore.
+ */
+static int edgetpu_pm_get_irqs_disabled(struct edgetpu_dev *etdev)
+{
+	int ret;
+
+	edgetpu_mailbox_irqs_enable(etdev, false);
+	ret = pm_runtime_get_sync(etdev->dev);
+	/* Re-enable mailbox IRQs. */
+	edgetpu_mailbox_irqs_enable(etdev, true);
+	return ret;
+}
+
+/*
+ * Work-around for b/422990510.
+ *
+ * If the last two active devices in a genpd power domain race, such that both devices make their
+ * runtime_suspend callback before either updates their status to RPM_SUSPEND, the genpd layer will
+ * not shut down that power domain, as both callbacks believe there's another active device.
+ *
+ * This function tries to recover from that state by forcing another call to the TPU power domain's
+ * genpd suspend handler by activating and suspending the edgetpu device.
+ */
+static int try_force_power_domain_reboot(struct edgetpu_dev *etdev)
+{
+	int ret;
+	int times = 0;
+
+	ret = pm_runtime_get_sync(etdev->dev);
+	if (ret) {
+		pm_runtime_put_noidle(etdev->dev);
+		etdev_err(etdev, "pm_runtime_get failed for forced reboot %d", ret);
+		return ret;
+	}
+
+	ret = pm_runtime_put_sync(etdev->dev);
+	if (ret) {
+		etdev_err(etdev, "pm_runtime_put failed for forced reboot %d", ret);
+		return ret;
+	}
+
+	do {
+		if (edgetpu_poll_block_off(etdev))
+			break;
+		usleep_range(BLOCK_DOWN_MIN_DELAY_US, BLOCK_DOWN_MAX_DELAY_US);
+	} while (++times < BLOCK_DOWN_RETRY_TIMES);
+
+	if (times >= BLOCK_DOWN_RETRY_TIMES && !edgetpu_poll_block_off(etdev)) {
+		etdev_err(etdev, "device still not off after forced reboot");
+		edgetpu_soc_pm_dump_block_state(etdev);
+		return -EAGAIN;
+	}
+	etdev_info(etdev, "forced reboot successfully recovered device into power-off state.");
+
+	return 0;
+}
 
 static int mobile_power_up(void *data)
 {
@@ -294,16 +248,30 @@ static int mobile_power_up(void *data)
 			usleep_range(BLOCK_DOWN_MIN_DELAY_US, BLOCK_DOWN_MAX_DELAY_US);
 		} while (++times < BLOCK_DOWN_RETRY_TIMES);
 		if (times >= BLOCK_DOWN_RETRY_TIMES && !edgetpu_poll_block_off(etdev)) {
-			etdev_err(etdev, "power up failed: device not in correct power state");
+			etdev_err(
+				etdev,
+				"power up failed: device not in correct power state. pm_runtime_active=%d",
+				pm_runtime_active(etdev->dev));
 			edgetpu_soc_pm_dump_block_state(etdev);
-			return -EAGAIN;
+
+			/*
+			 * If pm_runtime has suspended the device, genpd may have failed to
+			 * shutdown the power domain due to racing devices. Attempt to recover by
+			 * cycling the edgetpu device's pm_runtime state.
+			 */
+			if (!pm_runtime_active(etdev->dev)) {
+				ret = try_force_power_domain_reboot(etdev);
+				if (ret)
+					return ret;
+			} else {
+				return -EAGAIN;
+			}
 		}
 	}
 
 	etdev_info(etdev, "Powering up\n");
-
-	ret = pm_runtime_get_sync(etdev->dev);
-	if (ret) {
+	ret = edgetpu_pm_get_irqs_disabled(etdev);
+	if (ret < 0) {
 		pm_runtime_put_noidle(etdev->dev);
 		etdev_err(etdev, "pm_runtime_get_sync returned %d\n", ret);
 		return ret;
@@ -320,9 +288,13 @@ static int mobile_power_up(void *data)
 		etdev_dbg(etdev, "Resetting in-kernel VII\n");
 		edgetpu_ikv_reinit(etdev->etikv);
 	}
+	if (etdev->etiif) {
+		etdev_dbg(etdev, "Resetting IIF\n");
+		edgetpu_iif_reinit_mailbox(etdev->etiif);
+	}
 	if (etdev->mailbox_manager) {
-		etdev_dbg(etdev, "Resetting (VII/external) mailboxes\n");
-		edgetpu_mailbox_reset_mailboxes(etdev->mailbox_manager);
+		etdev_dbg(etdev, "Resetting external mailboxes\n");
+		edgetpu_mailbox_reset_ext_mailboxes(etdev->mailbox_manager);
 	}
 
 	if (!etdev->firmware)
@@ -420,14 +392,23 @@ static int mobile_power_down(void *data)
 			edgetpu_kci_update_usage_locked(etdev);
 			mobile_firmware_down(etdev);
 			/* Ensure firmware is completely off */
-			edgetpu_soc_pm_lpm_down(etdev);
+			if (!edgetpu_always_on())
+				edgetpu_soc_pm_lpm_down(etdev);
 			/* Indicate firmware is no longer running */
 			etdev->state = ETDEV_STATE_NOFW;
 		}
 		edgetpu_kci_cancel_work_queues(etdev->etkci);
 	}
 
-	if (etdev->firmware) {
+	/*
+	 * If this function was called due to a failed power-up, the CPU may never have booted.
+	 * In that case, it's not necessary to attempt to put the CPU into reset here and the block
+	 * should be powered-down.
+	 *
+	 * This also ensures that a failed, unnecessary, CPU reset request failure does not keep the
+	 * block powered-up.
+	 */
+	if (etdev->firmware && etdev->firmware_cpu_on) {
 		res = edgetpu_firmware_reset_cpu(etdev, true);
 
 		if (res == -EAGAIN || res == -EIO)
@@ -463,7 +444,7 @@ static int mobile_pm_after_create(void *data)
 
 	devm_pm_runtime_enable(dev);
 	ret = pm_runtime_get_sync(dev);
-	if (ret) {
+	if (ret < 0) {
 		dev_err(dev, "pm_runtime_get_sync returned %d\n", ret);
 		goto err_pm_runtime_put;
 	}
@@ -481,10 +462,6 @@ static int mobile_pm_after_create(void *data)
 				    &fops_tpu_pwr_state);
 		debugfs_create_file("policy", 0660, etdev->pm->debugfs_dir, etdev,
 				    &fops_tpu_pwr_policy);
-		debugfs_create_file("min_freq", 0660, etdev->pm->debugfs_dir, etdev,
-				    &fops_tpu_pwr_min_freq);
-		debugfs_create_file("max_freq", 0660, etdev->pm->debugfs_dir, etdev,
-				    &fops_tpu_pwr_max_freq);
 	}
 
 	ret = edgetpu_soc_pm_init(etdev);
@@ -502,10 +479,21 @@ err_pm_runtime_put:
 	return ret;
 }
 
+static void debugfs_wakelock_remove(struct edgetpu_dev *etdev)
+{
+	if (!etdev->debugfs_wakelock_client)
+		return;
+
+	edgetpu_client_remove(etdev->debugfs_wakelock_client);
+	etdev->debugfs_wakelock_client = NULL;
+}
+
 static void mobile_pm_before_destroy(void *data)
 {
 	struct edgetpu_dev *etdev = (struct edgetpu_dev *)data;
 
+	/* If debugfs wakelock client exists, release its wakelocks now. */
+	debugfs_wakelock_remove(etdev);
 	debugfs_remove_recursive(etdev->pm->debugfs_dir);
 	edgetpu_soc_pm_exit(etdev);
 }
@@ -555,32 +543,50 @@ static int __maybe_unused edgetpu_pm_suspend(struct device *dev)
 	struct edgetpu_dev *etdev = dev_get_drvdata(dev);
 	struct edgetpu_list_device_client *lc;
 	int count;
+	bool suspendable;
 
 	if (!edgetpu_pm_trylock(etdev)) {
 		etdev_warn_ratelimited(etdev, "cannot suspend during power state transition\n");
 		return -EAGAIN;
 	}
 
-	count = edgetpu_pm_get_count(etdev);
+	suspendable = gcip_pm_suspendable_locked(edgetpu_gcip_pm(etdev), &count);
 	edgetpu_pm_unlock(etdev);
 
-	if (!count) {
-		etdev_info_ratelimited(etdev, "suspended\n");
+	if (suspendable) {
+		if (count) {
+			etdev_info_ratelimited(etdev, "suspend allowed while powered\n");
+			device_set_wakeup_path(etdev->dev);
+		} else {
+			etdev_info_ratelimited(etdev, "suspended\n");
+		}
 		return 0;
 	}
 
-	etdev_warn_ratelimited(etdev, "cannot suspend with power up count = %d\n", count);
+	/* Not suspendable but count 0 means there is pending power down transition. */
+	if (!count)
+		return -EAGAIN;
+
+	etdev_warn_ratelimited(etdev,
+			       "cannot suspend; power up count = %d\n", count);
 
 	if (!mutex_trylock(&etdev->clients_lock))
 		return -EAGAIN;
 	for_each_list_device_client(etdev, lc) {
 		if (!lc->client->wakelock.req_count)
 			continue;
-		etdev_warn_ratelimited(etdev,
-				       "client pid %d tgid %d count %d\n",
-				       lc->client->pid,
-				       lc->client->tgid,
-				       lc->client->wakelock.req_count);
+		if (lc->client->wakelock.suspendable)
+			continue;
+		if (lc->client == etdev->debugfs_wakelock_client)
+			etdev_warn_ratelimited(etdev,
+					       "debugfs client count %d\n",
+					       lc->client->wakelock.req_count);
+		else
+			etdev_warn_ratelimited(
+				etdev,
+				"client pid %d tgid %d limited_pid %d limited_tgid %d count %d\n",
+				lc->client->pid, lc->client->tgid, lc->client->limited_pid,
+				lc->client->limited_tgid, lc->client->wakelock.req_count);
 	}
 	mutex_unlock(&etdev->clients_lock);
 	return -EAGAIN;

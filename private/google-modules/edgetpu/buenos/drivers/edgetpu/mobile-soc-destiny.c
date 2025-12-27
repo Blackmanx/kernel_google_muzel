@@ -12,20 +12,25 @@
 #include <linux/device.h>
 #include <linux/interrupt.h>
 #include <linux/io.h>
+#include <linux/list.h>
 #include <linux/platform_device.h>
+#include <linux/pm_runtime.h>
 #include <linux/types.h>
 
 #include <mem-qos/google_qos_box_reg_api.h>
 
 #include "edgetpu-config.h"
+#include "edgetpu-device-group.h"
 #include "edgetpu-internal.h"
 #include "edgetpu-kci.h"
 #include "edgetpu-mobile-platform.h"
+#include "edgetpu-pixel-trim.h"
 #include "edgetpu-pm.h"
 #include "edgetpu-soc.h"
 #include "edgetpu-sw-watchdog.h"
 #include "mobile-soc-destiny.h"
 
+#if EDGETPU_USE_HW_WDT
 /* WDT_CONTROL CSR bits */
 #define WDT_CTRL_ENABLED	0
 #define WDT_CTRL_KEY_ENABLED	2
@@ -33,6 +38,7 @@
 
 /* WDT KEY PIN */
 #define WDT_KEY_PIN		0xA55AA55A
+#endif /* EDGETPU_USE_HW_WDT */
 
 /* LpmControlCsr bits */
 #define LPM_CTRL_LPMCTLPWRSTATE		BIT(0)
@@ -43,34 +49,39 @@
 #define SHUTDOWN_MAX_DELAY_COUNT 100
 
 /* LPB_SSWRP_TPU_CSRS register offsets and fields and values. */
-#define LPB_TPU_INT_STATUS		0x04	/* internal status */
 #define LPB_TPU_INT_STATUS_FIELD	GENMASK(1, 0)
 #define LPB_TPU_INT_STATUS_OFF		0
 #define LPB_TPU_INT_STATUS_BUSY_ON	1
 #define LPB_TPU_INT_STATUS_ON		2
 #define LPB_TPU_INT_STATUS_BUSY_OFF	3
 
-#define LPB_TPU_RAIL_STATUS		0x08
-
-/* LPB_CLIENT_CSRS[1] (TPU) IP_REQ and IP_STATUS register offsets and bits */
-#define LPB_TPU_REQ_CSR			0x80
-#define LPB_TPU_REQ_BIT			BIT(0)
-
-#define LPB_TPU_STATUS_CSR		0x180
-#define LPB_TPU_STATUS_BIT		BIT(0)
-
 /* LPM_CORE_CSR fields */
 #define LPM_CORE_PWR_STATE		BIT(0)
 #define LPM_CORE_CURR_PCR_STATE		GENMASK(17, 13)
 
+/*
+ * If chip headers don't define LPB CSR defaults then use these defaults, will skip LPB access if
+ * device tree doesn't define or if emulation/tests system without LPB.
+ */
+#ifndef LPB_SSWRP_DEFAULT_TPU_CSRS
+#define LPB_SSWRP_DEFAULT_TPU_CSRS 0
+#define LPB_SSWRP_DEFAULT_TPU_CSRS_SIZE 0
+#endif
+
+#if EDGETPU_USE_HW_WDT
 static void edgetpu_wdt_set(struct edgetpu_dev *etdev, uint core, bool enable)
 {
-	enum edgetpu_csrs wdt_ctrl_csr;
-	enum edgetpu_csrs wdt_key_csr;
+	unsigned int wdt_ctrl_csr;
+	unsigned int wdt_key_csr;
 	u32 ctrlval;
 
+#if EDGETPU_NUM_CORES == 2
 	wdt_ctrl_csr = core ?  EDGETPU_REG_WDT1_CONTROL : EDGETPU_REG_WDT0_CONTROL;
 	wdt_key_csr = core ?  EDGETPU_REG_WDT1_KEY : EDGETPU_REG_WDT0_KEY;
+#else
+	wdt_ctrl_csr = EDGETPU_REG_WDT0_CONTROL;
+	wdt_key_csr = EDGETPU_REG_WDT0_KEY;
+#endif
 
 	/* Unlock WDT */
 	edgetpu_dev_write_32(etdev, wdt_key_csr, WDT_KEY_PIN);
@@ -90,6 +101,33 @@ static void edgetpu_wdt_set(struct edgetpu_dev *etdev, uint core, bool enable)
 	/* Relock WDT */
 	edgetpu_dev_write_32(etdev, wdt_key_csr, 0x0);
 }
+
+/* Handle a watchdog timer interrupt. */
+static irqreturn_t edgetpu_soc_wdt_irq_handler(int irq, void *arg)
+{
+	struct edgetpu_dev *etdev = arg;
+	struct edgetpu_soc_data *soc_data = etdev->soc_data;
+	uint core;
+
+	if (!soc_data->wdt_irq)
+		return IRQ_NONE;
+	for (core = 0; core < etdev->num_cores; core++) {
+		if (irq == soc_data->wdt_irq[core])
+			break;
+	}
+	if (core == etdev->num_cores)
+		return IRQ_NONE;
+
+	etdev_err(etdev, "core %u watchdog timeout interrupt\n", core);
+	/* Clear the WDT interrupt (on at least 1 core) and disable WDT on all cores. */
+	for (core = 0; core < etdev->num_cores; core++)
+		edgetpu_wdt_set(etdev, core, false);
+
+	/* Restart control cluster */
+	edgetpu_watchdog_bite(etdev);
+	return IRQ_HANDLED;
+}
+#endif /* EDGETPU_USE_HW_WDT */
 
 int edgetpu_soc_prepare_firmware(struct edgetpu_dev *etdev)
 {
@@ -124,14 +162,10 @@ void edgetpu_soc_pm_post_fw_start(struct edgetpu_dev *etdev)
 	bcl_mitigation_send(etdev);
 }
 
-void edgetpu_soc_handle_reverse_kci(struct edgetpu_dev *etdev,
-				    struct gcip_kci_response_element *resp)
+int edgetpu_soc_handle_reverse_kci(struct edgetpu_dev *etdev,
+				   struct gcip_kci_response_element *resp)
 {
-	switch (resp->code) {
-	default:
-		etdev_warn(etdev, "Unrecognized KCI request: %u\n", resp->code);
-		break;
-	}
+	return -EOPNOTSUPP;
 }
 
 long edgetpu_soc_pm_get_rate(struct edgetpu_dev *etdev, int flags)
@@ -162,21 +196,17 @@ void edgetpu_soc_pm_power_down(struct edgetpu_dev *etdev)
 
 bool edgetpu_soc_pm_is_block_off(struct edgetpu_dev *etdev)
 {
-#if EDGETPU_FEATURE_ALWAYS_ON
-	return false;
-#else
 	u32 internal_status;
 
-	if (IS_ENABLED(CONFIG_EDGETPU_TEST))
+	if (EDGETPU_FEATURE_ALWAYS_ON || IS_ENABLED(CONFIG_EDGETPU_TEST) ||
+	    !etdev->soc_data->lpb_sswrp_csrs)
 		return false;
 
 	internal_status = readl(etdev->soc_data->lpb_sswrp_csrs + LPB_TPU_INT_STATUS);
 	etdev_dbg(etdev, "lpb int status=%u rail status=%u\n",
 		  internal_status, readl(etdev->soc_data->lpb_sswrp_csrs + LPB_TPU_RAIL_STATUS));
 	return FIELD_GET(LPB_TPU_INT_STATUS_FIELD, internal_status) == LPB_TPU_INT_STATUS_OFF;
-#endif
 }
-
 
 void edgetpu_soc_pm_lpm_down(struct edgetpu_dev *etdev)
 {
@@ -189,7 +219,7 @@ void edgetpu_soc_pm_lpm_down(struct edgetpu_dev *etdev)
 	 */
 	do {
 		usleep_range(SHUTDOWN_DELAY_US_MIN, SHUTDOWN_DELAY_US_MAX);
-		val = edgetpu_dev_read_32_sync(etdev, EDGETPU_LPM_CONTROL_CSR);
+		val = edgetpu_dev_read_32_sync(etdev, EDGETPU_REG_LPM_CONTROL);
 		if (!(val & LPM_CTRL_LPMCTLPWRSTATE))
 			break;
 		timeout_cnt++;
@@ -209,20 +239,39 @@ int edgetpu_soc_pm_lpm_up(struct edgetpu_dev *etdev)
 	return 0;
 }
 
-/* Log TPU block power state for debugging.  Block must be powered up. */
+/* Log TPU block power state for debugging. The block is not required to be powered up. */
 void edgetpu_soc_pm_dump_block_state(struct edgetpu_dev *etdev)
 {
-	if (IS_ENABLED(CONFIG_EDGETPU_TEST))
+	uint32_t psm0, psm1, psm2;
+
+	if (EDGETPU_FEATURE_ALWAYS_ON || IS_ENABLED(CONFIG_EDGETPU_TEST) ||
+	    !etdev->soc_data->lpb_sswrp_csrs)
 		return;
 
 	etdev_warn(etdev, "lpb int status=%u rail status=%u\n",
 		   readl(etdev->soc_data->lpb_sswrp_csrs + LPB_TPU_INT_STATUS),
 		   readl(etdev->soc_data->lpb_sswrp_csrs + LPB_TPU_RAIL_STATUS));
-	if (etdev->soc_data->lpcm_lpm_csrs)
-		etdev_warn(etdev, "psm0=%#x psm1=%#x psm2=%#x\n",
-			   readl(etdev->soc_data->lpcm_lpm_csrs + LPCM_LPM_TPU_PSM0_STATUS),
-			   readl(etdev->soc_data->lpcm_lpm_csrs + LPCM_LPM_TPU_PSM1_STATUS),
-			   readl(etdev->soc_data->lpcm_lpm_csrs + LPCM_LPM_TPU_PSM2_STATUS));
+
+	if (!etdev->soc_data->lpcm_lpm_csrs)
+		return;
+	if (pm_runtime_get_if_active(etdev->dev, false) <= 0) {
+		etdev_info(etdev, "pm_runtime not active, skip PSM state dump.");
+		return;
+	}
+
+	psm0 = readl(etdev->soc_data->lpcm_lpm_csrs + LPCM_LPM_TPU_PSM0_STATUS);
+	psm1 = readl(etdev->soc_data->lpcm_lpm_csrs + LPCM_LPM_TPU_PSM1_STATUS);
+	psm2 = readl(etdev->soc_data->lpcm_lpm_csrs + LPCM_LPM_TPU_PSM2_STATUS);
+	pm_runtime_put(etdev->dev);
+	etdev_warn(etdev, "psm0=%#x psm1=%#x psm2=%#x\n", psm0, psm1, psm2);
+}
+
+static int mitigation_response_en_get(void *data, u64 *val)
+{
+	struct edgetpu_dev *etdev = (typeof(etdev))data;
+
+	*val = etdev->soc_data->bcl_mitigation.mitigation_response_en;
+	return 0;
 }
 
 static int mitigation_response_en_set(void *data, u64 val)
@@ -235,6 +284,14 @@ static int mitigation_response_en_set(void *data, u64 val)
 	return bcl_mitigation_send_if_powered(etdev);
 }
 
+static int mitigation_response_type_get(void *data, u64 *val)
+{
+	struct edgetpu_dev *etdev = (typeof(etdev))data;
+
+	*val = etdev->soc_data->bcl_mitigation.mitigation_response_type;
+	return 0;
+}
+
 static int mitigation_response_type_set(void *data, u64 val)
 {
 	struct edgetpu_dev *etdev = (typeof(etdev))data;
@@ -243,6 +300,14 @@ static int mitigation_response_type_set(void *data, u64 val)
 	etdev_info(etdev, "Set MITIGATION_RESPONSE_TYPE=%#llx\n", val);
 	etdev->soc_data->bcl_mitigation_valid = true;
 	return bcl_mitigation_send_if_powered(etdev);
+}
+
+static int mitigation_response_hyst_get(void *data, u64 *val)
+{
+	struct edgetpu_dev *etdev = (typeof(etdev))data;
+
+	*val = etdev->soc_data->bcl_mitigation.mitigation_response_hyst;
+	return 0;
 }
 
 static int mitigation_response_hyst_set(void *data, u64 val)
@@ -255,6 +320,14 @@ static int mitigation_response_hyst_set(void *data, u64 val)
 	return bcl_mitigation_send_if_powered(etdev);
 }
 
+static int mitigation_div_2_ratio_get(void *data, u64 *val)
+{
+	struct edgetpu_dev *etdev = (typeof(etdev))data;
+
+	*val = etdev->soc_data->bcl_mitigation.div_2_ratio;
+	return 0;
+}
+
 static int mitigation_div_2_ratio_set(void *data, u64 val)
 {
 	struct edgetpu_dev *etdev = (typeof(etdev))data;
@@ -263,6 +336,14 @@ static int mitigation_div_2_ratio_set(void *data, u64 val)
 	etdev_info(etdev, "Set DIV_2_RATIO=%#llx\n", val);
 	etdev->soc_data->bcl_mitigation_valid = true;
 	return bcl_mitigation_send_if_powered(etdev);
+}
+
+static int mitigation_div_4_ratio_get(void *data, u64 *val)
+{
+	struct edgetpu_dev *etdev = (typeof(etdev))data;
+
+	*val = etdev->soc_data->bcl_mitigation.div_4_ratio;
+	return 0;
 }
 
 static int mitigation_div_4_ratio_set(void *data, u64 val)
@@ -275,26 +356,67 @@ static int mitigation_div_4_ratio_set(void *data, u64 val)
 	return bcl_mitigation_send_if_powered(etdev);
 }
 
-DEFINE_DEBUGFS_ATTRIBUTE(mitigation_response_en_fops, NULL, mitigation_response_en_set, "0x%llx\n");
-DEFINE_DEBUGFS_ATTRIBUTE(mitigation_response_type_fops, NULL, mitigation_response_type_set,
-			 "0x%llx\n");
-DEFINE_DEBUGFS_ATTRIBUTE(mitigation_response_hyst_fops, NULL, mitigation_response_hyst_set,
-			 "0x%llx\n");
-DEFINE_DEBUGFS_ATTRIBUTE(mitigation_div_2_ratio_fops, NULL, mitigation_div_2_ratio_set, "0x%llx\n");
-DEFINE_DEBUGFS_ATTRIBUTE(mitigation_div_4_ratio_fops, NULL, mitigation_div_4_ratio_set, "0x%llx\n");
+static int mitigation_fll_step_down_mux_get(void *data, u64 *val)
+{
+	struct edgetpu_dev *etdev = (typeof(etdev))data;
+
+	*val = etdev->soc_data->bcl_mitigation.mitigation_fll_step_down_mux;
+	return 0;
+}
+
+static int mitigation_fll_step_down_mux_set(void *data, u64 val)
+{
+	struct edgetpu_dev *etdev = (typeof(etdev))data;
+
+	etdev->soc_data->bcl_mitigation.mitigation_fll_step_down_mux = val;
+	etdev_info(etdev, "Set MITIGATION_FLL_STEP_DOWN_MUX=%#llx\n", val);
+	etdev->soc_data->bcl_mitigation_valid = true;
+	return bcl_mitigation_send_if_powered(etdev);
+}
+
+static int thermal_heavy_mitigation_div_ratio_get(void *data, u64 *val)
+{
+	struct edgetpu_dev *etdev = (typeof(etdev))data;
+
+	*val = etdev->soc_data->bcl_mitigation.thermal_heavy_mitigation_div_ratio;
+	return 0;
+}
+
+static int thermal_heavy_mitigation_div_ratio_set(void *data, u64 val)
+{
+	struct edgetpu_dev *etdev = (typeof(etdev))data;
+
+	etdev->soc_data->bcl_mitigation.thermal_heavy_mitigation_div_ratio = val;
+	etdev_info(etdev, "Set THERMAL_HEAVY_MITIGATION_DIV_RATIO=%#llx\n", val);
+	etdev->soc_data->bcl_mitigation_valid = true;
+	return bcl_mitigation_send_if_powered(etdev);
+}
+
+DEFINE_DEBUGFS_ATTRIBUTE(mitigation_response_en_fops, mitigation_response_en_get,
+			 mitigation_response_en_set, "0x%llx\n");
+DEFINE_DEBUGFS_ATTRIBUTE(mitigation_response_type_fops, mitigation_response_type_get,
+			 mitigation_response_type_set, "0x%llx\n");
+DEFINE_DEBUGFS_ATTRIBUTE(mitigation_response_hyst_fops, mitigation_response_hyst_get,
+			 mitigation_response_hyst_set, "0x%llx\n");
+DEFINE_DEBUGFS_ATTRIBUTE(mitigation_div_2_ratio_fops, mitigation_div_2_ratio_get,
+			 mitigation_div_2_ratio_set, "0x%llx\n");
+DEFINE_DEBUGFS_ATTRIBUTE(mitigation_div_4_ratio_fops, mitigation_div_4_ratio_get,
+			 mitigation_div_4_ratio_set, "0x%llx\n");
+DEFINE_DEBUGFS_ATTRIBUTE(mitigation_fll_step_down_mux_fops, mitigation_fll_step_down_mux_get,
+			 mitigation_fll_step_down_mux_set, "0x%llx\n");
+DEFINE_DEBUGFS_ATTRIBUTE(thermal_heavy_mitigation_div_ratio_fops,
+			 thermal_heavy_mitigation_div_ratio_get,
+			 thermal_heavy_mitigation_div_ratio_set, "0x%llx\n");
 
 static int sswrp_power_state_get(void *data, u64 *val)
 {
-#if EDGETPU_FEATURE_ALWAYS_ON
-	*val = LPB_TPU_INT_STATUS_ON;
-	return 0;
-#endif
-
 	struct edgetpu_dev *etdev = data;
 	u32 internal_status;
 
-	if (IS_ENABLED(CONFIG_EDGETPU_TEST)) {
+	if (EDGETPU_FEATURE_ALWAYS_ON || IS_ENABLED(CONFIG_EDGETPU_TEST) ||
+	    !etdev->soc_data->lpb_sswrp_csrs) {
 		*val = LPB_TPU_INT_STATUS_ON;
+		etdev_info(etdev, "always on is enabled, return status ON and skip LPB read\n");
 		return 0;
 	}
 
@@ -309,24 +431,33 @@ DEFINE_DEBUGFS_ATTRIBUTE(sswrp_power_state_fops, sswrp_power_state_get, NULL, "%
 
 int edgetpu_soc_pm_init(struct edgetpu_dev *etdev)
 {
-	/* Setup BCL mitigation config via debugfs. */
+	/* Setup BCL mitigation config default values and debugfs override interface. */
+	/* Assume firmware also has copies of the default values and doesn't need those sent. */
 	etdev->soc_data->bcl_mitigation_valid = false;
 	etdev->soc_data->bcl_mitigation.version = BCL_MITIGATION_CONFIG_VERSION;
-	etdev->soc_data->bcl_mitigation.mitigation_response_en = 0xDEADFEED;
-	etdev->soc_data->bcl_mitigation.mitigation_response_type = 0xDEADFEED;
-	etdev->soc_data->bcl_mitigation.mitigation_response_hyst = 0xDEADFEED;
-	etdev->soc_data->bcl_mitigation.div_2_ratio = 0xDEADFEED;
-	etdev->soc_data->bcl_mitigation.div_4_ratio = 0xDEADFEED;
-	debugfs_create_file("mitigation_response_en", 0220, etdev->d_entry, etdev,
+	etdev->soc_data->bcl_mitigation.mitigation_response_en = MITIGATION_RESPONSE_EN_DEFAULT;
+	etdev->soc_data->bcl_mitigation.mitigation_response_type = MITIGATION_RESPONSE_TYPE_DEFAULT;
+	etdev->soc_data->bcl_mitigation.mitigation_response_hyst = MITIGATION_RESPONSE_HYST_DEFAULT;
+	etdev->soc_data->bcl_mitigation.div_2_ratio = LIGHT_MITIGATION_DIV_RATIO_DEFAULT;
+	etdev->soc_data->bcl_mitigation.div_4_ratio = HEAVY_MITIGATION_DIV_RATIO_DEFAULT;
+	etdev->soc_data->bcl_mitigation.thermal_heavy_mitigation_div_ratio =
+		THERMAL_HEAVY_MITIGATION_DIV_RATIO_DEFAULT;
+	etdev->soc_data->bcl_mitigation.mitigation_fll_step_down_mux =
+		MITIGATION_FLL_STEP_DOWN_DEFAULT;
+	debugfs_create_file("mitigation_response_en", 0660, etdev->d_entry, etdev,
 			    &mitigation_response_en_fops);
-	debugfs_create_file("mitigation_response_type", 0220, etdev->d_entry, etdev,
+	debugfs_create_file("mitigation_response_type", 0660, etdev->d_entry, etdev,
 			    &mitigation_response_type_fops);
-	debugfs_create_file("mitigation_response_hyst", 0220, etdev->d_entry, etdev,
+	debugfs_create_file("mitigation_response_hyst", 0660, etdev->d_entry, etdev,
 			    &mitigation_response_hyst_fops);
-	debugfs_create_file("mitigation_div_2_ratio", 0220, etdev->d_entry, etdev,
+	debugfs_create_file("mitigation_div_2_ratio", 0660, etdev->d_entry, etdev,
 			    &mitigation_div_2_ratio_fops);
-	debugfs_create_file("mitigation_div_4_ratio", 0220, etdev->d_entry, etdev,
+	debugfs_create_file("mitigation_div_4_ratio", 0660, etdev->d_entry, etdev,
 			    &mitigation_div_4_ratio_fops);
+	debugfs_create_file("mitigation_fll_step_down_mux", 0660, etdev->d_entry, etdev,
+			    &mitigation_fll_step_down_mux_fops);
+	debugfs_create_file("thermal_heavy_mitigation_div_ratio", 0660, etdev->d_entry, etdev,
+			    &thermal_heavy_mitigation_div_ratio_fops);
 
 	/* Destiny SoC family-specific power/ attrs. */
 	debugfs_create_file("sswrp_power_state", 0440, etdev->pm->debugfs_dir, etdev,
@@ -392,6 +523,37 @@ int edgetpu_soc_check_supplier_devices(struct device *dev)
 	return 0;
 }
 
+#if IS_ENABLED(CONFIG_PIXEL_TRIM)
+static unsigned long edgetpu_pixel_trim(void *private)
+{
+	struct edgetpu_dev *etdev = private;
+
+	edgetpu_trim_buffers(etdev);
+	return 0;
+}
+
+void edgetpu_pixel_trim_register(struct edgetpu_dev *etdev)
+{
+	int ret;
+
+	etdev->soc_data->edgetpu_pixel_trim.pixel_trim.name = "edgetpu";
+	etdev->soc_data->edgetpu_pixel_trim.pixel_trim.trim = edgetpu_pixel_trim;
+	etdev->soc_data->edgetpu_pixel_trim.pixel_trim.private = etdev;
+	INIT_LIST_HEAD(&etdev->soc_data->edgetpu_pixel_trim.pixel_trim.list);
+	ret = register_trim(&etdev->soc_data->edgetpu_pixel_trim.pixel_trim);
+	if (ret)
+		etdev_warn(etdev, "pixel trim register returns %d\n", ret);
+	else
+		etdev->soc_data->edgetpu_pixel_trim.registered = true;
+}
+
+void edgetpu_pixel_trim_unregister(struct edgetpu_dev *etdev)
+{
+	if (etdev->soc_data->edgetpu_pixel_trim.registered)
+		unregister_trim(&etdev->soc_data->edgetpu_pixel_trim.pixel_trim);
+}
+#endif
+
 int edgetpu_soc_early_init(struct edgetpu_dev *etdev)
 {
 	struct platform_device *pdev = to_platform_device(etdev->dev);
@@ -399,7 +561,6 @@ int edgetpu_soc_early_init(struct edgetpu_dev *etdev)
 	struct resource *res;
 	u32 lpb_sswrp_base = LPB_SSWRP_DEFAULT_TPU_CSRS,
 	    lpb_sswrp_size = LPB_SSWRP_DEFAULT_TPU_CSRS_SIZE;
-	u32 lpb_client_base = LPB_CLIENT_TPU_CSRS, lpb_client_size = LPB_CLIENT_TPU_CSRS_SIZE;
 	u32 val;
 	u32 of_data_array[256];
 	u32 num_columns, table_size;
@@ -459,19 +620,13 @@ int edgetpu_soc_early_init(struct edgetpu_dev *etdev)
 	    !of_property_read_u32_index(np, "lpb-sswrp-size", 0, &val))
 		lpb_sswrp_size = val;
 
-	etdev->soc_data->lpb_sswrp_csrs = ioremap(lpb_sswrp_base, lpb_sswrp_size);
-	if (!etdev->soc_data->lpb_sswrp_csrs)
+	if (lpb_sswrp_base)
+		etdev->soc_data->lpb_sswrp_csrs = ioremap(lpb_sswrp_base, lpb_sswrp_size);
+	if (!etdev->soc_data->lpb_sswrp_csrs && !EDGETPU_FEATURE_ALWAYS_ON &&
+	    !IS_ENABLED(CONFIG_EDGETPU_TEST))
 		return -ENOMEM;
 
-	if (of_find_property(np, "lpb-client-base", NULL) &&
-	    !of_property_read_u32_index(np, "lpb-client-base", 0, &val))
-		lpb_client_base = val;
-	if (of_find_property(np, "lpb-client-size", NULL) &&
-	    !of_property_read_u32_index(np, "lpb-client-size", 0, &val))
-		lpb_client_size = val;
-
-	etdev->soc_data->lpb_client_csrs = ioremap(lpb_client_base, lpb_client_size);
-
+	edgetpu_pixel_trim_register(etdev);
 	return 0;
 }
 
@@ -482,10 +637,10 @@ int edgetpu_soc_post_power_on_init(struct edgetpu_dev *etdev)
 
 void edgetpu_soc_exit(struct edgetpu_dev *etdev)
 {
+	edgetpu_pixel_trim_unregister(etdev);
+
 	if (etdev->soc_data->lpb_sswrp_csrs)
 		iounmap(etdev->soc_data->lpb_sswrp_csrs);
-	if (etdev->soc_data->lpb_client_csrs)
-		iounmap(etdev->soc_data->lpb_client_csrs);
 }
 
 int edgetpu_soc_activate_context(struct edgetpu_dev *etdev, int pasid)
@@ -512,43 +667,17 @@ void edgetpu_soc_set_tpu_cpu_security(struct edgetpu_dev *etdev)
 	}
 }
 
-/* Handle a watchdog timer interrupt. */
-static irqreturn_t edgetpu_soc_wdt_irq_handler(int irq, void *arg)
-{
-	struct edgetpu_dev *etdev = arg;
-	struct edgetpu_soc_data *soc_data = etdev->soc_data;
-	uint core;
-
-	if (!soc_data->wdt_irq)
-		return IRQ_NONE;
-	for (core = 0; core < etdev->num_cores; core++) {
-		if (irq == soc_data->wdt_irq[core])
-			break;
-	}
-	if (core == etdev->num_cores)
-		return IRQ_NONE;
-
-	etdev_err(etdev, "core %u watchdog timeout interrupt\n", core);
-	/* Clear the WDT interrupt (on at least 1 core) and disable WDT on all cores. */
-	for (core = 0; core < etdev->num_cores; core++)
-		edgetpu_wdt_set(etdev, core, false);
-
-	/* Restart control cluster */
-	edgetpu_watchdog_bite(etdev);
-	return IRQ_HANDLED;
-}
-
 int edgetpu_soc_setup_irqs(struct edgetpu_dev *etdev)
 {
 	struct platform_device *pdev = to_platform_device(etdev->dev);
-	struct edgetpu_mobile_platform_dev *etmdev = to_mobile_dev(etdev);
 	struct edgetpu_soc_data *soc_data = etdev->soc_data;
 	int n = platform_irq_count(pdev);
-	int wdt_irq_count = 0;
-	int ret;
-	int i, core, mbox_irq_index;
+	int core;
 	static const char *wdt_interrupt_names[] = {"wdt_0", "wdt_1"};
 	int wdt_irq_count_max = min_t(int, etdev->num_cores, ARRAY_SIZE(wdt_interrupt_names));
+#if EDGETPU_USE_HW_WDT
+	int ret;
+#endif
 
 	if (n < 0) {
 		dev_err(etdev->dev, "Error retrieving IRQ count: %d\n", n);
@@ -565,7 +694,7 @@ int edgetpu_soc_setup_irqs(struct edgetpu_dev *etdev)
 		soc_data->wdt_irq[core] =
 			platform_get_irq_byname_optional(pdev, wdt_interrupt_names[core]);
 		if (soc_data->wdt_irq[core] > 0) {
-			wdt_irq_count++;
+#if EDGETPU_USE_HW_WDT
 			ret = devm_request_irq(etdev->dev, soc_data->wdt_irq[core],
 					       edgetpu_soc_wdt_irq_handler, IRQF_ONESHOT,
 					       etdev->dev_name, etdev);
@@ -576,41 +705,11 @@ int edgetpu_soc_setup_irqs(struct edgetpu_dev *etdev)
 			}
 			/* Disable WDT IRQs (b/346649094). */
 			disable_irq(soc_data->wdt_irq[core]);
+#endif
 		} else {
 			soc_data->wdt_irq[core] = 0;
 		}
 	}
 
-	etmdev->n_mailbox_irq = n - wdt_irq_count;
-	if (etmdev->n_mailbox_irq < 0) {
-		dev_err(etdev->dev, "Invalid IRQ count: %d\n", platform_irq_count(pdev));
-		return -ENODEV;
-	}
-
-	etmdev->mailbox_irq = devm_kmalloc_array(etdev->dev, etmdev->n_mailbox_irq,
-						 sizeof(*etmdev->mailbox_irq), GFP_KERNEL);
-	if (!etmdev->mailbox_irq)
-		return -ENOMEM;
-
-	for (i = 0, mbox_irq_index = 0; i < n; i++) {
-		int irq = platform_get_irq(pdev, i);
-
-		for (core = 0; core < etdev->num_cores; core++) {
-			if (irq == soc_data->wdt_irq[core]) {
-				irq = 0;
-				break;
-			}
-		}
-		if (!irq)
-			continue;
-		etmdev->mailbox_irq[mbox_irq_index++] = irq;
-		ret = devm_request_irq(etdev->dev, irq, edgetpu_mailbox_irq_handler, IRQF_ONESHOT,
-				       etdev->dev_name, etdev);
-		if (ret) {
-			dev_err(etdev->dev, "%s: failed to request mailbox irq %d: %d\n",
-				etdev->dev_name, irq, ret);
-			return ret;
-		}
-	}
 	return 0;
 }

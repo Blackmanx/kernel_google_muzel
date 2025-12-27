@@ -10,18 +10,10 @@
 
 #include <linux/types.h> /* u32 */
 
-#define EDGETPU_NUM_VII_MAILBOXES 15
-/* 7 VII contexts mappable via SysMMU VID */
-#define EDGETPU_NUM_USE_VII_MAILBOXES 7
+#define EDGETPU_NUM_MAILBOXES 19
 #define EDGETPU_NUM_EXT_MAILBOXES 3
-#define EDGETPU_NUM_MAILBOXES (EDGETPU_NUM_VII_MAILBOXES + EDGETPU_NUM_EXT_MAILBOXES + 1)
-/*
- * Mailbox index layout in mailbox manager is like:
- * ---------------------------------------------
- * | KCI X 1 |   VII(s) X 15  | EXT_DSP(s) X 3  |
- * ---------------------------------------------
- */
-#define EDGETPU_EXT_DSP_MAILBOX_START (EDGETPU_NUM_VII_MAILBOXES + 1)
+#define EDGETPU_EXT_MAILBOX_START 16
+#define EDGETPU_EXT_DSP_MAILBOX_START EDGETPU_EXT_MAILBOX_START
 #define EDGETPU_EXT_DSP_MAILBOX_END (EDGETPU_NUM_EXT_MAILBOXES + EDGETPU_EXT_DSP_MAILBOX_START - 1)
 
 #define RIO_CSR_MBOX3_CONTEXT_ENABLE 0x30000 /* starting kernel mb */

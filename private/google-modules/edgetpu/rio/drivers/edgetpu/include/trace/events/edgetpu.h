@@ -19,47 +19,47 @@
 #include <linux/tracepoint.h>
 
 #include "../../../edgetpu.h"
+#include "../../../edgetpu-device-group.h"
 #include "../../../edgetpu-internal.h"
 
 #define EDGETPU_TRACE_SYSTEM __stringify(TRACE_SYSTEM)
 
 TRACE_EVENT(edgetpu_map_buffer_start,
 
-	TP_PROTO(struct edgetpu_map_ioctl *ibuf),
+	TP_PROTO(struct edgetpu_device_group *group, struct edgetpu_map_ioctl *ibuf),
 
-	TP_ARGS(ibuf),
+	TP_ARGS(group, ibuf),
 
 	TP_STRUCT__entry(
 		__field(__u64, host_address)
 		__field(__u64, size)
 		__field(edgetpu_map_flag_t, flags)
-		__field(__u32, die_index)
+		__field(__u32, group_id)
 	),
 
 	TP_fast_assign(
 		__entry->host_address = ibuf->host_address;
 		__entry->size = ibuf->size;
 		__entry->flags = ibuf->flags;
-		__entry->die_index = ibuf->die_index;
+		__entry->group_id = group->group_id;
 	),
 
-	TP_printk("host_address = 0x%llx, size = %llu, flags = 0x%x, die_index = %u",
-		__entry->host_address, __entry->size, __entry->flags,
-		__entry->die_index)
+	TP_printk("host_address = 0x%llx, size = %llu, flags = 0x%x, group = %u",
+		__entry->host_address, __entry->size, __entry->flags, __entry->group_id)
 );
 
 TRACE_EVENT(edgetpu_map_buffer_end,
 
-	TP_PROTO(struct edgetpu_map_ioctl *ibuf),
+	TP_PROTO(struct edgetpu_device_group *group, struct edgetpu_map_ioctl *ibuf),
 
-	TP_ARGS(ibuf),
+	TP_ARGS(group, ibuf),
 
 	TP_STRUCT__entry(
 		__field(__u64, host_address)
 		__field(__u64, size)
 		__field(__u64, device_address)
 		__field(edgetpu_map_flag_t, flags)
-		__field(__u32, die_index)
+		__field(__u32, group_id)
 	),
 
 	TP_fast_assign(
@@ -67,26 +67,70 @@ TRACE_EVENT(edgetpu_map_buffer_end,
 		__entry->size = ibuf->size;
 		__entry->device_address = ibuf->device_address;
 		__entry->flags = ibuf->flags;
-		__entry->die_index = ibuf->die_index;
+		__entry->group_id = group->group_id;
 	),
 
-	TP_printk("host_address = 0x%llx, size = %llu, device_address = 0x%llx, flags = 0x%x, die_index = %u",
+	TP_printk("host_address = 0x%llx, size = %llu, device_address = 0x%llx, flags = 0x%x, group = %u",
 		__entry->host_address, __entry->size, __entry->device_address,
-		__entry->flags, __entry->die_index)
+		__entry->flags, __entry->group_id)
+);
+
+TRACE_EVENT(edgetpu_unmap_buffer_start,
+
+	TP_PROTO(struct edgetpu_device_group *group, struct edgetpu_map_ioctl *ibuf),
+
+	TP_ARGS(group, ibuf),
+
+	TP_STRUCT__entry(
+		__field(__u64, device_address)
+		__field(edgetpu_map_flag_t, flags)
+		__field(__u32, group_id)
+	),
+
+	TP_fast_assign(
+		__entry->device_address = ibuf->device_address;
+		__entry->flags = ibuf->flags;
+		__entry->group_id = group->group_id;
+	),
+
+	TP_printk("device_address = 0x%llx, flags = 0x%x, group = %u",
+		__entry->device_address, __entry->flags, __entry->group_id)
+);
+
+TRACE_EVENT(edgetpu_unmap_buffer_end,
+
+	TP_PROTO(struct edgetpu_device_group *group, struct edgetpu_map_ioctl *ibuf),
+
+	TP_ARGS(group, ibuf),
+
+	TP_STRUCT__entry(
+		__field(__u64, device_address)
+		__field(edgetpu_map_flag_t, flags)
+		__field(__u32, group_id)
+	),
+
+	TP_fast_assign(
+		__entry->device_address = ibuf->device_address;
+		__entry->flags = ibuf->flags;
+		__entry->group_id = group->group_id;
+	),
+
+	TP_printk("device_address = 0x%llx, flags = 0x%x, group = %u",
+		__entry->device_address, __entry->flags, __entry->group_id)
 );
 
 TRACE_EVENT(edgetpu_map_dmabuf_start,
 
-	TP_PROTO(struct edgetpu_map_dmabuf_ioctl *ibuf),
+	TP_PROTO(struct edgetpu_device_group *group, struct edgetpu_map_dmabuf_ioctl *ibuf),
 
-	TP_ARGS(ibuf),
+	TP_ARGS(group, ibuf),
 
 	TP_STRUCT__entry(
 		__field(__u64, offset)
 		__field(__u64, size)
 		__field(int, dmabuf_fd)
 		__field(edgetpu_map_flag_t, flags)
-		__field(__u32, die_index)
+		__field(__u32, group_id)
 	),
 
 	TP_fast_assign(
@@ -94,19 +138,19 @@ TRACE_EVENT(edgetpu_map_dmabuf_start,
 		__entry->size = ibuf->size;
 		__entry->dmabuf_fd = ibuf->dmabuf_fd;
 		__entry->flags = ibuf->flags;
-		__entry->die_index = ibuf->die_index;
+		__entry->group_id = group->group_id;
 	),
 
-	TP_printk("offset = 0x%llx, size = %llu, dmabuf_fd = %d, flags = 0x%x, die_index = %u",
+	TP_printk("offset = 0x%llx, size = %llu, dmabuf_fd = %d, flags = 0x%x, group = %u",
 		__entry->offset, __entry->size, __entry->dmabuf_fd,
-		__entry->flags, __entry->die_index)
+		__entry->flags, __entry->group_id)
 );
 
 TRACE_EVENT(edgetpu_map_dmabuf_end,
 
-	TP_PROTO(struct edgetpu_map_dmabuf_ioctl *ibuf),
+	TP_PROTO(struct edgetpu_device_group *group, struct edgetpu_map_dmabuf_ioctl *ibuf),
 
-	TP_ARGS(ibuf),
+	TP_ARGS(group, ibuf),
 
 	TP_STRUCT__entry(
 		__field(__u64, offset)
@@ -114,7 +158,7 @@ TRACE_EVENT(edgetpu_map_dmabuf_end,
 		__field(__u64, device_address)
 		__field(int, dmabuf_fd)
 		__field(edgetpu_map_flag_t, flags)
-		__field(__u32, die_index)
+		__field(__u32, group_id)
 	),
 
 	TP_fast_assign(
@@ -123,29 +167,75 @@ TRACE_EVENT(edgetpu_map_dmabuf_end,
 		__entry->device_address = ibuf->device_address;
 		__entry->dmabuf_fd = ibuf->dmabuf_fd;
 		__entry->flags = ibuf->flags;
-		__entry->die_index = ibuf->die_index;
+		__entry->group_id = group->group_id;
 	),
 
-	TP_printk("offset = 0x%llx, size = %llu, device_address = 0x%llx, dmabuf_fd = %d, flags = 0x%x, die_index = %u",
+	TP_printk("offset = 0x%llx, size = %llu, device_address = 0x%llx, dmabuf_fd = %d, flags = 0x%x, group = %u",
 		__entry->offset, __entry->size, __entry->device_address,
-		__entry->dmabuf_fd, __entry->flags, __entry->die_index)
+		__entry->dmabuf_fd, __entry->flags, __entry->group_id)
+);
+
+TRACE_EVENT(edgetpu_unmap_dmabuf_start,
+
+	TP_PROTO(struct edgetpu_device_group *group, struct edgetpu_map_dmabuf_ioctl *ibuf),
+
+	TP_ARGS(group, ibuf),
+
+	TP_STRUCT__entry(
+		__field(__u64, device_address)
+		__field(int, dmabuf_fd)
+		__field(__u32, group_id)
+	),
+
+	TP_fast_assign(
+		__entry->device_address = ibuf->device_address;
+		__entry->dmabuf_fd = ibuf->dmabuf_fd;
+		__entry->group_id = group->group_id;
+	),
+
+	TP_printk("device_address = 0x%llx, dmabuf_fd = %d, group = %u",
+		__entry->device_address, __entry->dmabuf_fd, __entry->group_id)
+);
+
+TRACE_EVENT(edgetpu_unmap_dmabuf_end,
+
+	TP_PROTO(struct edgetpu_device_group *group, struct edgetpu_map_dmabuf_ioctl *ibuf),
+
+	TP_ARGS(group, ibuf),
+
+	TP_STRUCT__entry(
+		__field(__u64, device_address)
+		__field(int, dmabuf_fd)
+		__field(__u32, group_id)
+	),
+
+	TP_fast_assign(
+		__entry->device_address = ibuf->device_address;
+		__entry->dmabuf_fd = ibuf->dmabuf_fd;
+		__entry->group_id = group->group_id;
+	),
+
+	TP_printk("device_address = 0x%llx, dmabuf_fd = %d, group = %u",
+		__entry->device_address, __entry->dmabuf_fd, __entry->group_id)
 );
 
 TRACE_EVENT(edgetpu_acquire_wakelock_start,
 
-	TP_PROTO(pid_t pid),
+	TP_PROTO(pid_t pid, u32 flags),
 
-	TP_ARGS(pid),
+	TP_ARGS(pid, flags),
 
 	TP_STRUCT__entry(
 		__field(pid_t, pid)
+		__field(u32, flags)
 	),
 
 	TP_fast_assign(
 		__entry->pid = pid;
+		__entry->flags = flags;
 	),
 
-	TP_printk("pid = %d", __entry->pid)
+	TP_printk("pid = %d, flags = %u", __entry->pid, __entry->flags)
 );
 
 TRACE_EVENT(edgetpu_acquire_wakelock_end,
@@ -214,14 +304,19 @@ TRACE_EVENT(edgetpu_vii_command_start,
 	TP_STRUCT__entry(
 		__field(pid_t, pid)
 		__field(pid_t, tgid)
+		__field(pid_t, limited_pid)
+		__field(pid_t, limited_tgid)
 	),
 
 	TP_fast_assign(
 		__entry->pid = client->pid;
 		__entry->tgid = client->tgid;
+		__entry->limited_pid = client->limited_pid;
+		__entry->limited_tgid = client->limited_tgid;
 	),
 
-	TP_printk("client pid = %u, tgid = %u", __entry->pid, __entry->tgid)
+	TP_printk("client pid = %u, tgid = %u, limited_pid = %d, limited_tgid = %d",
+		  __entry->pid, __entry->tgid, __entry->limited_pid, __entry->limited_tgid)
 );
 
 TRACE_EVENT(edgetpu_vii_command_end,
@@ -233,6 +328,8 @@ TRACE_EVENT(edgetpu_vii_command_end,
 	TP_STRUCT__entry(
 		__field(pid_t, pid)
 		__field(pid_t, tgid)
+		__field(pid_t, limited_pid)
+		__field(pid_t, limited_tgid)
 		__field(__u64, seq)
 		__field(int, ret)
 	),
@@ -240,12 +337,15 @@ TRACE_EVENT(edgetpu_vii_command_end,
 	TP_fast_assign(
 		__entry->pid = client->pid;
 		__entry->tgid = client->tgid;
+		__entry->limited_pid = client->limited_pid;
+		__entry->limited_tgid = client->limited_tgid;
 		__entry->seq = ibuf->command.seq;
 		__entry->ret = ret;
 	),
 
-	TP_printk("client pid = %u, tgid = %u, seq = %llu (ret = %d)",
-		  __entry->pid, __entry->tgid, __entry->seq, __entry->ret)
+	TP_printk("client pid = %u, tgid = %u, limited_pid = %d, limited_tgid = %d, seq = %llu (ret = %d)",
+		  __entry->pid, __entry->tgid, __entry->limited_pid, __entry->limited_tgid,
+		  __entry->seq, __entry->ret)
 
 );
 
@@ -258,14 +358,19 @@ TRACE_EVENT(edgetpu_vii_response_start,
 	TP_STRUCT__entry(
 		__field(pid_t, pid)
 		__field(pid_t, tgid)
+		__field(pid_t, limited_pid)
+		__field(pid_t, limited_tgid)
 	),
 
 	TP_fast_assign(
 		__entry->pid = client->pid;
 		__entry->tgid = client->tgid;
+		__entry->limited_pid = client->limited_pid;
+		__entry->limited_tgid = client->limited_tgid;
 	),
 
-	TP_printk("client pid = %u, tgid = %u", __entry->pid, __entry->tgid)
+	TP_printk("client pid = %u, tgid = %u, limited_pid = %d, limited_tgid = %d",
+		  __entry->pid, __entry->tgid, __entry->limited_pid, __entry->limited_tgid)
 );
 
 TRACE_EVENT(edgetpu_vii_response_end,
@@ -277,6 +382,8 @@ TRACE_EVENT(edgetpu_vii_response_end,
 	TP_STRUCT__entry(
 		__field(pid_t, pid)
 		__field(pid_t, tgid)
+		__field(pid_t, limited_pid)
+		__field(pid_t, limited_tgid)
 		__field(__u64, seq)
 		__field(__u64, retval)
 		__field(int, ret)
@@ -285,13 +392,16 @@ TRACE_EVENT(edgetpu_vii_response_end,
 	TP_fast_assign(
 		__entry->pid = client->pid;
 		__entry->tgid = client->tgid;
+		__entry->limited_pid = client->limited_pid;
+		__entry->limited_tgid = client->limited_tgid;
 		__entry->seq = ibuf->response.seq;
 		__entry->retval = ibuf->response.retval;
 		__entry->ret = ret;
 	),
 
-	TP_printk("client pid = %u, tgid = %u, seq = %llu, retval = 0x%llx (ret = %d)",
-		  __entry->pid, __entry->tgid, __entry->seq, __entry->retval, __entry->ret)
+	TP_printk("client pid = %u, tgid = %u, limited_pid = %d, limited_tgid = %d, seq = %llu, retval = 0x%llx (ret = %d)",
+		  __entry->pid, __entry->tgid, __entry->limited_pid, __entry->limited_tgid,
+		  __entry->seq, __entry->retval, __entry->ret)
 );
 
 TRACE_EVENT(edgetpu_vii_litebuf_command_start,
@@ -303,14 +413,19 @@ TRACE_EVENT(edgetpu_vii_litebuf_command_start,
 	TP_STRUCT__entry(
 		__field(pid_t, pid)
 		__field(pid_t, tgid)
+		__field(pid_t, limited_pid)
+		__field(pid_t, limited_tgid)
 	),
 
 	TP_fast_assign(
 		__entry->pid = client->pid;
 		__entry->tgid = client->tgid;
+		__entry->limited_pid = client->limited_pid;
+		__entry->limited_tgid = client->limited_tgid;
 	),
 
-	TP_printk("client pid = %u, tgid = %u", __entry->pid, __entry->tgid)
+	TP_printk("client pid = %u, tgid = %u, limited_pid = %d, limited_tgid = %d",
+		  __entry->pid, __entry->tgid, __entry->limited_pid, __entry->limited_tgid)
 );
 
 TRACE_EVENT(edgetpu_vii_litebuf_command_end,
@@ -323,6 +438,8 @@ TRACE_EVENT(edgetpu_vii_litebuf_command_end,
 	TP_STRUCT__entry(
 		__field(pid_t, pid)
 		__field(pid_t, tgid)
+		__field(pid_t, limited_pid)
+		__field(pid_t, limited_tgid)
 		__field(__u64, seq)
 		__field(int, ret)
 	),
@@ -330,12 +447,15 @@ TRACE_EVENT(edgetpu_vii_litebuf_command_end,
 	TP_fast_assign(
 		__entry->pid = client->pid;
 		__entry->tgid = client->tgid;
+		__entry->limited_pid = client->limited_pid;
+		__entry->limited_tgid = client->limited_tgid;
 		__entry->seq = ibuf->seq;
 		__entry->ret = ret;
 	),
 
-	TP_printk("client pid = %u, tgid = %u, seq = %llu (ret = %d)",
-		  __entry->pid, __entry->tgid, __entry->seq, __entry->ret)
+	TP_printk("client pid = %u, tgid = %u, limited_pid = %d, limited_tgid = %d, seq = %llu (ret = %d)",
+		  __entry->pid, __entry->tgid, __entry->limited_pid, __entry->limited_tgid,
+		  __entry->seq, __entry->ret)
 
 );
 
@@ -348,14 +468,19 @@ TRACE_EVENT(edgetpu_vii_litebuf_response_start,
 	TP_STRUCT__entry(
 		__field(pid_t, pid)
 		__field(pid_t, tgid)
+		__field(pid_t, limited_pid)
+		__field(pid_t, limited_tgid)
 	),
 
 	TP_fast_assign(
 		__entry->pid = client->pid;
 		__entry->tgid = client->tgid;
+		__entry->limited_pid = client->limited_pid;
+		__entry->limited_tgid = client->limited_tgid;
 	),
 
-	TP_printk("client pid = %u, tgid = %u", __entry->pid, __entry->tgid)
+	TP_printk("client pid = %u, tgid = %u, limited_pid = %d, limited_tgid = %d",
+		  __entry->pid, __entry->tgid, __entry->limited_pid, __entry->limited_tgid)
 );
 
 TRACE_EVENT(edgetpu_vii_litebuf_response_end,
@@ -368,6 +493,8 @@ TRACE_EVENT(edgetpu_vii_litebuf_response_end,
 	TP_STRUCT__entry(
 		__field(pid_t, pid)
 		__field(pid_t, tgid)
+		__field(pid_t, limited_pid)
+		__field(pid_t, limited_tgid)
 		__field(__u64, seq)
 		__field(__u16, code)
 		__field(int, ret)
@@ -376,13 +503,52 @@ TRACE_EVENT(edgetpu_vii_litebuf_response_end,
 	TP_fast_assign(
 		__entry->pid = client->pid;
 		__entry->tgid = client->tgid;
+		__entry->limited_pid = client->limited_pid;
+		__entry->limited_tgid = client->limited_tgid;
 		__entry->seq = ibuf->seq;
 		__entry->code = ibuf->code;
 		__entry->ret = ret;
 	),
 
-	TP_printk("client pid = %u, tgid = %u, seq = %llu, code = 0x%hx (ret = %d)",
-		  __entry->pid, __entry->tgid, __entry->seq, __entry->code, __entry->ret)
+	TP_printk("client pid = %u, tgid = %u, limited_pid = %d, limited_tgid = %d, seq = %llu, code = 0x%hx (ret = %d)",
+		  __entry->pid, __entry->tgid, __entry->limited_pid, __entry->limited_tgid,
+		  __entry->seq, __entry->code, __entry->ret)
+);
+
+TRACE_EVENT(edgetpu_iif_unblocked_start,
+
+	TP_PROTO(struct iif_fence *fence),
+
+	TP_ARGS(fence),
+
+	TP_STRUCT__entry(
+		__field(int, id)
+		__field(int, signal_error)
+	),
+
+	TP_fast_assign(
+		__entry->id = fence->id;
+		__entry->signal_error = fence->signal_error;
+	),
+
+	TP_printk("fence id = %d, signal_error = %d", __entry->id, __entry->signal_error)
+);
+
+TRACE_EVENT(edgetpu_iif_unblocked_end,
+
+	TP_PROTO(u32 fence_id),
+
+	TP_ARGS(fence_id),
+
+	TP_STRUCT__entry(
+		__field(u32, fence_id)
+	),
+
+	TP_fast_assign(
+		__entry->fence_id = fence_id;
+	),
+
+	TP_printk("fence id = %u", __entry->fence_id)
 );
 
 #endif /* _TRACE_EDGETPU_H */

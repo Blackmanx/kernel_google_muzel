@@ -56,6 +56,7 @@ static void __exit buenos_exit(void)
 }
 
 MODULE_DESCRIPTION("Google Buenos Edge TPU driver");
+MODULE_IMPORT_NS(DMA_BUF);
 MODULE_LICENSE("GPL");
 module_init(buenos_init);
 module_exit(buenos_exit);

@@ -1,18 +1,22 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Virtual Inference Interface, implements the protocol between AP kernel and TPU firmware.
  *
- * Copyright (C) 2023 Google LLC
+ * Copyright (C) 2023-2025 Google LLC
  */
+
 #ifndef __EDGETPU_IKV_H__
 #define __EDGETPU_IKV_H__
 
 #include <linux/list.h>
 #include <linux/mutex.h>
+#include <linux/seq_file.h>
 #include <linux/spinlock.h>
 
 #include <gcip/gcip-fence-array.h>
 #include <gcip/gcip-mailbox.h>
+#include <gcip/gcip-memory.h>
+#include <iif/iif-fence.h>
 
 #include "edgetpu-device-group.h"
 #include "edgetpu-ikv-additional-info.h"
@@ -83,8 +87,14 @@ struct edgetpu_ikv_response {
 	struct gcip_fence_array *in_fence_array;
 	/* Fences to signal on timeout or completion. */
 	struct gcip_fence_array *out_fence_array;
+	/*
+	 * Pointer to an IIF being used as a proxy for any DMA in-fences for the command.
+	 * Saved here so the proxying thread can be stopped when this response arrives or is
+	 * canceled.
+	 */
+	struct iif_fence *iif_dma_fence;
 	/* The coherent buffer for the additional_info to be shared with the firmware. */
-	struct edgetpu_coherent_mem additional_info;
+	struct gcip_memory additional_info;
 	/* Callback to clean-up any data allocated for this command. */
 	void (*release_callback)(void *data);
 	void *release_data;
@@ -98,9 +108,9 @@ struct edgetpu_ikv {
 	/* Interface for accessing the mailbox hardware and the values in their data registers. */
 	struct edgetpu_mailbox *mbx_hardware;
 
-	struct edgetpu_coherent_mem cmd_queue_mem;
+	struct gcip_memory cmd_queue_mem;
 	struct mutex cmd_queue_lock;
-	struct edgetpu_coherent_mem resp_queue_mem;
+	struct gcip_memory resp_queue_mem;
 	spinlock_t resp_queue_lock;
 	unsigned long resp_queue_lock_flags;
 
@@ -109,16 +119,6 @@ struct edgetpu_ikv {
 	 * ever be full. In practice, credit enforcement prevents the queue from ever overflowing.
 	 */
 	wait_queue_head_t pending_commands;
-
-	/*
-	 * Protects the list of pending responses for commands which have already been sent.
-	 * The protected list is part of `struct gcip_mailbox`. GCIP code acquires and releases
-	 * this lock via the `acquire_wait_list_lock` and `release_wait_list_lock` mailbox ops.
-	 */
-	spinlock_t wait_list_lock;
-
-	/* Whether in-kernel VII is supported. If false, VII is routed through user-space. */
-	bool enabled;
 
 	/*
 	 * Timeout for a command, once it has been enqueued.
@@ -186,7 +186,7 @@ int edgetpu_ikv_send_cmd(struct edgetpu_ikv *etikv, void *cmd, struct list_head 
 			 struct list_head *ready_queue, spinlock_t *queue_lock,
 			 struct edgetpu_device_group *group_to_notify,
 			 struct gcip_fence_array *in_fence_array,
-			 struct gcip_fence_array *out_fence_array,
+			 struct gcip_fence_array *out_fence_array, struct iif_fence *iif_dma_fence,
 			 struct edgetpu_ikv_additional_info *additional_info,
 			 void (*release_callback)(void *), void *release_data);
 
@@ -221,5 +221,19 @@ void edgetpu_ikv_flush_responses(struct edgetpu_ikv *etikv);
  * considered as canceled.
  */
 void edgetpu_ikv_cancel(struct edgetpu_device_group *group, int reason);
+
+/*
+ * Notifies the firmware of the unblock of the @fence_id inter-IP fence. This function works
+ * asynchronously.
+ *
+ * Note that this function will be called when the fence has been unblocked and the IIF driver calls
+ * the unblocked callback.
+ */
+void edgetpu_ikv_send_iif_unblock_notification(struct edgetpu_ikv *etikv, int fence_id);
+
+/*
+ * Dumps in-kernel VII queue addresses for debug mappings.
+ */
+void edgetpu_ikv_mappings_show(struct edgetpu_ikv *etikv, struct seq_file *s);
 
 #endif /* __EDGETPU_IKV_H__*/

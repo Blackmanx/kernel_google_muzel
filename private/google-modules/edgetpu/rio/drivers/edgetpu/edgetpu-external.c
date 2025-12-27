@@ -16,6 +16,7 @@
 
 #include "edgetpu-config.h"
 #include "edgetpu-device-group.h"
+#include "edgetpu-iif.h"
 #include "edgetpu-internal.h"
 #include "edgetpu-mailbox.h"
 #include "edgetpu-mobile-platform.h"
@@ -102,10 +103,18 @@ void edgetpu_ext_client_remove(struct edgetpu_client *client)
 static int edgetpu_get_ext_mailbox_index(u32 mbox_type, u32 *start, u32 *end)
 {
 	switch (mbox_type) {
+#if defined(EDGETPU_EXT_DSP_MAILBOX_START)
 	case EDGETPU_EXTERNAL_MAILBOX_TYPE_DSP:
 		*start = EDGETPU_EXT_DSP_MAILBOX_START;
 		*end = EDGETPU_EXT_DSP_MAILBOX_END;
 		return 0;
+#endif
+#if defined(EDGETPU_EXT_AOC_MAILBOX_START)
+	case EDGETPU_EXTERNAL_MAILBOX_TYPE_AOC:
+		*start = EDGETPU_EXT_AOC_MAILBOX_START;
+		*end = EDGETPU_EXT_AOC_MAILBOX_END;
+		return 0;
+#endif
 	default:
 		return -ENOENT;
 	}
@@ -208,7 +217,7 @@ static int edgetpu_external_mailbox_alloc(struct device *edgetpu_dev,
 					 group->mbox_attr.client_priv);
 	if (ret)
 		goto error_put_group;
-	mutex_lock(&group->lock);
+	down_write(&group->lock);
 	ext_mailbox = group->ext_mailbox;
 	if (!ext_mailbox) {
 		ret = -ENOENT;
@@ -216,7 +225,7 @@ static int edgetpu_external_mailbox_alloc(struct device *edgetpu_dev,
 	}
 	ret = edgetpu_external_mailbox_info_get(info, ext_mailbox);
 unlock:
-	mutex_unlock(&group->lock);
+	up_write(&group->lock);
 error_put_group:
 	edgetpu_device_group_put(group);
 out:
@@ -296,7 +305,7 @@ static int edgetpu_external_start_offload(struct device *edgetpu_dev,
 	group = edgetpu_device_group_get(client->group);
 	mutex_unlock(&client->group_lock);
 
-	mutex_lock(&group->lock);
+	down_write(&group->lock);
 	etdomain = edgetpu_group_domain_locked(group);
 	if (edgetpu_mmu_domain_detached(etdomain)) {
 		ret = -EINVAL;
@@ -310,7 +319,7 @@ static int edgetpu_external_start_offload(struct device *edgetpu_dev,
 		offload_info->client_id = etdomain->pasid;
 
 out_group_unlock:
-	mutex_unlock(&group->lock);
+	up_write(&group->lock);
 	edgetpu_device_group_put(group);
 out:
 	fput(file);
@@ -323,10 +332,10 @@ static int edgetpu_external_get_iif_manager(struct device *edgetpu_dev,
 	struct platform_device *pdev = to_platform_device(edgetpu_dev);
 	struct edgetpu_dev *etdev = platform_get_drvdata(pdev);
 
-	if (!etdev->iif_mgr)
+	if (!etdev->etiif->iif_mgr)
 		return -ENODEV;
 
-	*iif_manager_ptr = iif_manager_get(etdev->iif_mgr);
+	*iif_manager_ptr = iif_manager_get(etdev->etiif->iif_mgr);
 
 	return 0;
 }

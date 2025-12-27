@@ -1,8 +1,8 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Edge TPU IOMMU interface.
  *
- * Copyright (C) 2019 Google, Inc.
+ * Copyright (C) 2019-2025 Google LLC
  */
 
 #include <linux/bits.h>
@@ -10,6 +10,7 @@
 #include <linux/dma-mapping.h>
 #include <linux/iommu.h>
 #include <linux/scatterlist.h>
+#include <linux/sizes.h>
 #include <linux/slab.h>
 #include <linux/types.h>
 
@@ -25,6 +26,8 @@
 #if !defined(EDGETPU_NUM_PREALLOCATED_DOMAINS)
 #define EDGETPU_NUM_PREALLOCATED_DOMAINS 0
 #endif
+
+#define EDGETPU_IOVA_GRANULE (EDGETPU_MMU_GRANULARITY_IS_PAGE ? PAGE_SIZE : SZ_4K)
 
 struct edgetpu_iommu {
 	struct iommu_group *iommu_group;
@@ -45,6 +48,7 @@ struct edgetpu_iommu {
 	 * The implementation will fall back to dynamically allocated domains otherwise.
 	 */
 	struct gcip_iommu_domain_pool domain_pool;
+
 };
 
 bool edgetpu_mmu_is_domain_default_domain(struct edgetpu_dev *etdev,
@@ -69,7 +73,7 @@ static void report_page_fault(struct edgetpu_dev *etdev, u64 addr, u32 pasid, u3
 }
 #endif
 
-static int edgetpu_check_fault(struct edgetpu_dev *etdev, struct iommu_fault *fault)
+static int edgetpu_check_dev_fault(struct edgetpu_dev *etdev, struct iommu_fault *fault)
 {
 	u64 iova;
 	uint pasid;
@@ -93,11 +97,11 @@ static int edgetpu_check_fault(struct edgetpu_dev *etdev, struct iommu_fault *fa
 
 static int edgetpu_iommu_dev_fault_handler(struct iommu_fault *fault, void *token)
 {
-	struct edgetpu_dev *etdev = (struct edgetpu_dev *)token;
+	struct edgetpu_dev *etdev = token;
 	static DEFINE_RATELIMIT_STATE(rs, DEFAULT_RATELIMIT_INTERVAL, DEFAULT_RATELIMIT_BURST);
 
 	/* Optional debugging info / other fixup/handling for an IOMMU fault. */
-	edgetpu_check_fault(etdev, fault);
+	edgetpu_check_dev_fault(etdev, fault);
 	/* Ignore return, continue on with error reporting. */
 
 	if (!__ratelimit(&rs))
@@ -121,14 +125,12 @@ static int edgetpu_iommu_dev_fault_handler(struct iommu_fault *fault, void *toke
 
 static int edgetpu_register_iommu_device_fault_handler(struct edgetpu_dev *etdev)
 {
-	etdev_dbg(etdev, "Registering IOMMU device fault handler\n");
 	return iommu_register_device_fault_handler(etdev->dev, edgetpu_iommu_dev_fault_handler,
 						   etdev);
 }
 
 static int edgetpu_unregister_iommu_device_fault_handler(struct edgetpu_dev *etdev)
 {
-	etdev_dbg(etdev, "Unregistering IOMMU device fault handler\n");
 	return iommu_unregister_device_fault_handler(etdev->dev);
 }
 
@@ -148,10 +150,17 @@ static int edgetpu_iommu_fault_handler(struct iommu_domain *domain, struct devic
 static void edgetpu_init_etdomain(struct edgetpu_iommu_domain *etdomain, struct edgetpu_dev *etdev,
 				  struct gcip_iommu_domain *gdomain, uint pasid)
 {
+	struct iommu_domain *domain = gdomain->domain;
+
 	etdomain->etdev = etdev;
 	etdomain->gdomain = gdomain;
 	etdomain->pasid = pasid;
-	iommu_set_fault_handler(etdomain->gdomain->domain, edgetpu_iommu_fault_handler, etdomain);
+	/*
+	 * Only register fault handler used by clients where we need to inform them when an IOMMU
+	 * fault happens.
+	 */
+	if (pasid)
+		iommu_set_fault_handler(domain, edgetpu_iommu_fault_handler, etdomain);
 }
 
 /*
@@ -204,8 +213,8 @@ int edgetpu_mmu_attach(struct edgetpu_dev *etdev)
 	 * Specify `base_addr` and `iova_space_size` as 0 so the gcip_iommu_domain_pool will obtain
 	 * the values from the device tree.
 	 */
-	ret = gcip_iommu_domain_pool_init(&etiommu->domain_pool, etdev->dev, 0, 0, SZ_4K,
-					  EDGETPU_NUM_PREALLOCATED_DOMAINS,
+	ret = gcip_iommu_domain_pool_init(&etiommu->domain_pool, etdev->dev, 0, 0,
+					  EDGETPU_IOVA_GRANULE, EDGETPU_NUM_PREALLOCATED_DOMAINS,
 					  GCIP_IOMMU_DOMAIN_TYPE_IOVAD);
 	if (ret) {
 		etdev_err(etdev, "Unable create domain pool (%d)\n", ret);

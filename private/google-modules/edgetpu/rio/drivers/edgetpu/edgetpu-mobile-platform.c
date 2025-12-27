@@ -1,25 +1,28 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Common platform interfaces for mobile TPU chips.
  *
- * Copyright (C) 2021 Google, Inc.
+ * Copyright (C) 2021-2025 Google LLC
  */
 
 #include <linux/device.h>
 #include <linux/interrupt.h>
+#include <linux/list.h>
 #include <linux/module.h>
 #include <linux/of.h>
 #include <linux/of_address.h>
 #include <linux/of_platform.h>
 #include <linux/platform_device.h>
+#include <linux/spinlock.h>
+#include <linux/workqueue.h>
 
 #include <gcip/gcip-iommu.h>
-#include <iif/iif-manager.h>
 
 #include "edgetpu-config.h"
 #include "edgetpu-devfreq.h"
 #include "edgetpu-dmabuf.h"
 #include "edgetpu-firmware.h"
+#include "edgetpu-ikv.h"
 #include "edgetpu-internal.h"
 #include "edgetpu-mmu.h"
 #include "edgetpu-mobile-platform.h"
@@ -37,7 +40,6 @@ static int edgetpu_platform_setup_fw_region(struct edgetpu_mobile_platform_dev *
 	struct resource r;
 	struct device_node *np;
 	int ret;
-	size_t region_map_size = EDGETPU_MAX_FW_LIMIT;
 
 	np = of_parse_phandle(dev->of_node, "memory-region", 0);
 	if (!np) {
@@ -52,15 +54,15 @@ static int edgetpu_platform_setup_fw_region(struct edgetpu_mobile_platform_dev *
 		return ret;
 	}
 
-	if (resource_size(&r) < region_map_size) {
-		dev_err(dev, "Memory region for firmware too small (%zu bytes needed, got %llu)",
-			region_map_size, resource_size(&r));
+	if (resource_size(&r) < EDGETPU_MAX_FW_LIMIT) {
+		dev_err(dev, "Memory region for firmware too small (%#x bytes needed, got %#llx)",
+			EDGETPU_MAX_FW_LIMIT, resource_size(&r));
 		return -ENOSPC;
 	}
 
-	ret = edgetpu_firmware_setup_fw_region(etdev, r.start);
+	ret = edgetpu_firmware_setup_fw_carveout(etdev, r.start, resource_size(&r));
 	if (ret)
-		dev_err(dev, "setup firmware region failed: %d", ret);
+		dev_err(dev, "setup firmware carveout failed: %d", ret);
 	return ret;
 }
 
@@ -68,47 +70,7 @@ static void edgetpu_platform_cleanup_fw_region(struct edgetpu_mobile_platform_de
 {
 	struct edgetpu_dev *etdev = &etmdev->edgetpu_dev;
 
-	edgetpu_firmware_cleanup_fw_region(etdev);
-}
-
-/* Handle mailbox response doorbell IRQ for mobile platform devices. */
-static irqreturn_t edgetpu_platform_handle_mailbox_doorbell(struct edgetpu_dev *etdev, int irq)
-{
-	struct edgetpu_mailbox *mailbox;
-	struct edgetpu_mobile_platform_dev *etmdev = to_mobile_dev(etdev);
-	struct edgetpu_mailbox_manager *mgr = etdev->mailbox_manager;
-	uint i;
-
-	if (!mgr)
-		return IRQ_NONE;
-	for (i = 0; i < etmdev->n_mailbox_irq; i++)
-		if (etmdev->mailbox_irq[i] == irq)
-			break;
-	if (i == etmdev->n_mailbox_irq)
-		return IRQ_NONE;
-	read_lock(&mgr->mailboxes_lock);
-	mailbox = mgr->mailboxes[i];
-	if (!mailbox)
-		goto out;
-	if (!EDGETPU_MAILBOX_RESP_QUEUE_READ(mailbox, doorbell_status))
-		goto out;
-	EDGETPU_MAILBOX_RESP_QUEUE_WRITE(mailbox, doorbell_clear, 1);
-	etdev_dbg(mgr->etdev, "mbox %u resp doorbell irq tail=%u\n", i,
-		  EDGETPU_MAILBOX_RESP_QUEUE_READ(mailbox, tail));
-	if (mailbox->handle_irq)
-		mailbox->handle_irq(mailbox);
-out:
-	read_unlock(&mgr->mailboxes_lock);
-	return IRQ_HANDLED;
-}
-
-/* Handle a mailbox response doorbell interrupt. */
-irqreturn_t edgetpu_mailbox_irq_handler(int irq, void *arg)
-{
-	struct edgetpu_dev *etdev = arg;
-
-	edgetpu_telemetry_irq_handler(etdev);
-	return edgetpu_platform_handle_mailbox_doorbell(etdev, irq);
+	edgetpu_firmware_cleanup_fw_carveout(etdev);
 }
 
 static inline const char *get_driver_commit(void)
@@ -120,67 +82,6 @@ static inline const char *get_driver_commit(void)
 #else
 	return "Unknown";
 #endif
-}
-
-static void edgetpu_get_embedded_iif_mgr(struct edgetpu_dev *etdev)
-{
-	struct iif_manager *mgr;
-
-	etdev_info(etdev, "Try to get an embedded IIF manager");
-
-	mgr = iif_manager_init(etdev->dev->of_node);
-	if (IS_ERR(mgr)) {
-		etdev_warn(etdev, "Failed to init an embedded IIF manager: %ld", PTR_ERR(mgr));
-		return;
-	}
-
-	etdev->iif_mgr = mgr;
-}
-
-static void edgetpu_get_iif_mgr(struct edgetpu_dev *etdev)
-{
-	struct platform_device *pdev;
-	struct device_node *node;
-	struct iif_manager *mgr;
-
-	node = of_parse_phandle(etdev->dev->of_node, "iif-device", 0);
-	if (IS_ERR_OR_NULL(node)) {
-		etdev_warn(etdev, "There is no iif-device node in the device tree");
-		goto get_embed;
-	}
-
-	pdev = of_find_device_by_node(node);
-	of_node_put(node);
-	if (!pdev) {
-		etdev_warn(etdev, "Failed to find the IIF device");
-		goto get_embed;
-	}
-
-	mgr = platform_get_drvdata(pdev);
-	if (!mgr) {
-		etdev_warn(etdev, "Failed to get a manager from IIF device");
-		goto put_device;
-	}
-
-	etdev_info(etdev, "Use the IIF manager of IIF device");
-
-	/* We don't need to call `get_device` since `of_find_device_by_node` takes a refcount. */
-	etdev->iif_dev = &pdev->dev;
-	etdev->iif_mgr = iif_manager_get(mgr);
-	return;
-
-put_device:
-	put_device(&pdev->dev);
-get_embed:
-	edgetpu_get_embedded_iif_mgr(etdev);
-}
-
-static void edgetpu_put_iif_mgr(struct edgetpu_dev *etdev)
-{
-	if (etdev->iif_mgr)
-		iif_manager_put(etdev->iif_mgr);
-	/* NO-OP if `etdev->iif_dev.dev` is NULL. */
-	put_device(etdev->iif_dev);
 }
 
 static int edgetpu_mobile_platform_probe(struct platform_device *pdev)
@@ -196,7 +97,14 @@ static int edgetpu_mobile_platform_probe(struct platform_device *pdev)
 		{ .name = NULL },
 		/* Common name for embedded SoC devices */
 		{ .name = "edgetpu-soc" },
+		/* Limited interface for map/unmap only */
+		{ .name = "edgetpu-limited", .limited = true },
 	};
+
+	/* Ensure any drivers relied upon have already probed. */
+	ret = edgetpu_soc_check_supplier_devices(dev);
+	if (ret)
+		return ret;
 
 	etmdev = devm_kzalloc(dev, sizeof(*etmdev), GFP_KERNEL);
 	if (!etmdev)
@@ -240,8 +148,6 @@ static int edgetpu_mobile_platform_probe(struct platform_device *pdev)
 		return ret;
 	}
 
-	mutex_init(&etdev->vii_format_uninitialized_lock);
-	etdev->vii_format = EDGETPU_VII_FORMAT_UNKNOWN;
 	ret = edgetpu_device_add(etdev, &regs, iface_params, ARRAY_SIZE(iface_params));
 	if (ret) {
 		dev_err(dev, "edgetpu device add failed: %d", ret);
@@ -274,7 +180,6 @@ static int edgetpu_mobile_platform_probe(struct platform_device *pdev)
 		goto out_destroy_thermal;
 	}
 
-	edgetpu_get_iif_mgr(etdev);
 	edgetpu_soc_post_power_on_init(etdev);
 	dev_info(dev, "%s edgetpu initialized. Build: %s", etdev->dev_name, get_driver_commit());
 
@@ -301,7 +206,6 @@ static void edgetpu_mobile_platform_remove(struct platform_device *pdev)
 	struct edgetpu_dev *etdev = platform_get_drvdata(pdev);
 	struct edgetpu_mobile_platform_dev *etmdev = to_mobile_dev(etdev);
 
-	edgetpu_put_iif_mgr(etdev);
 	edgetpu_devfreq_destroy(etdev);
 	edgetpu_thermal_destroy(etdev);
 	edgetpu_firmware_destroy(etdev);

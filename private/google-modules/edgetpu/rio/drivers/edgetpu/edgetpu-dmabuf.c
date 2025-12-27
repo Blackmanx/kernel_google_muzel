@@ -50,8 +50,7 @@ static const struct dma_fence_ops edgetpu_dma_fence_ops;
 /*
  * Clean resources recorded in @dmap.
  *
- * Caller holds the lock of group (map->priv) and ensures the group is in
- * the finalized state.
+ * Caller holds the lock of group (map->priv) and ensures the group is in the ready state.
  */
 static void dmabuf_mapping_destroy(struct edgetpu_mapping *mapping)
 {
@@ -100,24 +99,26 @@ static struct edgetpu_mapping *dmabuf_mapping_create(struct edgetpu_device_group
 	mapping->release = dmabuf_mapping_destroy;
 	mapping->show = dmabuf_map_callback_show;
 
-	mutex_lock(&group->lock);
-	if (!edgetpu_device_group_is_finalized(group)) {
+	down_read(&group->lock);
+	mutex_lock(&group->mapping_lock);
+	if (!edgetpu_device_group_is_ready(group)) {
 		ret = edgetpu_group_errno(group);
 		etdev_dbg(group->etdev,
-			  "%s: edgetpu_device_group_is_finalized returns %d\n",
+			  "%s: edgetpu_device_group_is_ready returns %d\n",
 			  __func__, ret);
-		mutex_unlock(&group->lock);
+		mutex_unlock(&group->mapping_lock);
+		up_read(&group->lock);
 		goto err_device_group_put;
 	}
 	etdomain = edgetpu_group_domain_locked(group);
 
 	mapping->gcip_mapping =
 		gcip_iommu_domain_map_dma_buf(etdomain->gdomain, dmabuf, gcip_map_flags);
-	mutex_unlock(&group->lock);
+	mutex_unlock(&group->mapping_lock);
+	up_read(&group->lock);
 	if (IS_ERR(mapping->gcip_mapping)) {
 		ret = PTR_ERR(mapping->gcip_mapping);
-		etdev_dbg(group->etdev, "%s: gcip_iommu_domain_map_dma_buf returns %d\n", __func__,
-			  ret);
+		edgetpu_device_group_log_map_error(group, dmabuf->size, flags, ret);
 		goto err_device_group_put;
 	}
 
@@ -167,11 +168,11 @@ int edgetpu_unmap_dmabuf(struct edgetpu_device_group *group, tpu_addr_t tpu_addr
 	struct edgetpu_mapping *map;
 
 	edgetpu_mapping_lock(mappings);
-	map = edgetpu_mapping_find_locked(mappings, tpu_addr);
+	map = edgetpu_mapping_find_locked(mappings, tpu_addr, /*limited=*/false);
 	if (!map) {
 		edgetpu_mapping_unlock(mappings);
 		etdev_err(group->etdev, "unmap group=%u tpu_addr=%pad not found",
-			  group->workload_id, &tpu_addr);
+			  group->group_id, &tpu_addr);
 		return -EINVAL;
 	}
 	edgetpu_mapping_unlink(mappings, map);
@@ -203,9 +204,9 @@ static void edgetpu_dma_fence_release(struct dma_fence *fence)
 	struct edgetpu_dma_fence *etfence = to_etfence(gfence);
 	struct edgetpu_device_group *group = etfence->group;
 
-	mutex_lock(&group->lock);
+	down_write(&group->lock);
 	list_del(&etfence->group_list);
-	mutex_unlock(&group->lock);
+	up_write(&group->lock);
 	/* Release this fence's reference on the owning group. */
 	edgetpu_device_group_put(group);
 	gcip_dma_fence_exit(gfence);
@@ -225,9 +226,9 @@ static int edgetpu_dma_fence_after_init(struct gcip_dma_fence *gfence)
 	struct edgetpu_dma_fence *etfence = to_etfence(gfence);
 	struct edgetpu_device_group *group = etfence->group;
 
-	mutex_lock(&group->lock);
+	down_write(&group->lock);
 	list_add_tail(&etfence->group_list, &group->dma_fence_list);
-	mutex_unlock(&group->lock);
+	up_write(&group->lock);
 
 	return 0;
 }
@@ -306,7 +307,7 @@ int edgetpu_sync_fence_debugfs_show(struct seq_file *s, void *unused)
 		struct edgetpu_dma_fence *etfence = to_etfence(gfence);
 
 		gcip_dma_fence_show(gfence, s);
-		seq_printf(s, " group=%u\n", etfence->group->workload_id);
+		seq_printf(s, " group=%u\n", etfence->group->group_id);
 	}
 	GCIP_DMA_FENCE_LIST_UNLOCK(etdev->gfence_mgr, flags);
 

@@ -22,12 +22,8 @@ struct edgetpu_dev;
  * Defined with X macros to support fetching event names from values.
  */
 #define EDGETPU_WAKELOCK_EVENTS                                                \
-	X(EDGETPU_WAKELOCK_EVENT_FULL_CSR, 0),                                 \
-	X(EDGETPU_WAKELOCK_EVENT_MBOX_CSR, 1),                                 \
-	X(EDGETPU_WAKELOCK_EVENT_CMD_QUEUE, 2),                                \
-	X(EDGETPU_WAKELOCK_EVENT_RESP_QUEUE, 3),                               \
-	X(EDGETPU_WAKELOCK_EVENT_EXT_MAILBOX, 4),                              \
-	X(EDGETPU_WAKELOCK_EVENT_END, 5)
+	X(EDGETPU_WAKELOCK_EVENT_EXT_MAILBOX, 0),                              \
+	X(EDGETPU_WAKELOCK_EVENT_END, 1)
 
 enum edgetpu_wakelock_event {
 #define X(name, val) name = val
@@ -44,6 +40,8 @@ struct edgetpu_wakelock {
 	 * "release".
 	 */
 	uint req_count;
+	/* This client's wakelock has been marked "suspendable", allowing system suspend. */
+	bool suspendable;
 	/*
 	 * Events counter.
 	 * release() would fail if one of the slots is not zero.
@@ -129,6 +127,7 @@ edgetpu_wakelock_count_locked(struct edgetpu_wakelock *wakelock)
 
 /*
  * Acquires the wakelock, increases @wakelock->req_count by one.
+ * @flags: Bitmask of EDGETPU_ACQUIRE_WAKELOCK_FLAG_* flags, such as to allow suspend.
  *
  * This function should be surrounded by edgetpu_wakelock_lock() and
  * edgetpu_wakelock_unlock().
@@ -136,7 +135,8 @@ edgetpu_wakelock_count_locked(struct edgetpu_wakelock *wakelock)
  * Returns the value of request counter *before* being increased.
  * Returns -EOVERFLOW if the request counter would overflow after increment.
  */
-int edgetpu_wakelock_acquire(struct edgetpu_wakelock *wakelock);
+int edgetpu_wakelock_acquire(struct edgetpu_wakelock *wakelock, u32 flags);
+
 /*
  * Requests to release the wakelock, decreases @wakelock->req_count by one on
  * success.

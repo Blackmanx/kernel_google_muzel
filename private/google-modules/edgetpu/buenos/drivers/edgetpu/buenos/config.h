@@ -30,6 +30,9 @@
 /* Number of TPU clusters for metrics handling. */
 #define EDGETPU_TPU_CLUSTER_COUNT 3
 
+/* Size of IKV queues (in unit number of elements). */
+#define EDGETPU_IKV_QUEUE_SIZE 1023
+
 /*
  * TZ Mailbox ID for secure workloads.  Must match firmware kTzMailboxId value for the chip,
  * but note firmware uses a zero-based index vs. kernel passing a one-based value here.
@@ -44,6 +47,17 @@
 #define EDGETPU_HAS_GSA 1
 
 #define EDGETPU_HAS_FW_DEBUG 1
+
+#define EDGETPU_USE_LITEBUF_VII 1
+
+/* BCL mitigation CSRs default values. */
+#define MITIGATION_RESPONSE_EN_DEFAULT			0x5f
+#define MITIGATION_RESPONSE_TYPE_DEFAULT		0xcd
+#define MITIGATION_RESPONSE_HYST_DEFAULT		0xff
+#define LIGHT_MITIGATION_DIV_RATIO_DEFAULT		0x2
+#define HEAVY_MITIGATION_DIV_RATIO_DEFAULT		0x4
+#define THERMAL_HEAVY_MITIGATION_DIV_RATIO_DEFAULT	0xdeadfeed
+#define MITIGATION_FLL_STEP_DOWN_DEFAULT		0xdeadfeed
 
 #include "config-mailbox.h"
 #include "config-tpu-cpu.h"

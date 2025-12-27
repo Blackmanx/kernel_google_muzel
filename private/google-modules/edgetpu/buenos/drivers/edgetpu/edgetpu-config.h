@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Defines chipset dependent configuration.
  *
@@ -64,6 +64,28 @@
 
 #ifndef EDGETPU_NUM_VII_CREDITS_PER_CLIENT
 #define EDGETPU_NUM_VII_CREDITS_PER_CLIENT 8
+#endif
+
+#ifndef EDGETPU_IKV_QUEUE_SIZE
+/* Size of IKV queues (in unit number of elements). */
+#define EDGETPU_IKV_QUEUE_SIZE (EDGETPU_NUM_VII_CREDITS_PER_CLIENT * EDGETPU_NUM_VCIDS)
+#endif
+
+#ifndef EDGETPU_CPU_CACHE_LINE_SIZE
+#define EDGETPU_CPU_CACHE_LINE_SIZE 64
+#endif
+
+#ifndef EDGETPU_USE_HW_WDT
+#define EDGETPU_USE_HW_WDT 0
+#endif
+
+#ifndef EDGETPU_POWER_ISLAND_COUNT
+#define EDGETPU_POWER_ISLAND_COUNT 0
+#endif
+
+/* Whether the IOMMU granularity is same as PAGE_SIZE. */
+#ifndef EDGETPU_MMU_GRANULARITY_IS_PAGE
+#define EDGETPU_MMU_GRANULARITY_IS_PAGE 1
 #endif
 
 #endif /* __EDGETPU_CONFIG_H__ */

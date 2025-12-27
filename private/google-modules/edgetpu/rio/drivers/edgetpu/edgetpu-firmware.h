@@ -1,12 +1,14 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * EdgeTPU firmware loader.
  *
- * Copyright (C) 2020-2022,2024 Google, Inc.
+ * Copyright (C) 2019-2025 Google LLC
  */
+
 #ifndef __EDGETPU_FIRMWARE_H__
 #define __EDGETPU_FIRMWARE_H__
 
+#include <linux/bits.h>
 #include <linux/seq_file.h>
 #include <linux/sizes.h>
 
@@ -16,46 +18,14 @@
 #include "edgetpu-internal.h"
 #include "edgetpu-mmu.h"
 
-#define MAX_IOMMU_MAPPINGS 23
-#define MAX_NS_IOMMU_MAPPINGS 5
+/*
+ * This is the kernel driver version provided to the firmware during boot.
+ * This version is bumped when the kernel driver has behavior changes that firmware needs to be
+ * aware of.
+ */
+#define EDGETPU_DRIVER_FW_INTERFACE_VERSION 1
 
-#define EDGETPU_FW_HEADER_SIZE SZ_4K
-
-struct edgetpu_image_sub_header_common {
-	int Magic;
-	int Generation;
-	int RollbackInfo;
-	int Length;
-	char Flags[16];
-};
-
-struct edgetpu_image_sub_header_gen1 {
-	char BodyHash[32];
-	char ChipId[32];
-	char AuthConfig[256];
-	struct gcip_image_config ImageConfig;
-};
-
-struct edgetpu_image_sub_header_gen2 {
-	char BodyHash[64];
-	char ChipId[32];
-	char AuthConfig[256];
-	struct gcip_image_config ImageConfig;
-};
-
-struct edgetpu_image_header {
-	char sig[512];
-	char pub[512];
-	struct {
-		struct edgetpu_image_sub_header_common common;
-		union {
-			struct edgetpu_image_sub_header_gen1 gen1;
-			struct edgetpu_image_sub_header_gen2 gen2;
-		};
-	};
-};
-
-/* Value of Magic field above: 'TPUF' as a 32-bit LE int */
+/* Value of magic field above: 'TPUF' as a 32-bit LE int */
 #define EDGETPU_FW_MAGIC	0x46555054
 
 /*
@@ -83,6 +53,14 @@ struct edgetpu_image_header {
  */
 #define EDGETPU_DEFAULT_REMAPPED_DATA_ADDR                                                         \
 	(EDGETPU_INSTRUCTION_REMAP_BASE + EDGETPU_DEFAULT_FW_LIMIT)
+
+/* Firmware client_id fields. */
+#define CLIENT_ID_REALM		GENMASK(31, 30)
+#define CLIENT_ID_VM		GENMASK(29, 16)
+#define CLIENT_ID_PASID		GENMASK(15, 0)
+
+/* Firmware client_id realm IDs. */
+#define CLIENT_REALM_NS		0	/* kHostVmId  */
 
 /*
  * Load and run firmware.
@@ -184,16 +162,18 @@ void edgetpu_firmware_shared_mappings_context_unmap(struct edgetpu_dev *etdev,
 int edgetpu_firmware_reset_cpu(struct edgetpu_dev *etdev, bool assert_reset);
 
 /*
- * Setup firmware region carveout and iremap pool for device.
+ * Setup firmware carveout and (initial) iremap pool for device.
  * Allocates device firmware private data.  Must be called before edgetpu_firmware_create.
  *
- * @etdev: device for which to setup firmware region.
- * @fw_region_paddr: phys addr of firmware region (as from device tree)
+ * @etdev: device for which to setup firmware carveout.
+ * @fw_carveout_paddr: phys addr of firmware carveout (from device tree).
+ * @fw_carveout_size: size in bytes of firmware carveout (from device tree).
  */
-int edgetpu_firmware_setup_fw_region(struct edgetpu_dev *etdev, phys_addr_t fw_region_paddr);
+int edgetpu_firmware_setup_fw_carveout(struct edgetpu_dev *etdev, phys_addr_t fw_carveout_paddr,
+				       size_t fw_carveout_size);
 
-/* Cleanup firmware region carveout and iremap pool, free firmware private data. */
-void edgetpu_firmware_cleanup_fw_region(struct edgetpu_dev *etdev);
+/* Cleanup firmware carveout and iremap pool, free firmware private data. */
+void edgetpu_firmware_cleanup_fw_carveout(struct edgetpu_dev *etdev);
 
 /* Return KVA of FW shared data area. */
 void *edgetpu_firmware_shared_data_vaddr(struct edgetpu_dev *etdev);

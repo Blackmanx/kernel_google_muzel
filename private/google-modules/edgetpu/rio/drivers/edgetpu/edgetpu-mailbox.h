@@ -13,6 +13,7 @@
 #include <linux/types.h>
 
 #include <gcip/gcip-mailbox.h>
+#include <gcip/gcip-memory.h>
 
 #include "edgetpu-internal.h"
 #include "edgetpu.h"
@@ -24,6 +25,9 @@
 
 /* Mailbox index for in-kernel virtual inference interface, if enabled */
 #define IKV_MAILBOX_INDEX 1
+
+/* Mailbox index for Inter-IP Fence signaling mailbox, if enabled */
+#define IIF_MAILBOX_INDEX 2
 
 /* Size of CSRs start from cmd_queue_csr_base can be mmap-ed to userspace. */
 #define USERSPACE_CSR_SIZE 0x1000ul
@@ -64,11 +68,10 @@ struct edgetpu_mailbox {
 	union {
 		struct edgetpu_kci *etkci;
 		struct edgetpu_ikv *etikv;
+		struct edgetpu_iif *etiif;
 		struct edgetpu_device_group *group;
 	} internal;
 };
-
-typedef struct edgetpu_coherent_mem edgetpu_queue_mem;
 
 struct edgetpu_vii {
 	/*
@@ -77,15 +80,15 @@ struct edgetpu_vii {
 	 */
 	struct edgetpu_mailbox *mailbox;
 	struct edgetpu_dev *etdev;
-	edgetpu_queue_mem cmd_queue_mem;
-	edgetpu_queue_mem resp_queue_mem;
+	struct gcip_memory cmd_queue_mem;
+	struct gcip_memory resp_queue_mem;
 };
 
 /* Structure to hold info about mailbox and its queues. */
 struct edgetpu_mailbox_descriptor {
 	struct edgetpu_mailbox *mailbox;
-	edgetpu_queue_mem cmd_queue_mem;
-	edgetpu_queue_mem resp_queue_mem;
+	struct gcip_memory cmd_queue_mem;
+	struct gcip_memory resp_queue_mem;
 };
 
 enum edgetpu_ext_mailbox_type {
@@ -142,8 +145,6 @@ struct edgetpu_mailbox_manager {
 	struct edgetpu_dev *etdev;
 	/* total number of mailboxes that edgetpu device could provide */
 	u8 num_mailbox;
-	/* indices reserved for VII, the range is [from, to) */
-	u8 vii_index_from, vii_index_to;
 	/* indices reserved for external mailboxes */
 	u8 ext_index_from, ext_index_to;
 	rwlock_t mailboxes_lock;	/* protects mailboxes */
@@ -154,19 +155,19 @@ struct edgetpu_mailbox_manager {
 	get_csr_base_t get_resp_queue_csr_base;
 	struct edgetpu_handshake open_devices;
 	struct edgetpu_handshake enabled_pasids;
-	bool use_ikv;
+	bool use_iif;
 };
 
 /* the structure to configure a mailbox manager */
 struct edgetpu_mailbox_manager_desc {
 	u8 num_mailbox;
-	u8 num_vii_mailbox;
-	u8 num_use_vii_mailbox;
 	u8 num_ext_mailbox;
+	u8 ext_mailbox_start;
 	get_csr_base_t get_context_csr_base;
 	get_csr_base_t get_cmd_queue_csr_base;
 	get_csr_base_t get_resp_queue_csr_base;
-	bool use_ikv;
+	/* Whether or not a mailbox is reserved for IIF signaling. */
+	bool use_iif;
 };
 
 /* Mailbox CSRs. The order and size are exactly the same as RTL defined. */
@@ -187,10 +188,10 @@ struct edgetpu_mailbox_context_csr {
 	u32 resp_queue_address_low;
 	u32 resp_queue_address_high;
 	u32 resp_queue_size;
-	u32 config_spare_0;
-	u32 config_spare_1;
-	u32 config_spare_2;
-	u32 config_spare_3;
+	u32 config_spare_0; /* For KCI, kernel driver version; unused for others. */
+	u32 config_spare_1; /* For KCI, firmware boot stage; unused for others. */
+	u32 config_spare_2; /* unused for now */
+	u32 config_spare_3; /* unused for now */
 } __packed;
 
 /* CSRs that can be accessed by AP runtime */
@@ -230,6 +231,12 @@ edgetpu_mailbox_create_mgr(struct edgetpu_dev *etdev,
 irqreturn_t edgetpu_mailbox_irq_handler(int irq, void *arg);
 
 /*
+ * Enable or disable all mailbox IRQs for the device.
+ * @enable: true to enable IRQs, or false to disable IRQs.
+ */
+void edgetpu_mailbox_irqs_enable(struct edgetpu_dev *etdev, bool enable);
+
+/*
  * Removes the mailbox previously requested from a mailbox manager.
  *
  * This function doesn't change the state of mailbox enable/disable.
@@ -248,11 +255,29 @@ void edgetpu_mailbox_remove_all(struct edgetpu_mailbox_manager *mgr, bool hwacce
 /* set cmd/resp_queue's address and size */
 int edgetpu_mailbox_set_queue(struct edgetpu_mailbox *mailbox, enum gcip_mailbox_queue_type type,
 			      u64 addr, u32 size);
+/* set cmd/resp_queue's registers to reflect that it is not being used. */
+void edgetpu_mailbox_set_queue_as_unused(struct edgetpu_mailbox *mailbox,
+					 enum gcip_mailbox_queue_type type);
 void edgetpu_mailbox_set_priority(struct edgetpu_mailbox *mailbox,
 				  u32 priority);
 
 /* Reset mailbox queues, clear out any commands/responses left from before. */
 void edgetpu_mailbox_reset(struct edgetpu_mailbox *mailbox);
+
+/*
+ * Clears any stale doorbell requests at the mailbox level
+ */
+void edgetpu_mailbox_clear_doorbells(struct edgetpu_mailbox *mailbox);
+
+/*
+ * Enables the doorbell interrupts at the mailbox level
+ */
+void edgetpu_mailbox_enable_doorbells(struct edgetpu_mailbox *mailbox);
+
+/*
+ * Disables the doorbell interrupts at the mailbox level
+ */
+void edgetpu_mailbox_disable_doorbells(struct edgetpu_mailbox *mailbox);
 
 /*
  * Clears any stale doorbell requests and enables the doorbell interrupts
@@ -275,19 +300,10 @@ void edgetpu_mailbox_inc_resp_queue_head(struct edgetpu_mailbox *mailbox,
 /* requests the mailbox for in-kernel VII */
 struct edgetpu_mailbox *edgetpu_mailbox_ikv(struct edgetpu_mailbox_manager *mgr);
 
-/* utility functions for user-space VII */
+/* requests the mailbox for Inter-IP Fence signaling to the TPU */
+struct edgetpu_mailbox *edgetpu_mailbox_iif(struct edgetpu_mailbox_manager *mgr);
 
-/*
- * Request the mailbox with mailbox_id equals @id.
- * @id = 0 means there is no preference, @mgr will return a spare mailbox.
- *
- * Caller calls edgetpu_mailbox_enable() to enable the returned mailbox.
- *
- * -EBUSY is returned if the requested @id is used or there is no mailbox
- * available.
- */
-struct edgetpu_mailbox *
-edgetpu_mailbox_vii_add(struct edgetpu_mailbox_manager *mgr, uint id);
+/* utility functions for user-space VII */
 
 /*
  * Validates the mailbox attributes.
@@ -297,45 +313,18 @@ edgetpu_mailbox_vii_add(struct edgetpu_mailbox_manager *mgr, uint id);
  * be considered as invalid.
  */
 int edgetpu_mailbox_validate_attr(const struct edgetpu_mailbox_attr *attr);
-/*
- * Sets mailbox and allocates queues to @vii.
- *
- * @group is the device group that @vii will be associated with,
- * @group->mbox_attr is used to set the VII mailbox attributes.
- *
- * @group->mbox_attr must be checked by edgetpu_mailbox_validate_attr() before
- * calling this function.
- *
- * Returns 0 on success.
- */
-int edgetpu_mailbox_init_vii(struct edgetpu_vii *vii,
-			     struct edgetpu_device_group *group);
-void edgetpu_mailbox_remove_vii(struct edgetpu_vii *vii);
 
-
-/*
- * Reset all mailboxes CSRs to valid values, needed after the device is power
- * gated.
- */
-void edgetpu_mailbox_reset_mailboxes(struct edgetpu_mailbox_manager *mgr);
+/* Reset all external mailboxes CSRs to valid values, needed after the device is power gated. */
+void edgetpu_mailbox_reset_ext_mailboxes(struct edgetpu_mailbox_manager *mgr);
 
 
 /* For VII mailboxes to allocate/free queue memory */
 
 int edgetpu_mailbox_alloc_queue(struct edgetpu_dev *etdev, struct edgetpu_mailbox *mailbox,
 				u32 queue_size, u32 unit, enum gcip_mailbox_queue_type type,
-				edgetpu_queue_mem *mem);
-void edgetpu_mailbox_free_queue(struct edgetpu_dev *etdev,
-				struct edgetpu_mailbox *mailbox,
-				edgetpu_queue_mem *mem);
-
-/*
- * Re-programs the CSRs of queue addresses, context, priority etc. to @group's
- * VII mailbox.
- *
- * Caller holds @group->lock and ensures @group has mailbox attached.
- */
-void edgetpu_mailbox_reinit_vii(struct edgetpu_device_group *group);
+				struct gcip_memory *mem);
+void edgetpu_mailbox_free_queue(struct edgetpu_dev *etdev, struct edgetpu_mailbox *mailbox,
+				struct gcip_memory *mem);
 
 /*
  * Re-configure VII and external mailbox queues which have an active client, re-using

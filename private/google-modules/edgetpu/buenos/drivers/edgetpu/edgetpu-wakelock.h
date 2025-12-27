@@ -22,12 +22,8 @@ struct edgetpu_dev;
  * Defined with X macros to support fetching event names from values.
  */
 #define EDGETPU_WAKELOCK_EVENTS                                                \
-	X(EDGETPU_WAKELOCK_EVENT_FULL_CSR, 0),                                 \
-	X(EDGETPU_WAKELOCK_EVENT_MBOX_CSR, 1),                                 \
-	X(EDGETPU_WAKELOCK_EVENT_CMD_QUEUE, 2),                                \
-	X(EDGETPU_WAKELOCK_EVENT_RESP_QUEUE, 3),                               \
-	X(EDGETPU_WAKELOCK_EVENT_EXT_MAILBOX, 4),                              \
-	X(EDGETPU_WAKELOCK_EVENT_END, 5)
+	X(EDGETPU_WAKELOCK_EVENT_EXT_MAILBOX, 0),                              \
+	X(EDGETPU_WAKELOCK_EVENT_END, 1)
 
 enum edgetpu_wakelock_event {
 #define X(name, val) name = val

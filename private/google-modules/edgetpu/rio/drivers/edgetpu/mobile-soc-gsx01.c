@@ -12,6 +12,7 @@
 #include <linux/errno.h>
 #include <linux/interrupt.h>
 #include <linux/iopoll.h>
+#include <linux/limits.h>
 #include <linux/notifier.h>
 #include <linux/platform_device.h>
 #include <linux/thermal.h>
@@ -201,6 +202,12 @@ static void __iomem *reg_base_of_prop(struct device *dev, const char *prop, size
 		return ERR_PTR(-ENOMEM);
 
 	return addr;
+}
+
+int edgetpu_soc_check_supplier_devices(struct device *dev)
+{
+	/* gsx01 platforms have no supplier devices */
+	return 0;
 }
 
 int edgetpu_soc_early_init(struct edgetpu_dev *etdev)
@@ -417,26 +424,28 @@ static void gsx01_set_pm_qos(struct edgetpu_dev *etdev, u32 pm_qos_val)
 	exynos_pm_qos_update_request(&etdev->soc_data->mif_min, mif_val);
 }
 
-void edgetpu_soc_handle_reverse_kci(struct edgetpu_dev *etdev,
-				    struct gcip_kci_response_element *resp)
+int edgetpu_soc_handle_reverse_kci(struct edgetpu_dev *etdev,
+				   struct gcip_kci_response_element *resp)
 {
 	int ret;
 
 	switch (resp->code) {
-	case RKCI_CODE_PM_QOS_BTS:
+	case GCIP_RKCI_PM_QOS_BTS_REQUEST:
 		/* FW indicates to ignore the request by setting them to undefined values. */
-		if (resp->retval != (typeof(resp->retval))~0ull)
-			gsx01_set_pm_qos(etdev, resp->retval);
-		if (resp->status != (typeof(resp->status))~0ull)
-			gsx01_set_bts(etdev, resp->status);
+		if (resp->rkci_value2 != U32_MAX)
+			gsx01_set_pm_qos(etdev, resp->rkci_value2);
+		if (resp->rkci_value1 != U16_MAX)
+			gsx01_set_bts(etdev, resp->rkci_value1);
 		ret = edgetpu_kci_resp_rkci_ack(etdev, resp);
 		if (ret)
 			etdev_err(etdev, "failed to send rkci resp for %llu (%d)", resp->seq, ret);
 		break;
 	default:
-		etdev_warn(etdev, "Unrecognized KCI request: %u\n", resp->code);
+		ret = -EOPNOTSUPP;
 		break;
 	}
+
+	return ret;
 }
 
 static unsigned long edgetpu_pm_rate;
@@ -863,7 +872,6 @@ void edgetpu_soc_set_tpu_cpu_security(struct edgetpu_dev *etdev)
 int edgetpu_soc_setup_irqs(struct edgetpu_dev *etdev)
 {
 	struct platform_device *pdev = to_platform_device(etdev->dev);
-	struct edgetpu_mobile_platform_dev *etmdev = to_mobile_dev(etdev);
 	int n = platform_irq_count(pdev);
 	int ret;
 	int i;
@@ -873,22 +881,22 @@ int edgetpu_soc_setup_irqs(struct edgetpu_dev *etdev)
 		return n;
 	}
 
-	etmdev->mailbox_irq = devm_kmalloc_array(etdev->dev, n, sizeof(*etmdev->mailbox_irq),
-						 GFP_KERNEL);
-	if (!etmdev->mailbox_irq)
+	etdev->mailbox_irq = devm_kmalloc_array(etdev->dev, n, sizeof(*etdev->mailbox_irq),
+						GFP_KERNEL);
+	if (!etdev->mailbox_irq)
 		return -ENOMEM;
 
 	for (i = 0; i < n; i++) {
-		etmdev->mailbox_irq[i] = platform_get_irq(pdev, i);
-		ret = devm_request_irq(etdev->dev, etmdev->mailbox_irq[i],
+		etdev->mailbox_irq[i] = platform_get_irq(pdev, i);
+		ret = devm_request_irq(etdev->dev, etdev->mailbox_irq[i],
 				       edgetpu_mailbox_irq_handler, IRQF_ONESHOT, etdev->dev_name,
 				       etdev);
 		if (ret) {
 			dev_err(etdev->dev, "%s: failed to request mailbox irq %d: %d\n",
-				etdev->dev_name, etmdev->mailbox_irq[i], ret);
+				etdev->dev_name, etdev->mailbox_irq[i], ret);
 			return ret;
 		}
 	}
-	etmdev->n_mailbox_irq = n;
+	etdev->n_mailbox_irq = n;
 	return 0;
 }

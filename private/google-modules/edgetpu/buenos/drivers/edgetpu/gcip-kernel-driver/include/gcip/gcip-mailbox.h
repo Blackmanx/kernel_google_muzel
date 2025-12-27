@@ -16,6 +16,14 @@
 #include <linux/wait.h>
 #include <linux/workqueue.h>
 
+#define GCIP_MAILBOX_MODE_TX_CMD BIT(0)
+#define GCIP_MAILBOX_MODE_RX_RSP BIT(1)
+#define GCIP_MAILBOX_MODE_RX_CMD BIT(2)
+#define GCIP_MAILBOX_MODE_TX_RSP BIT(3)
+#define GCIP_MAILBOX_MODE_FORWARD (GCIP_MAILBOX_MODE_TX_CMD | GCIP_MAILBOX_MODE_RX_RSP)
+#define GCIP_MAILBOX_MODE_BACKWARD (GCIP_MAILBOX_MODE_RX_CMD | GCIP_MAILBOX_MODE_TX_RSP)
+#define GCIP_MAILBOX_MODE_ALL (GCIP_MAILBOX_MODE_FORWARD | GCIP_MAILBOX_MODE_BACKWARD)
+
 #define CIRC_QUEUE_WRAPPED(idx, wrap_bit) ((idx) & wrap_bit)
 #define CIRC_QUEUE_INDEX_MASK(wrap_bit) (wrap_bit - 1)
 #define CIRC_QUEUE_VALID_MASK(wrap_bit) (CIRC_QUEUE_INDEX_MASK(wrap_bit) | wrap_bit)
@@ -142,114 +150,111 @@ struct gcip_mailbox_resp_awaiter {
  * For in_interrupt() context, see the implementation of gcip_mailbox_handle_irq for details.
  */
 struct gcip_mailbox_ops {
-	/* Mandatory. */
+	/* Mandatory if GCIP_MAILBOX_MODE_TX_CMD or GCIP_MAILBOX_MODE_TX_RSP is on. */
 	/*
-	 * Gets the tail of mailbox command queue.
+	 * Gets the tail of mailbox transmit queue.
 	 *
-	 * Context: cmd_queue_lock.
+	 * Context: tx_queue_lock.
 	 */
-	u32 (*get_cmd_queue_tail)(struct gcip_mailbox *mailbox);
+	u32 (*get_tx_queue_tail)(struct gcip_mailbox *mailbox);
 	/*
-	 * Increases the tail of mailbox command queue by @inc.
+	 * Increases the tail of mailbox transmit queue by @inc.
 	 *
-	 * Context: cmd_queue_lock.
+	 * Context: tx_queue_lock.
 	 */
-	void (*inc_cmd_queue_tail)(struct gcip_mailbox *mailbox, u32 inc);
+	void (*inc_tx_queue_tail)(struct gcip_mailbox *mailbox, u32 inc);
 	/*
-	 * Acquires the lock of cmd_queue. If @try is true, "_trylock" functions can be used, but
+	 * Acquires the lock of tx_queue. If @try is true, "_trylock" functions can be used, but
 	 * also it can be ignored. If the lock will make the context atomic, @atomic must be set
 	 * to true. Returns 1 if succeed, 0 if failed.
 	 *
 	 * This callback will be called in the following situations.
-	 * - Enqueue a command to the cmd_queue.
+	 * - Enqueue a command to the tx_queue.
 	 *
 	 * The lock can be mutex lock or spin lock and it will be released by calling
-	 * `release_cmd_queue_lock` callback.
+	 * `release_tx_queue_lock` callback.
 	 *
 	 * Context: normal.
 	 */
-	int (*acquire_cmd_queue_lock)(struct gcip_mailbox *mailbox, bool try, bool *atomic);
+	int (*acquire_tx_queue_lock)(struct gcip_mailbox *mailbox, bool try, bool *atomic);
 	/*
-	 * Releases the lock of cmd_queue which is acquired by calling `acquire_cmd_queue_lock`.
+	 * Releases the lock of tx_queue which is acquired by calling `acquire_tx_queue_lock`.
 	 *
-	 * Context: cmd_queue_lock.
+	 * Context: tx_queue_lock.
 	 */
-	void (*release_cmd_queue_lock)(struct gcip_mailbox *mailbox);
+	void (*release_tx_queue_lock)(struct gcip_mailbox *mailbox);
 	/*
 	 * Gets the sequence number of @cmd queue element.
 	 *
-	 * Context: cmd_queue_lock.
+	 * Context: tx_queue_lock.
 	 */
 	u64 (*get_cmd_elem_seq)(struct gcip_mailbox *mailbox, void *cmd);
 	/*
 	 * Sets the sequence number of @cmd queue element.
 	 *
-	 * Context: cmd_queue_lock.
+	 * Context: tx_queue_lock.
 	 */
 	void (*set_cmd_elem_seq)(struct gcip_mailbox *mailbox, void *cmd, u64 seq);
 	/*
-	 * Gets the code of @cmd queue element.
-	 *
-	 * Context: normal.
-	 */
-	u32 (*get_cmd_elem_code)(struct gcip_mailbox *mailbox, void *cmd);
-	/*
-	 * Waits for the cmd queue of @mailbox has a available space for putting the command. If
+	 * Waits for the tx queue of @mailbox has a available space for putting the command. If
 	 * the queue has a space, returns 0. Otherwise, returns error as non-zero value. It depends
 	 * on the implementation details, but it is okay to return right away with error when the
-	 * queue is full. If this callback returns an error, `gcip_mailbox_send_cmd` function or
-	 * `gcip_mailbox_put_cmd` function will return that error too.
+	 * queue is full. If this callback returns an error, `gcip_mailbox_send_tx` function or
+	 * `gcip_mailbox_put_tx` function will return that error too.
 	 *
-	 * Context: cmd_queue_lock.
+	 * Context: tx_queue_lock.
 	 */
-	int (*wait_for_cmd_queue_not_full)(struct gcip_mailbox *mailbox);
+	int (*wait_for_tx_queue_not_full)(struct gcip_mailbox *mailbox);
 
+	/* Mandatory if GCIP_MAILBOX_MODE_RX_RSP or GCIP_MAILBOX_MODE_RX_CMD is on. */
 	/*
-	 * Gets the size of mailbox response queue.
+	 * Gets the size of mailbox receive queue.
 	 *
 	 * Context: normal.
 	 */
-	u32 (*get_resp_queue_size)(struct gcip_mailbox *mailbox);
+	u32 (*get_rx_queue_size)(struct gcip_mailbox *mailbox);
 	/*
-	 * Gets the head of mailbox response queue.
+	 * Gets the head of mailbox receive queue.
 	 *
-	 * Context: resp_queue_lock.
+	 * Context: rx_queue_lock.
 	 */
-	u32 (*get_resp_queue_head)(struct gcip_mailbox *mailbox);
+	u32 (*get_rx_queue_head)(struct gcip_mailbox *mailbox);
 	/*
-	 * Gets the tail of mailbox response queue.
+	 * Gets the tail of mailbox receive queue.
 	 *
-	 * Context: resp_queue_lock.
+	 * Context: rx_queue_lock.
 	 */
-	u32 (*get_resp_queue_tail)(struct gcip_mailbox *mailbox);
+	u32 (*get_rx_queue_tail)(struct gcip_mailbox *mailbox);
 	/*
-	 * Increases the head of mailbox response queue by @inc.
+	 * Increases the head of mailbox receive queue by @inc.
 	 *
-	 * Context: resp_queue_lock.
+	 * Context: rx_queue_lock.
 	 */
-	void (*inc_resp_queue_head)(struct gcip_mailbox *mailbox, u32 inc);
+	void (*inc_rx_queue_head)(struct gcip_mailbox *mailbox, u32 inc);
 	/*
-	 * Acquires the lock of resp_queue. If @try is true, "_trylock" functions can be used, but
+	 * Acquires the lock of rx_queue. If @try is true, "_trylock" functions can be used, but
 	 * also it can be ignored. If the lock will make the context atomic, @atomic must be set
 	 * to true. Returns 1 if succeed, 0 if failed.
 	 *
 	 * This callback will be called in the following situations:
-	 * - Fetch response(s) from the resp_queue.
+	 * - Fetch response(s) from the rx_queue.
 	 *
 	 * The lock can be a mutex lock or a spin lock. However, if @try is considered and the
 	 * "_trylock" is used, it must be a spin lock only.
 	 *
-	 * The lock will be released by calling `release_resp_queue_lock` callback.
+	 * The lock will be released by calling `release_rx_queue_lock` callback.
 	 *
 	 * Context: normal and in_interrupt().
 	 */
-	int (*acquire_resp_queue_lock)(struct gcip_mailbox *mailbox, bool try, bool *atomic);
+	int (*acquire_rx_queue_lock)(struct gcip_mailbox *mailbox, bool try, bool *atomic);
 	/*
-	 * Releases the lock of resp_queue which is acquired by calling `acquire_resp_queue_lock`.
+	 * Releases the lock of rx_queue which is acquired by calling `acquire_rx_queue_lock`.
 	 *
-	 * Context: resp_queue_lock.
+	 * Context: rx_queue_lock.
 	 */
-	void (*release_resp_queue_lock)(struct gcip_mailbox *mailbox);
+	void (*release_rx_queue_lock)(struct gcip_mailbox *mailbox);
+
+	/* Mandatory if GCIP_MAILBOX_MODE_RX_RSP is on. */
 	/*
 	 * Gets the sequence number of @resp queue element.
 	 *
@@ -259,9 +264,31 @@ struct gcip_mailbox_ops {
 	/*
 	 * Sets the sequence number of @resp queue element.
 	 *
-	 * Context: cmd_queue_lock.
+	 * Context: tx_queue_lock.
 	 */
 	void (*set_resp_elem_seq)(struct gcip_mailbox *mailbox, void *resp, u64 seq);
+
+	/* Mandatory if GCIP_MAILBOX_MODE_RX_RSP and GCIP_MAILBOX_MODE_RX_CMD are both on. */
+	/**
+	 * is_rx_elem_reversed() - Distinguishes whether the received element is rsp or rev-cmd.
+	 * @mailbox: The pointer to the gcip_mailbox object to interact with mailbox interfaces.
+	 * @rx_elem: The received element to be distinguished.
+	 *
+	 * Context: normal and in_interrupt().
+	 * Return: true if the @elem is a reversed command.
+	 */
+	bool (*is_rx_elem_reversed)(struct gcip_mailbox *mailbox, const void *rx_elem);
+
+	/* Mandatory if GCIP_MAILBOX_MODE_RX_CMD is on. */
+	/**
+	 * handle_reversed_command() - The handler of the received reversed command.
+	 * @mailbox: The pointer to the gcip_mailbox object to interact with mailbox interfaces.
+	 * @reversed_cmd: The reversed command to be handled.
+	 *
+	 * Context: normal and in_interrupt().
+	 * Return: 0 on success, or a negative errno otherwise.
+	 */
+	int (*handle_reversed_command)(struct gcip_mailbox *mailbox, const void *reversed_cmd);
 
 	/* Optional. */
 	/*
@@ -296,14 +323,6 @@ struct gcip_mailbox_ops {
 	 * Context: normal and in_interrupt().
 	 */
 	void (*after_fetch_resps)(struct gcip_mailbox *mailbox, u32 num_resps);
-	/*
-	 * Before handling each fetched responses, this callback will be called. If this callback
-	 * is not defined or returns true, the mailbox will handle the @resp normally. If the @resp
-	 * should not be handled, returns false. This is called without holding any locks.
-	 *
-	 * Context: normal and in_interrupt().
-	 */
-	bool (*before_handle_resp)(struct gcip_mailbox *mailbox, const void *resp);
 	/*
 	 * Handles the asynchronous response which arrives well. How to handle it depends on the
 	 * chip implementation. However, @awaiter should be released by calling the
@@ -380,20 +399,22 @@ struct gcip_mailbox_ops {
 struct gcip_mailbox {
 	/* Device used for logging and memory allocation. */
 	struct device *dev;
+	/* The operating mode of the mailbox. */
+	u8 mode;
 	/* Warp bit for both cmd and resp queue. */
 	u64 queue_wrap_bit;
 	/* Cmd sequence number. */
 	u64 cur_seq;
 
-	/* Cmd queue pointer. */
-	void *cmd_queue;
-	/* Size of element of cmd queue. */
-	u32 cmd_elem_size;
+	/* Tx queue pointer. */
+	void *tx_queue;
+	/* Size of element of tx queue. */
+	u32 tx_elem_size;
 
-	/* Resp queue pointer. */
-	void *resp_queue;
-	/* Size of element of resp queue. */
-	u32 resp_elem_size;
+	/* Rx queue pointer. */
+	void *rx_queue;
+	/* Size of element of rx queue. */
+	u32 rx_elem_size;
 
 	/* The spinlock to protect the @wait_list. */
 	spinlock_t wait_list_lock;
@@ -413,13 +434,14 @@ struct gcip_mailbox {
 /* Arguments for gcip_mailbox_init. See struct gcip_mailbox for details. */
 struct gcip_mailbox_args {
 	struct device *dev;
+	u8 mode;
 	u32 queue_wrap_bit;
 
-	void *cmd_queue;
-	u32 cmd_elem_size;
+	void *tx_queue;
+	u32 tx_elem_size;
 
-	void *resp_queue;
-	u32 resp_elem_size;
+	void *rx_queue;
+	u32 rx_elem_size;
 
 	u32 timeout;
 	const struct gcip_mailbox_ops *ops;
@@ -452,8 +474,9 @@ void gcip_mailbox_consume_responses_work(struct gcip_mailbox *mailbox);
  * responses for the client anymore first.
  *
  * Note that it is recommended to call this function in the normal context only. Otherwise, please
- * keep in mind that if the `handle_awaiter_arrived`, `before_handle_resp` or `after_fetch_resps`
- * operators can sleep, this function shouldn't be called in the IRQ context.
+ * keep in mind that if the `handle_awaiter_arrived`, `handle_reversed_command`,
+ * `is_rx_elem_reversed` or `after_fetch_resps` operators can sleep, this function shouldn't be
+ * called in the IRQ context.
  */
 void gcip_mailbox_consume_responses(struct gcip_mailbox *mailbox);
 
@@ -580,24 +603,24 @@ static inline u64 gcip_mailbox_get_cur_seq(struct gcip_mailbox *mailbox)
 	return mailbox->cur_seq;
 }
 
-static inline void *gcip_mailbox_get_cmd_queue(struct gcip_mailbox *mailbox)
+static inline void *gcip_mailbox_get_tx_queue(struct gcip_mailbox *mailbox)
 {
-	return mailbox->cmd_queue;
+	return mailbox->tx_queue;
 }
 
-static inline u32 gcip_mailbox_get_cmd_elem_size(struct gcip_mailbox *mailbox)
+static inline u32 gcip_mailbox_get_tx_elem_size(struct gcip_mailbox *mailbox)
 {
-	return mailbox->cmd_elem_size;
+	return mailbox->tx_elem_size;
 }
 
-static inline void *gcip_mailbox_get_resp_queue(struct gcip_mailbox *mailbox)
+static inline void *gcip_mailbox_get_rx_queue(struct gcip_mailbox *mailbox)
 {
-	return mailbox->resp_queue;
+	return mailbox->rx_queue;
 }
 
-static inline u32 gcip_mailbox_get_resp_elem_size(struct gcip_mailbox *mailbox)
+static inline u32 gcip_mailbox_get_rx_elem_size(struct gcip_mailbox *mailbox)
 {
-	return mailbox->resp_elem_size;
+	return mailbox->rx_elem_size;
 }
 
 static inline u64 gcip_mailbox_get_queue_wrap_bit(struct gcip_mailbox *mailbox)

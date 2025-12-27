@@ -103,10 +103,18 @@ void edgetpu_ext_client_remove(struct edgetpu_client *client)
 static int edgetpu_get_ext_mailbox_index(u32 mbox_type, u32 *start, u32 *end)
 {
 	switch (mbox_type) {
+#if defined(EDGETPU_EXT_DSP_MAILBOX_START)
 	case EDGETPU_EXTERNAL_MAILBOX_TYPE_DSP:
 		*start = EDGETPU_EXT_DSP_MAILBOX_START;
 		*end = EDGETPU_EXT_DSP_MAILBOX_END;
 		return 0;
+#endif
+#if defined(EDGETPU_EXT_AOC_MAILBOX_START)
+	case EDGETPU_EXTERNAL_MAILBOX_TYPE_AOC:
+		*start = EDGETPU_EXT_AOC_MAILBOX_START;
+		*end = EDGETPU_EXT_AOC_MAILBOX_END;
+		return 0;
+#endif
 	default:
 		return -ENOENT;
 	}

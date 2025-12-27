@@ -70,8 +70,22 @@ void edgetpu_soc_pm_dump_block_state(struct edgetpu_dev *etdev);
  * Note: This will get called from the system's work queue.
  * Code should not block for extended periods of time
  */
-void edgetpu_soc_handle_reverse_kci(struct edgetpu_dev *etdev,
-				    struct gcip_kci_response_element *resp);
+
+/**
+ * edgetpu_soc_handle_reverse_kci() - Handle Reverse KCI commands for SoC family.
+ * @etdev: The edgetpu device object.
+ * @resp: The GCIP KCI response obeject which contains the RKCI information.
+ *
+ * This will get called from the system's work queue.
+ * Code should not block for extended periods of time.
+ *
+ * Return:
+ * * %0           - RKCI handled successfully.
+ * * %-EOPNOTSUPP - The RKCI code is not handled by this handler.
+ * * %others      - Negative errno for other failures.
+ */
+int edgetpu_soc_handle_reverse_kci(struct edgetpu_dev *etdev,
+				   struct gcip_kci_response_element *resp);
 
 /* Init thermal subsystem SoC specifics for TPU */
 void edgetpu_soc_thermal_init(struct edgetpu_dev *etdev);

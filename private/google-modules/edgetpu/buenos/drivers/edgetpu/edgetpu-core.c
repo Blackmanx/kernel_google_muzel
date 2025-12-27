@@ -8,6 +8,7 @@
 #include <asm/current.h>
 #include <asm/page.h>
 #include <linux/atomic.h>
+#include <linux/bits.h>
 #include <linux/compiler.h>
 #include <linux/cred.h>
 #include <linux/delay.h>
@@ -41,22 +42,6 @@
 #include "edgetpu-wakelock.h"
 #include "edgetpu.h"
 
-/*
- * Module parameter to override in-kernel VII usage found in device-tree.
- * By default in-kernel VII will be enabled if the `use-kernel-vii` property is defined in the
- * device-tree, and disabled otherwise. This behavior can be overridden during insmod by passing
- * "force_ikv=x" for the following values:
- * - 0: Disable in-kernel VII regardless of device-tree
- * - 1: Enable in-kernel VII regardless of device-tree
- * - other: ignored
- */
-static int force_ikv = -1;
-module_param(force_ikv, int, 0440);
-
-#ifndef EDGETPU_NUM_USE_VII_MAILBOXES
-#define EDGETPU_NUM_USE_VII_MAILBOXES EDGETPU_NUM_VII_MAILBOXES
-#endif
-
 /* Bits higher than VMA_TYPE_WIDTH are used to carry type specific data, e.g., core id. */
 #define VMA_TYPE_WIDTH 16
 #define VMA_TYPE(x) ((x) & (BIT_MASK(VMA_TYPE_WIDTH) - 1))
@@ -66,16 +51,10 @@ module_param(force_ikv, int, 0440);
 enum edgetpu_vma_type {
 	VMA_INVALID,
 
-	VMA_FULL_CSR,
-	VMA_VII_CSR,
-	VMA_VII_CMDQ,
-	VMA_VII_RESPQ,
-	VMA_EXT_CSR,
-	VMA_EXT_CMDQ,
-	VMA_EXT_RESPQ,
 	/* For VMA_LOG and VMA_TRACE, core id is stored in bits higher than VMA_TYPE_WIDTH. */
 	VMA_LOG,
 	VMA_TRACE,
+	VMA_HWTRACE,
 };
 
 /* type that combines enum edgetpu_vma_type and data in higher bits. */
@@ -94,44 +73,11 @@ struct edgetpu_vma_private {
 
 static atomic_t dev_count = ATOMIC_INIT(-1);
 
-static int edgetpu_mmap_full_csr(struct edgetpu_client *client,
-				 struct vm_area_struct *vma)
-{
-	int ret;
-	ulong phys_base, vma_size, map_size;
-
-	if (!uid_eq(current_euid(), GLOBAL_ROOT_UID))
-		return -EPERM;
-	vma_size = vma->vm_end - vma->vm_start;
-	map_size = min_t(ulong, vma_size, client->etdev->regs.size);
-	phys_base = client->etdev->regs.phys;
-	ret = io_remap_pfn_range(vma, vma->vm_start, phys_base >> PAGE_SHIFT,
-				 map_size, vma->vm_page_prot);
-	if (ret)
-		etdev_dbg(client->etdev,
-			  "Error remapping PFN range: %d\n", ret);
-	return ret;
-}
-
 static edgetpu_vma_flags_t mmap_vma_flag(unsigned long pgoff)
 {
 	const unsigned long off = pgoff << PAGE_SHIFT;
 
 	switch (off) {
-	case 0:
-		return VMA_FULL_CSR;
-	case EDGETPU_MMAP_CSR_OFFSET:
-		return VMA_VII_CSR;
-	case EDGETPU_MMAP_CMD_QUEUE_OFFSET:
-		return VMA_VII_CMDQ;
-	case EDGETPU_MMAP_RESP_QUEUE_OFFSET:
-		return VMA_VII_RESPQ;
-	case EDGETPU_MMAP_EXT_CSR_OFFSET:
-		return VMA_EXT_CSR;
-	case EDGETPU_MMAP_EXT_CMD_QUEUE_OFFSET:
-		return VMA_EXT_CMDQ;
-	case EDGETPU_MMAP_EXT_RESP_QUEUE_OFFSET:
-		return VMA_EXT_RESPQ;
 	case EDGETPU_MMAP_LOG_BUFFER_OFFSET:
 		return VMA_DATA_SET(VMA_LOG, 0);
 	case EDGETPU_MMAP_TRACE_BUFFER_OFFSET:
@@ -154,215 +100,45 @@ static edgetpu_vma_flags_t mmap_vma_flag(unsigned long pgoff)
 	case EDGETPU_MMAP_TRACE3_BUFFER_OFFSET:
 		return VMA_DATA_SET(VMA_TRACE, 3);
 #endif /* EDGETPU_MAX_TELEMETRY_BUFFERS > 3 */
+	case EDGETPU_MMAP_HWTRACE_BUFFER_OFFSET:
+		return VMA_DATA_SET(VMA_HWTRACE, 0);
 	default:
 		return VMA_INVALID;
 	}
 }
 
-/*
- * Returns the wakelock event by VMA type. Returns EDGETPU_WAKELOCK_EVENT_END
- * if the type does not correspond to a wakelock event.
- */
-static enum edgetpu_wakelock_event
-vma_type_to_wakelock_event(enum edgetpu_vma_type type)
-{
-	switch (type) {
-	case VMA_FULL_CSR:
-		return EDGETPU_WAKELOCK_EVENT_FULL_CSR;
-	case VMA_VII_CSR:
-		return EDGETPU_WAKELOCK_EVENT_MBOX_CSR;
-	case VMA_VII_CMDQ:
-		return EDGETPU_WAKELOCK_EVENT_CMD_QUEUE;
-	case VMA_VII_RESPQ:
-		return EDGETPU_WAKELOCK_EVENT_RESP_QUEUE;
-	case VMA_EXT_CSR:
-		return EDGETPU_WAKELOCK_EVENT_MBOX_CSR;
-	case VMA_EXT_CMDQ:
-		return EDGETPU_WAKELOCK_EVENT_CMD_QUEUE;
-	case VMA_EXT_RESPQ:
-		return EDGETPU_WAKELOCK_EVENT_RESP_QUEUE;
-	default:
-		return EDGETPU_WAKELOCK_EVENT_END;
-	}
-}
-
-static struct edgetpu_vma_private *
-edgetpu_vma_private_alloc(struct edgetpu_client *client,
-			  edgetpu_vma_flags_t flag)
-{
-	struct edgetpu_vma_private *pvt = kmalloc(sizeof(*pvt), GFP_KERNEL);
-
-	if (!pvt)
-		return NULL;
-	pvt->client = edgetpu_client_get(client);
-	pvt->flag = flag;
-	refcount_set(&pvt->count, 1);
-
-	return pvt;
-}
-
-static void edgetpu_vma_private_get(struct edgetpu_vma_private *pvt)
-{
-	WARN_ON_ONCE(!refcount_inc_not_zero(&pvt->count));
-}
-
-static void edgetpu_vma_private_put(struct edgetpu_vma_private *pvt)
-{
-	if (!pvt)
-		return;
-	if (refcount_dec_and_test(&pvt->count)) {
-		edgetpu_client_put(pvt->client);
-		kfree(pvt);
-	}
-}
-
-static void edgetpu_vma_open(struct vm_area_struct *vma)
-{
-	struct edgetpu_vma_private *pvt = vma->vm_private_data;
-	struct edgetpu_client *client = pvt->client;
-	enum edgetpu_vma_type type = VMA_TYPE(pvt->flag);
-	enum edgetpu_wakelock_event evt = vma_type_to_wakelock_event(type);
-
-	edgetpu_vma_private_get(pvt);
-
-	if (evt != EDGETPU_WAKELOCK_EVENT_END)
-		edgetpu_wakelock_inc_event(&client->wakelock, evt);
-}
-
-/* Records previously mmapped addresses were unmapped. */
-static void edgetpu_vma_close(struct vm_area_struct *vma)
-{
-	struct edgetpu_vma_private *pvt = vma->vm_private_data;
-	struct edgetpu_client *client = pvt->client;
-	enum edgetpu_vma_type type = VMA_TYPE(pvt->flag);
-	enum edgetpu_wakelock_event evt = vma_type_to_wakelock_event(type);
-
-	if (evt != EDGETPU_WAKELOCK_EVENT_END)
-		edgetpu_wakelock_dec_event(&client->wakelock, evt);
-
-	edgetpu_vma_private_put(pvt);
-}
-
-static const struct vm_operations_struct edgetpu_vma_ops = {
-	.open = edgetpu_vma_open,
-	.close = edgetpu_vma_close,
-};
-
-/* Map exported device CSRs or queue into user space. */
+/* Map exported LOG/TRACE/HWTRACE buffers into user space. */
 int edgetpu_mmap(struct edgetpu_client *client, struct vm_area_struct *vma)
 {
-	int ret = 0;
+	struct edgetpu_dev *etdev = client->etdev;
 	edgetpu_vma_flags_t flag;
 	enum edgetpu_vma_type type;
-	enum edgetpu_wakelock_event evt;
-	struct edgetpu_vma_private *pvt;
+	uint instance_id;
 
-	if (vma->vm_start & ~PAGE_MASK) {
-		etdev_dbg(client->etdev,
-			  "Base address not page-aligned: %#lx\n",
-			  vma->vm_start);
-		return -EINVAL;
-	}
-
-	etdev_dbg(client->etdev, "%s: mmap pgoff = %#lX\n", __func__,
-		  vma->vm_pgoff);
+	etdev_dbg(etdev, "%s: mmap pgoff = %#lX\n", __func__, vma->vm_pgoff);
 
 	flag = mmap_vma_flag(vma->vm_pgoff);
-
 	type = VMA_TYPE(flag);
-	if (type == VMA_INVALID)
-		return -EINVAL;
-
-	if (type == VMA_LOG)
-		return edgetpu_mmap_telemetry_buffer(client->etdev, GCIP_TELEMETRY_TYPE_LOG, vma,
-						     VMA_DATA_GET(flag));
-
-	if (type == VMA_TRACE)
-		return edgetpu_mmap_telemetry_buffer(client->etdev, GCIP_TELEMETRY_TYPE_TRACE, vma,
-						     VMA_DATA_GET(flag));
-
-	if (client->etdev->mailbox_manager->use_ikv) {
-		etdev_err(client->etdev, "Invalid mmap pgoff (%#lX) for IKV\n", vma->vm_pgoff);
-		return -EINVAL;
-	}
-	pvt = edgetpu_vma_private_alloc(client, flag);
-	if (!pvt)
-		return -ENOMEM;
-
-	/* Mark the VMA's pages as uncacheable. */
-	vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
-	/* Disable fancy things to ensure our event counters work. */
-	vm_flags_set(vma, VM_DONTCOPY | VM_DONTEXPAND | VM_DONTDUMP);
-
-	/* map all CSRs for debug purpose */
-	if (type == VMA_FULL_CSR) {
-		evt = EDGETPU_WAKELOCK_EVENT_FULL_CSR;
-		if (edgetpu_wakelock_inc_event(&client->wakelock, evt)) {
-			ret = edgetpu_mmap_full_csr(client, vma);
-			if (ret)
-				goto out_dec_evt;
-		} else {
-			ret = -EAGAIN;
-		}
-		goto out_set_op;
-	}
-
-	evt = vma_type_to_wakelock_event(type);
-	/*
-	 * VMA_TYPE(@flag) should always correspond to a valid event since we handled
-	 * telemetry mmaps above, still check evt != END in case new types are
-	 * added in the future.
-	 */
-	if (unlikely(evt == EDGETPU_WAKELOCK_EVENT_END)) {
-		ret = -EINVAL;
-		goto err_release_pvt;
-	}
-	if (!edgetpu_wakelock_inc_event(&client->wakelock, evt)) {
-		ret = -EAGAIN;
-		goto err_release_pvt;
-	}
-
-	mutex_lock(&client->group_lock);
-	if (!client->group) {
-		ret = -EINVAL;
-		goto out_unlock;
-	}
+	instance_id = VMA_DATA_GET(flag);
 	switch (type) {
-	case VMA_VII_CSR:
-		ret = edgetpu_mmap_csr(client->group, vma, false);
-		break;
-	case VMA_VII_CMDQ:
-		ret = edgetpu_mmap_queue(client->group, GCIP_MAILBOX_CMD_QUEUE, vma, false);
-		break;
-	case VMA_VII_RESPQ:
-		ret = edgetpu_mmap_queue(client->group, GCIP_MAILBOX_RESP_QUEUE, vma, false);
-		break;
-	case VMA_EXT_CSR:
-		ret = edgetpu_mmap_csr(client->group, vma, true);
-		break;
-	case VMA_EXT_CMDQ:
-		ret = edgetpu_mmap_queue(client->group, GCIP_MAILBOX_CMD_QUEUE, vma, true);
-		break;
-	case VMA_EXT_RESPQ:
-		ret = edgetpu_mmap_queue(client->group, GCIP_MAILBOX_RESP_QUEUE, vma, true);
-		break;
-	default: /* to appease compiler */
-		break;
+	case VMA_LOG:
+		if (instance_id >= etdev->num_telemetry_buffers)
+			return -EINVAL;
+		return edgetpu_mmap_telemetry_buffer(etdev, &etdev->telemetry_log[instance_id],
+						     vma);
+	case VMA_TRACE:
+		if (instance_id >= etdev->num_telemetry_buffers)
+			return -EINVAL;
+		return edgetpu_mmap_telemetry_buffer(etdev, &etdev->telemetry_trace[instance_id],
+						     vma);
+	case VMA_HWTRACE:
+		if (!edgetpu_telemetry_mapped(&etdev->telemetry_hwtrace))
+			return -ENOENT;
+		return edgetpu_mmap_telemetry_buffer(etdev, &etdev->telemetry_hwtrace, vma);
+	case VMA_INVALID:
+	default:
+		return -EINVAL;
 	}
-out_unlock:
-	mutex_unlock(&client->group_lock);
-out_dec_evt:
-	if (ret)
-		edgetpu_wakelock_dec_event(&client->wakelock, evt);
-out_set_op:
-	if (!ret) {
-		vma->vm_private_data = pvt;
-		vma->vm_ops = &edgetpu_vma_ops;
-		return 0;
-	}
-err_release_pvt:
-	edgetpu_vma_private_put(pvt);
-	return ret;
 }
 
 int edgetpu_get_state_errno_locked(struct edgetpu_dev *etdev)
@@ -405,13 +181,8 @@ int edgetpu_device_add(struct edgetpu_dev *etdev,
 		       uint num_ifaces)
 {
 	struct edgetpu_mailbox_manager_desc mailbox_manager_desc = {
-		.num_mailbox = EDGETPU_NUM_MAILBOXES,
-		.num_vii_mailbox = EDGETPU_NUM_VII_MAILBOXES,
-		.num_use_vii_mailbox = EDGETPU_NUM_USE_VII_MAILBOXES,
 		.num_ext_mailbox = EDGETPU_NUM_EXT_MAILBOXES,
-		.get_context_csr_base = edgetpu_mailbox_get_context_csr_base,
-		.get_cmd_queue_csr_base = edgetpu_mailbox_get_cmd_queue_csr_base,
-		.get_resp_queue_csr_base = edgetpu_mailbox_get_resp_queue_csr_base,
+		.ext_mailbox_start = EDGETPU_EXT_MAILBOX_START,
 	};
 	uint ordinal_id;
 	int ret;
@@ -439,7 +210,7 @@ int edgetpu_device_add(struct edgetpu_dev *etdev,
 	mutex_init(&etdev->groups_lock);
 	INIT_LIST_HEAD(&etdev->groups);
 	etdev->n_groups = 0;
-	etdev->group_join_lockout = false;
+	etdev->group_create_lockout = false;
 	mutex_init(&etdev->clients_lock);
 	INIT_LIST_HEAD(&etdev->clients);
 	etdev->vcid_pool = (1u << EDGETPU_NUM_VCIDS) - 1;
@@ -459,29 +230,6 @@ int edgetpu_device_add(struct edgetpu_dev *etdev,
 		dev_err(etdev->dev, "%s: edgetpu_fs_add returns %d\n", etdev->dev_name, ret);
 		goto remove_dev;
 	}
-
-	switch (force_ikv) {
-	case 1:
-		mailbox_manager_desc.use_ikv = true;
-		break;
-	case 0:
-		mailbox_manager_desc.use_ikv = false;
-		break;
-	default:
-		mailbox_manager_desc.use_ikv =
-			of_find_property(etdev->dev->of_node, "use-kernel-vii", NULL) != NULL;
-	}
-	if (mailbox_manager_desc.use_ikv) {
-		/* If using in-kernel VII, don't allocate any mailboxes for user-space VII. */
-		mailbox_manager_desc.num_vii_mailbox--;
-		mailbox_manager_desc.num_use_vii_mailbox = 0;
-	}
-
-	mailbox_manager_desc.use_iif = mailbox_manager_desc.use_ikv && EDGETPU_USE_IIF_MAILBOX;
-	if (!mailbox_manager_desc.use_ikv && EDGETPU_USE_IIF_MAILBOX)
-		etdev_warn(etdev, "Unable to use IIF mailbox when not using IKV");
-	if (mailbox_manager_desc.use_iif)
-		mailbox_manager_desc.num_vii_mailbox--;
 
 	etdev->mailbox_manager =
 		edgetpu_mailbox_create_mgr(etdev, &mailbox_manager_desc);
@@ -530,19 +278,19 @@ int edgetpu_device_add(struct edgetpu_dev *etdev,
 	if (ret)
 		goto remove_usage_stats;
 
-	ret = edgetpu_kci_init(etdev->mailbox_manager, etdev->etkci);
+	ret = edgetpu_kci_init(etdev, etdev->etkci);
 	if (ret) {
 		etdev_err(etdev, "edgetpu_kci_init returns %d\n", ret);
 		goto out_telemetry_exit;
 	}
 
-	ret = edgetpu_ikv_init(etdev->mailbox_manager, etdev->etikv);
+	ret = edgetpu_ikv_init(etdev, etdev->etikv);
 	if (ret) {
 		etdev_err(etdev, "edgetpu_ikv_init returns %d\n", ret);
 		goto err_kci_release;
 	}
 
-	ret = edgetpu_iif_init(etdev->mailbox_manager, etdev->etiif);
+	ret = edgetpu_iif_init(etdev, etdev->etiif);
 	if (ret) {
 		etdev_err(etdev, "edgetpu_iif_init returns %d\n", ret);
 		goto err_ikv_release;
@@ -550,13 +298,15 @@ int edgetpu_device_add(struct edgetpu_dev *etdev,
 
 	edgetpu_debug_init(etdev);
 	etdev->fw_tracing = edgetpu_firmware_tracing_create(etdev);
-	if (IS_ERR(etdev->fw_tracing)) {
-		etdev_warn(etdev, "firmware tracing create fail: %ld", PTR_ERR(etdev->fw_tracing));
+	if (IS_ERR(etdev->fw_tracing))
 		etdev->fw_tracing = NULL;
-	}
 
 	/* No limit on DMA segment size */
 	dma_set_max_seg_size(etdev->dev, UINT_MAX);
+
+	etdev->is_first_open = true;
+	mutex_init(&etdev->first_open_lock);
+
 	return 0;
 
 err_ikv_release:
@@ -571,7 +321,7 @@ remove_usage_stats:
 remove_pm:
 	edgetpu_pm_destroy(etdev);
 remove_mboxes:
-	edgetpu_mailbox_remove_all(etdev->mailbox_manager, false);
+	edgetpu_mailbox_remove_ext_mailboxes(etdev->mailbox_manager, false);
 remove_dev:
 	edgetpu_fs_remove(etdev);
 	edgetpu_soc_exit(etdev);
@@ -589,7 +339,7 @@ void edgetpu_device_remove(struct edgetpu_dev *etdev)
 	edgetpu_ikv_release(etdev, etdev->etikv);
 	edgetpu_kci_release(etdev, etdev->etkci);
 	/* If not known powered up don't try to set mailbox CSRs to disabled state. */
-	edgetpu_mailbox_remove_all(etdev->mailbox_manager, !ret);
+	edgetpu_mailbox_remove_ext_mailboxes(etdev->mailbox_manager, !ret);
 	edgetpu_telemetry_exit(etdev);
 	edgetpu_usage_stats_exit(etdev);
 	edgetpu_mmu_detach(etdev);
@@ -616,12 +366,15 @@ struct edgetpu_client *edgetpu_client_add(struct edgetpu_dev_iface *etiface)
 	edgetpu_wakelock_init(etdev, &client->wakelock);
 	client->pid = current->pid;
 	client->tgid = current->tgid;
+	client->limited_pid = -1;
+	client->limited_tgid = -1;
 	client->etdev = etdev;
 	client->etiface = etiface;
 	mutex_init(&client->group_lock);
 	/* equivalent to edgetpu_client_get() */
 	refcount_set(&client->count, 1);
 	client->perdie_events = 0;
+	mutex_init(&client->limited_interface_lock);
 	mutex_lock(&etdev->clients_lock);
 	l->client = client;
 	list_add_tail(&l->list, &etdev->clients);
@@ -649,6 +402,7 @@ void edgetpu_client_remove(struct edgetpu_client *client)
 	struct edgetpu_list_device_client *lc;
 	uint wakelock_count;
 
+	edgetpu_eventlog_event(client->etdev, EVENTLOG_EVENT_CLIENT_REMOVE, client);
 	mutex_lock(&client->group_lock);
 	/*
 	 * Safe to read wakelock->req_count here since req_count is only modified during
@@ -692,11 +446,14 @@ void edgetpu_client_remove(struct edgetpu_client *client)
 
 	/* Clean up all the per die event fds registered by the client */
 	if (client->perdie_events &
-	    1 << perdie_event_id_to_num(EDGETPU_PERDIE_EVENT_LOGS_AVAILABLE))
-		edgetpu_telemetry_unset_event(etdev, GCIP_TELEMETRY_TYPE_LOG);
+	    BIT(perdie_event_id_to_num(EDGETPU_PERDIE_EVENT_LOGS_AVAILABLE)))
+		edgetpu_telemetry_unset_event(etdev, etdev->telemetry_log);
 	if (client->perdie_events &
-	    1 << perdie_event_id_to_num(EDGETPU_PERDIE_EVENT_TRACES_AVAILABLE))
-		edgetpu_telemetry_unset_event(etdev, GCIP_TELEMETRY_TYPE_TRACE);
+	    BIT(perdie_event_id_to_num(EDGETPU_PERDIE_EVENT_TRACES_AVAILABLE)))
+		edgetpu_telemetry_unset_event(etdev, etdev->telemetry_trace);
+	if (client->perdie_events &
+	    BIT(perdie_event_id_to_num(EDGETPU_PERDIE_EVENT_HWTRACES_AVAILABLE)))
+		edgetpu_telemetry_unset_event(etdev, &etdev->telemetry_hwtrace);
 
 	edgetpu_client_put(client);
 
