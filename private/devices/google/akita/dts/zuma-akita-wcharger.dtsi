@@ -90,6 +90,8 @@
 		fod_epp_iop = [8b 4a 7c 59 93 20 8f 28 95 1a 9f c8 00 00 00 29];
 		fod_gpp = [8b 4a 7c 59 93 27 8f 28 95 32 ab c8 00 00 00 29];
 
+		google,wlc_qispec = <0x1300>;
+
 		p9xxx_gpio: p9xxx_gpio {
 			gpio-controller;
 			#gpio-cells = <2>;
