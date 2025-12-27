@@ -90,6 +90,8 @@
 		google,alignment_offset_high_current = <139000>;
 		google,alignment_current_threshold = <500>;
 
+		google,wlc_qispec = <0x1200>;
+
 		p9xxx_gpio: p9xxx_gpio {
 			gpio-controller;
 			#gpio-cells = <2>;
