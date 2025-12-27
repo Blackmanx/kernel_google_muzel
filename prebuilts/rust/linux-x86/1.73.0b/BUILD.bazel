@@ -1,0 +1,15 @@
+package(default_visibility = [
+    "//build/bazel/toolchains/rust:__subpackages__",
+    "//build/kernel:__subpackages__",
+])
+
+exports_files(["bin/*"])
+
+filegroup(
+    name = "binaries",
+    srcs = glob([
+        "bin/*",
+        "lib/*",
+        "lib64/*",
+    ]),
+)
