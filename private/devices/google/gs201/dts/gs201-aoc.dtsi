@@ -148,6 +148,7 @@
 		notify-on-state-transition = "true";
 		hotword-supported = "true";
 		chre-supported = "true";
+		skip-mmap-offload = "true";
 	};
 	aoc_gpiochip: aoc_gpiochip {
 		compatible = "google,aoc_uwb_rst";
