@@ -47,11 +47,14 @@ struct iif_dma_fence {
 	/* The callback which will be invoked when @base_fence is signaled. */
 	union {
 		struct iif_fence_poll_cb iif_cb;
+		struct dma_fence_cb dma_cb;
 	} poll_cb;
 	/* The work signals @bridged_fence when @base_fence is signaled. */
 	struct work_struct signal_work;
 	/* The work which will be scheduled when @bridged_fence can be released. */
 	struct work_struct release_work;
+	/* The work which stops the @task thread asynchronously. */
+	struct work_struct stop_work;
 	/* Refcount. */
 	struct kref kref;
 };
@@ -106,8 +109,8 @@ static inline struct iif_fence *iif_dma_fence_wait(struct iif_manager *mgr,
 }
 
 /**
- * iif_dma_fence_stop() - Stops @iif_fence waiting on the DMA fence.
- * @iif_fence: The inter-IP fence to stop waiting on the waitd DMA fence.
+ * iif_dma_fence_stop() - Stops @iif_fence waiting on its bridged DMA fence.
+ * @iif_fence: The inter-IP fence to stop waiting on its bridged DMA fence.
  *
  * The thread waiting on the DMA fence will be interrupted. If the thread was interrupted before
  * the DMA fence is signaled, @iif_fence will be signaled with -ERESTARTSYS error.
@@ -121,8 +124,51 @@ static inline struct iif_fence *iif_dma_fence_wait(struct iif_manager *mgr,
 void iif_dma_fence_stop(struct iif_fence *iif_fence);
 
 /**
- * dma_iif_fence_wait_timeout() - Creates a DMA fence which will be signaled once @iif_fence is
- *                                signaled.
+ * iif_dma_fence_stop_and_put_async() - Stops @iif_fence waiting on its bridged DMA fence and put
+ *                                      @iif_fence asynchronously.
+ * @iif_fence: The inter-IP fence to stop waiting on its bridged DMA fence.
+ *
+ * The role of this function is basically the same with the `iif_dma_fence_stop()` function, but
+ * stops the thread waiting on its bridged DMA fence asynchronously. Also, the caller cannot decide
+ * when to put the refcount of @iif_fence as it stops the thread asynchronously, this function will
+ * do that after it has actually stopped the thread. Therefore, the caller must NOT put the refcount
+ * from their side unless they are holding additional refcounts.
+ */
+void iif_dma_fence_stop_and_put_async(struct iif_fence *iif_fence);
+
+/**
+ * iif_dma_fence_bridge() - Creates a single-shot IIF which will be signaled once @dma_fence is
+ *                          signaled.
+ * @mgr: IIF manager to create an inter-IP fence.
+ * @dma_fence: The DMA fence to be bridged to the created IIF.
+ *
+ * The major difference from the `iif_dma_fence_wait{_timeout}()` functions is that, this function
+ * doesn't spawn a thread to wait on @dma_fence. It simply registers a poll callback to @dma_fence,
+ * which will notify the returned IIF once @dma_fence is signaled. Therefore, the caller doesn't
+ * need to take care of the thread life-cycle. (i.e., don't need to call the `iif_dma_fence_stop()`
+ * function)
+ *
+ * Note that the caller must release the refcount of the returned IIF (i.e., iif_fence_put()) if
+ * they don't need to access it anymore.
+ *
+ * This function cannot be called in the IRQ context.
+ *
+ * Returns a IIF on success. Otherwise, returns an error pointer.
+ */
+struct iif_fence *iif_dma_fence_bridge(struct iif_manager *mgr, struct dma_fence *dma_fence);
+
+/**
+ * iif_dma_fence_get_base() - Returns the base DMA fence which @iif_fence was bridged to.
+ *
+ * @dma_fence: The IIF to get its base DMA fence.
+ *
+ * Returns the DMA fence bridged to @iif_fence if it was created by the `iif_dma_fence_bridge()` or
+ * `iif_dma_fence_wait{_timeout}()` functions. Otherwise, returns NULL.
+ */
+struct dma_fence *iif_dma_fence_get_base(struct iif_fence *iif_fence);
+
+/**
+ * dma_iif_fence_bridge() - Creates a DMA fence which will be signaled once @iif_fence is signaled.
  * @iif_fence: The IIF to be bridged.
  *
  * Note that the caller must release the refcount of the returned DMA fence (i.e., dma_fence_put())
@@ -138,12 +184,12 @@ void iif_dma_fence_stop(struct iif_fence *iif_fence);
 struct dma_fence *dma_iif_fence_bridge(struct iif_fence *iif_fence);
 
 /**
- * dma_iif_fence_get_base() - Returns the base IIF which @dma_fence is bridged.
+ * dma_iif_fence_get_base() - Returns the base IIF which @dma_fence was bridged to.
  *
  * @dma_fence: The DMA fence to get its base IIF.
  *
- * Returns an IIF bridged to @dma_fence if it was created by `dma_iif_fence_wait{_timeout}()`
- * functions. Otherwise, returns NULL.
+ * Returns the IIF bridged to @dma_fence if it was created by the `dma_iif_fence_bridge()` function.
+ * Otherwise, returns NULL.
  */
 struct iif_fence *dma_iif_fence_get_base(struct dma_fence *dma_fence);
 

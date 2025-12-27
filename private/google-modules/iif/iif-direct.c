@@ -31,27 +31,47 @@ struct iif_direct_fence {
 	struct iif_fence_params params;
 	struct list_head poll_cb_list;
 	spinlock_t poll_cb_lock;
+	bool error_set_by_kernel;
 };
 
-static bool iif_direct_fence_is_errored(struct iif_direct_fence *fence)
+static void iif_direct_fence_set_error(struct iif_direct_fence *fence, int error)
+{
+	if (fence->error && error != fence->error)
+		iif_warn(fence->iif, "fence error has been overwritten: %d -> %d\n", fence->error,
+			 error);
+
+	fence->error = error;
+}
+
+static inline void iif_direct_fence_set_timeline(struct iif_direct_fence *fence, int timeline)
+{
+	fence->timeline = timeline;
+}
+
+static bool iif_direct_fence_table_is_errored(struct iif_direct_fence *fence)
 {
 	return iif_fence_table_get_flag(&fence->mgr->fence_table, fence->id) &
 	       BIT(IIF_SIGNAL_TABLE_FLAG_ERROR_BIT);
 }
 
-static unsigned int iif_direct_fence_get_remaining_signals(struct iif_direct_fence *fence)
+static int iif_direct_fence_table_get_error(struct iif_direct_fence *fence)
+{
+	return iif_fence_table_get_error(&fence->mgr->fence_table, fence->id);
+}
+
+static void iif_direct_fence_table_set_error(struct iif_direct_fence *fence, int error)
+{
+	iif_fence_table_set_error(&fence->mgr->fence_table, fence->id, error);
+}
+
+static unsigned int iif_direct_fence_table_get_remaining_signals(struct iif_direct_fence *fence)
 {
 	return iif_fence_table_get_remaining_signals(&fence->mgr->fence_table, fence->id);
 }
 
-static u8 iif_direct_fencet_get_table_flags(struct iif_direct_fence *fence)
-{
-	return iif_fence_table_get_flag(&fence->mgr->fence_table, fence->id);
-}
-
 /* Sets the remaining signals of the fence to the signal fence table. */
-static void iif_direct_fence_set_remaining_signals(struct iif_direct_fence *fence,
-						   int remaining_signals)
+static void iif_direct_fence_table_set_remaining_signals(struct iif_direct_fence *fence,
+							 int remaining_signals)
 {
 	if (fence->iif->propagate)
 		iif_fence_table_set_remaining_signals(&fence->mgr->fence_table, fence->id,
@@ -59,21 +79,25 @@ static void iif_direct_fence_set_remaining_signals(struct iif_direct_fence *fenc
 }
 
 /* Increases the timeline value of the fence in the fence table. */
-static void iif_direct_fence_inc_timeline(struct iif_direct_fence *fence)
+static void iif_direct_fence_table_inc_timeline(struct iif_direct_fence *fence)
 {
 	if (fence->iif->propagate)
 		iif_fence_table_inc_timeline(&fence->mgr->fence_table, fence->id);
 }
 
 /* Returns the timeline value of the fence from the fence table. */
-static unsigned int iif_direct_fence_get_timeline(struct iif_direct_fence *fence)
+static unsigned int iif_direct_fence_table_get_timeline(struct iif_direct_fence *fence)
 {
+	if (fence->params.fence_type == IIF_FENCE_TYPE_SINGLE_SHOT)
+		return fence->params.remaining_signalers -
+		       iif_direct_fence_table_get_remaining_signals(fence);
+
 	return iif_fence_table_get_timeline(&fence->mgr->fence_table, fence->id);
 }
 
 /* Adds a new sync point to the fence table. */
-static void iif_direct_fence_set_sync_point(struct iif_direct_fence *fence, unsigned int timeline,
-					    unsigned int count)
+static void iif_direct_fence_table_set_sync_point(struct iif_direct_fence *fence,
+						  unsigned int timeline, unsigned int count)
 {
 	iif_fence_table_set_sync_point(&fence->mgr->fence_table, fence->id, fence->num_sync_points,
 				       timeline, count);
@@ -81,8 +105,8 @@ static void iif_direct_fence_set_sync_point(struct iif_direct_fence *fence, unsi
 }
 
 /* Gets the sync point timeline and count at @sync_point_index from the fence table. */
-static void iif_direct_fence_get_sync_point(struct iif_direct_fence *fence, int sync_point_index,
-					    u8 *timeline, u8 *count)
+static void iif_direct_fence_table_get_sync_point(struct iif_direct_fence *fence,
+						  int sync_point_index, u8 *timeline, u8 *count)
 {
 	iif_fence_table_get_sync_point(&fence->mgr->fence_table, fence->id, sync_point_index,
 				       timeline, count);
@@ -94,7 +118,7 @@ static bool iif_direct_fence_is_sync_point_ready(struct iif_direct_fence *fence,
 {
 	u8 timeline, count;
 
-	iif_direct_fence_get_sync_point(fence, sync_point_index, &timeline, &count);
+	iif_direct_fence_table_get_sync_point(fence, sync_point_index, &timeline, &count);
 
 	/*
 	 * E.g., sync point window = [3, 5] (timeline=3, count=3)
@@ -119,24 +143,32 @@ static bool iif_direct_fence_is_sync_point_ready(struct iif_direct_fence *fence,
 	       fence->timeline >= timeline;
 }
 
-/* Sets the error to @fence->error and marks the error bit of the signal fence table. */
-static void iif_direct_fence_set_error(struct iif_direct_fence *fence, int error)
+/* Handles the error passed while signaling the kernel fence object. */
+static void iif_direct_fence_handle_signal_error(struct iif_direct_fence *fence, int error)
 {
-	if (!error)
+	int table_error = iif_direct_fence_table_get_error(fence);
+	bool errored = iif_direct_fence_table_is_errored(fence);
+
+	/*
+	 * For the backward compatibility of IP firmwares which don't set the fence error code to
+	 * the table (i.e., only mark the errored flag), if the errored flag was set, but the error
+	 * code is empty in the table, let the kernel driver set it on behalf of the signaler IP
+	 * firmware regardless of @fence->iif->propagate.
+	 */
+	if (fence->iif->propagate || (errored && !table_error))
+		fence->error_set_by_kernel = true;
+
+	/*
+	 * If @error is 0, we don't need to handle the error.
+	 * If @fence->error_set_by_kernel is false, the firmware is supposed to set error to the
+	 * fence table, and the error of kernel fence object will be synced with the fence table
+	 * when `iif_direct_fence_sync_status()` is called.
+	 */
+	if (!error || !fence->error_set_by_kernel)
 		return;
 
-	if (fence->timeline == fence->params.remaining_signalers)
-		iif_warn(fence->iif, "The fence signal error is set after the fence is signaled\n");
-
-	if (fence->error)
-		iif_warn(fence->iif, "The fence signal error has been overwritten: %d -> %d\n",
-			 fence->error, error);
-
-	fence->error = error;
-
-	if (fence->iif->propagate)
-		iif_fence_table_set_flag(&fence->mgr->fence_table, fence->id,
-					 BIT(IIF_SIGNAL_TABLE_FLAG_ERROR_BIT));
+	iif_direct_fence_table_set_error(fence, error);
+	iif_direct_fence_set_error(fence, error);
 }
 
 /* Invokes poll callbacks registered to a direct single-shot fence. */
@@ -147,6 +179,13 @@ static void iif_direct_fence_invoke_poll_callbacks_single_shot(struct iif_direct
 	unsigned long flags;
 
 	lockdep_assert_held(&fence->iif->fence_lock);
+
+	/*
+	 * For single-shot fence, notify waiters only if all signalers have signaled the fence
+	 * regardless of the fence error.
+	 */
+	if (fence->timeline < fence->params.remaining_signalers)
+		return;
 
 	status.error = fence->error;
 	status.signaled = fence->timeline >= fence->params.remaining_signalers;
@@ -213,91 +252,89 @@ static void iif_direct_fence_invoke_poll_callbacks_reusable(struct iif_direct_fe
 }
 
 /*
- * Updates the status of @fence. (For single-shot)
- *
- * It will try to synchronize the status with the fence table.
+ * Synchronizes the fence status with the fence table. If it has been actually updated, invoke the
+ * poll callback to notify the update to the IIF driver users.
  */
-static void iif_direct_fence_update_status_single_shot(struct iif_direct_fence *fence)
+static void iif_direct_fence_sync_status(struct iif_direct_fence *fence,
+					 void (*invoke_poll_cb)(struct iif_direct_fence *fence))
 {
-	int timeline;
-	bool errored;
+	int table_timeline, table_error;
+	bool table_errored;
 
 	lockdep_assert_held(&fence->iif->fence_lock);
 
-	timeline =
-		fence->params.remaining_signalers - iif_direct_fence_get_remaining_signals(fence);
-	errored = iif_direct_fence_is_errored(fence);
+	table_timeline = iif_direct_fence_table_get_timeline(fence);
+	table_errored = iif_direct_fence_table_is_errored(fence);
+	table_error = iif_direct_fence_table_get_error(fence);
 
-	/* Reverting errored fence to normal is an invalid action. */
-	if (unlikely(!errored && fence->error)) {
+	/* If @fence->error_set_by_kernel is true, use the kernel level fence error directly. */
+	if (fence->error_set_by_kernel)
+		table_error = fence->error;
+
+	/*
+	 * @fence->error has a value means that the errored flag was set and the fence was already
+	 * errored out before. Reverting the errored fence to normal state is an invalid action. It
+	 * is likely a bug of the signaler IP.
+	 */
+	if (unlikely(!table_errored && fence->error)) {
 		iif_warn(fence->iif, "fence was already errored out, cannot revert it\n");
-		errored = true;
+		table_errored = true;
 	}
 
-	/* If the fence status is not updated, do nothing. */
-	if (fence->timeline == timeline && errored == (bool)(fence->error))
-		return;
-
-	/* If the fence is errored out, but the reason is unknown, treat it as canceled. */
-	if (errored && !fence->error) {
-		iif_warn(fence->iif, "fence is errored out without errno, treat it as canceled\n");
-		fence->error = -ECANCELED;
+	/*
+	 * Setting the fence error without the setting errored flag to the table is an invalid
+	 * action. The error code might be a dirty value unintendedly set by the signaler IP.
+	 */
+	if (unlikely(!table_errored && table_error)) {
+		iif_warn(fence->iif, "fence was not errored out, ignore the error\n");
+		table_error = 0;
 	}
 
-	fence->timeline = timeline;
-
-	if (fence->timeline < fence->params.remaining_signalers)
-		return;
-
-	iif_direct_fence_invoke_poll_callbacks_single_shot(fence);
-}
-
-/*
- * Updates the status of @fence. (For reusable)
- *
- * It will try to synchronize the status with the fence table.
- */
-static void iif_direct_fence_update_status_reusable(struct iif_direct_fence *fence)
-{
-	int timeline;
-	bool errored;
-
-	lockdep_assert_held(&fence->iif->fence_lock);
-
-	timeline = iif_direct_fence_get_timeline(fence);
-	errored = iif_direct_fence_is_errored(fence);
-
-	/* Reverting errored fence to normal is an invalid action. */
-	if (unlikely(!errored && fence->error)) {
-		iif_warn(fence->iif, "fence already errored out, cannot revert it\n");
-		errored = true;
-	}
+	/*
+	 * If the fence is errored out without any reason, treat it as canceled. If there is another
+	 * thread which is going to signal @fence with the exact error code, @fence->error will be
+	 * updated at that moment.
+	 */
+	if (unlikely(table_errored && !table_error))
+		table_error = -ECANCELED;
 
 	/* The fence timeline must be always increasing. */
-	if (unlikely(timeline < fence->timeline)) {
+	if (unlikely(table_timeline < fence->timeline)) {
 		iif_warn(fence->iif, "fence timeline shouldn't be decreased\n");
-		timeline = fence->timeline;
+		table_timeline = fence->timeline;
 	}
 
 	/* If the fence status is not updated, do nothing. */
-	if (fence->timeline == timeline && errored == (bool)(fence->error))
+	if (fence->timeline == table_timeline && fence->error == table_error)
 		return;
 
-	/* If the fence is errored out, but the reason is unknown, treat it as canceled. */
-	if (errored && !fence->error) {
-		iif_warn(fence->iif, "fence is errored out without errno, treat it as canceled\n");
-		fence->error = -ECANCELED;
-	}
+	/*
+	 * If @fence->error_set_by_kernel is true, this function call will be NO-OP as @fence->error
+	 * must have been set when `iif_direct_fence_handle_signal_error()` is called. Otherwise, it
+	 * will sync the error code of kernel fence object to the fence table.
+	 */
+	iif_direct_fence_set_error(fence, table_error);
+	iif_direct_fence_set_timeline(fence, table_timeline);
 
-	fence->timeline = timeline;
+	invoke_poll_cb(fence);
+}
 
-	iif_direct_fence_invoke_poll_callbacks_reusable(fence);
+/* Synchronizes the fence status with the fence table. (For single-shot) */
+static inline void iif_direct_fence_sync_status_single_shot(struct iif_direct_fence *fence)
+{
+	iif_direct_fence_sync_status(fence, iif_direct_fence_invoke_poll_callbacks_single_shot);
+}
+
+/* Synchronizes the fence status with the fence table. (For reusable) */
+static inline void iif_direct_fence_sync_status_reusable(struct iif_direct_fence *fence)
+{
+	iif_direct_fence_sync_status(fence, iif_direct_fence_invoke_poll_callbacks_reusable);
 }
 
 static int iif_direct_fence_signal_single_shot(struct iif_direct_fence *fence, int error)
 {
-	int remaining_signals;
-	u8 fence_flag;
+	int table_remaining_signals;
+	bool table_errored;
 
 	lockdep_assert_held(&fence->iif->fence_lock);
 
@@ -318,13 +355,12 @@ static int iif_direct_fence_signal_single_shot(struct iif_direct_fence *fence, i
 	 * When the signaler is AP, that race condition won't happen since the fence table should be
 	 * always managed by the IIF driver only and theoretically this logic won't have any effect.
 	 */
-	remaining_signals = iif_direct_fence_get_remaining_signals(fence);
-	fence_flag = iif_direct_fencet_get_table_flags(fence);
+	table_remaining_signals = iif_direct_fence_table_get_remaining_signals(fence);
+	table_errored = iif_direct_fence_table_is_errored(fence);
 
-	if (!remaining_signals && !(fence_flag & BIT(IIF_SIGNAL_TABLE_FLAG_ERROR_BIT)) && error) {
+	if (!table_remaining_signals && !table_errored && error) {
 		error = 0;
-	} else if (!remaining_signals && (fence_flag & BIT(IIF_SIGNAL_TABLE_FLAG_ERROR_BIT)) &&
-		   !error) {
+	} else if (!table_remaining_signals && table_errored && !error) {
 		/*
 		 * Theoretically, this case wouldn't happen since @fence->propagate was set means
 		 * that the signaler IP has been crashed and the IP driver will signal the fence
@@ -334,8 +370,8 @@ static int iif_direct_fence_signal_single_shot(struct iif_direct_fence *fence, i
 		error = -ECANCELED;
 	}
 
-	if (fence->iif->propagate && remaining_signals)
-		remaining_signals--;
+	if (fence->iif->propagate && table_remaining_signals)
+		table_remaining_signals--;
 
 	/*
 	 * Sets the error and remaining signals to the fence table. Note that these functions will
@@ -345,39 +381,39 @@ static int iif_direct_fence_signal_single_shot(struct iif_direct_fence *fence, i
 	 * true so that the IIF driver is updating the fence table and if it signals the fence
 	 * first, waiter IPs may misundestand that the fence has been unblocked without an error.
 	 */
-	iif_direct_fence_set_error(fence, error);
-	iif_direct_fence_set_remaining_signals(fence, remaining_signals);
+	iif_direct_fence_handle_signal_error(fence, error);
+	iif_direct_fence_table_set_remaining_signals(fence, table_remaining_signals);
 
-	/* Updates the fence status. */
-	iif_direct_fence_update_status_single_shot(fence);
+	/* Synchronizes the fence status with the fence table. */
+	iif_direct_fence_sync_status_single_shot(fence);
 
 	return 0;
 }
 
 static int iif_direct_fence_signal_reusable(struct iif_direct_fence *fence, int error)
 {
-	int timeline;
-	u8 fence_flag;
+	int table_timeline;
+	bool table_errored;
 
 	lockdep_assert_held(&fence->iif->fence_lock);
 
-	timeline = iif_direct_fence_get_timeline(fence);
-	fence_flag = iif_direct_fencet_get_table_flags(fence);
+	table_timeline = iif_direct_fence_table_get_timeline(fence);
+	table_errored = iif_direct_fence_table_is_errored(fence);
 
 	/*
 	 * Theoretically, if the error flag in the fence table was set by the firmware, the error
 	 * should be propagated from the firmware to kernel driver and the kernel driver should pass
 	 * non-zero value to @error. Handle it just in case.
 	 */
-	if ((fence_flag & BIT(IIF_SIGNAL_TABLE_FLAG_ERROR_BIT)) && !error)
+	if (table_errored && !error)
 		error = -ECANCELED;
 
 	/*
 	 * If @propagate is true, see if the fence will be timedout by this signal. Otherwise, see
 	 * if the fence was already timedout.
 	 */
-	if (timeline >= IIF_SIGNAL_TABLE_MAX_TIMELINE ||
-	    timeline + (fence->iif->propagate ? 1 : 0) >= fence->params.timeout)
+	if (table_timeline >= IIF_SIGNAL_TABLE_MAX_TIMELINE ||
+	    table_timeline + (fence->iif->propagate ? 1 : 0) >= fence->params.timeout)
 		error = -ETIMEDOUT;
 
 	/*
@@ -389,14 +425,14 @@ static int iif_direct_fence_signal_reusable(struct iif_direct_fence *fence, int 
 	 * signals the fence first, waiter IPs may misundestand that the fence has been unblocked
 	 * without an error.
 	 */
-	iif_direct_fence_set_error(fence, error);
+	iif_direct_fence_handle_signal_error(fence, error);
 
 	/* Prevents overflow. */
-	if (timeline < IIF_SIGNAL_TABLE_MAX_TIMELINE)
-		iif_direct_fence_inc_timeline(fence);
+	if (table_timeline < IIF_SIGNAL_TABLE_MAX_TIMELINE)
+		iif_direct_fence_table_inc_timeline(fence);
 
-	/* Updates the fence status. */
-	iif_direct_fence_update_status_reusable(fence);
+	/* Synchronizes the fence status with the fence table. */
+	iif_direct_fence_sync_status_reusable(fence);
 
 	return 0;
 }
@@ -513,7 +549,7 @@ static int iif_direct_fence_add_sync_point(struct iif_fence *iif, u64 timeline, 
 	if (count >= IIF_WAIT_TABLE_SYNC_POINT_COUNT_ALL)
 		count = IIF_WAIT_TABLE_SYNC_POINT_COUNT_ALL;
 
-	iif_direct_fence_set_sync_point(fence, timeline, count);
+	iif_direct_fence_table_set_sync_point(fence, timeline, count);
 
 	/*
 	 * If the current fence timeline already overlaps or has paased the new sync point window,

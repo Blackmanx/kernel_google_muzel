@@ -12,12 +12,20 @@
 #include <linux/fs.h>
 #include <linux/module.h>
 #include <linux/of.h>
+#include <linux/of_device.h>
 #include <linux/platform_device.h>
 #include <linux/types.h>
 
 #include <iif/iif-fs.h>
 #include <iif/iif-manager.h>
 #include <iif/iif-platform.h>
+
+#ifdef IIF_UNIT_TEST
+#include "unittests/helper/iif-platform-probe-controller.h"
+#define TEST_GET_PROBE_DEFER() iif_platform_probe_controller_get_probe_err()
+#else
+#define TEST_GET_PROBE_DEFER() (0)
+#endif
 
 #define IIF_DEV_COUNT 1
 
@@ -81,6 +89,10 @@ static int iif_platform_probe(struct platform_device *pdev)
 
 	dev_notice(dev, "Probing IIF driver (commit: %s)", iif_platform_get_driver_commit());
 
+	ret = TEST_GET_PROBE_DEFER();
+	if (ret)
+		return ret;
+
 	mgr = iif_manager_init(dev->of_node);
 	if (IS_ERR(mgr)) {
 		dev_err(dev, "Failed to initialize IIF manager, ret=%ld", PTR_ERR(mgr));
@@ -88,13 +100,15 @@ static int iif_platform_probe(struct platform_device *pdev)
 	}
 
 	mgr->dev = dev;
-	platform_set_drvdata(pdev, mgr);
 
 	ret = iif_cdev_add(mgr);
 	if (ret) {
 		dev_err(dev, "Failed to add IIF cdev, ret=%d", ret);
 		goto err_put_manager;
 	}
+
+	/* Set the manager pointer to the device only if the probe succeeds. */
+	platform_set_drvdata(pdev, mgr);
 
 	dev_info(dev, "IIF driver is probed");
 
@@ -190,3 +204,8 @@ MODULE_INFO(gitinfo, GIT_REPO_TAG);
 #endif
 module_init(iif_platform_init);
 module_exit(iif_platform_exit);
+
+bool iif_platform_is_iif_device(struct platform_device *pdev)
+{
+	return of_match_device(iif_of_match, &pdev->dev);
+}

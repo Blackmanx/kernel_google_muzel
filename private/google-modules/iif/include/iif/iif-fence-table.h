@@ -199,4 +199,34 @@ void iif_fence_table_set_flag(struct iif_fence_table *fence_table, unsigned int 
  */
 u8 iif_fence_table_get_flag(struct iif_fence_table *fence_table, unsigned int fence_id);
 
+/**
+ * iif_fence_table_get_error() - Gets the error of @fence_id fence.
+ * @fence_table: The fence table object.
+ * @fence_id: The fence ID.
+ *
+ * This function internally converts the fence error in the signal table to the Linux standard error
+ * code.
+ *
+ * Since this function will be called by the `iif_fence_signal{_with_status}` function which holds
+ * the kernel fence object lock, we don't have to hold any locks here.
+ *
+ * Returns an errno if the fence was errored out. Otherwise, returns 0.
+ */
+int iif_fence_table_get_error(struct iif_fence_table *fence_table, unsigned int fence_id);
+
+/**
+ * iif_fence_table_set_error() - Sets the error to @fence_id fence.
+ * @fence_table: The fence table object.
+ * @fence_id: The fence ID.
+ * @error: The fence error. It must be a Linux standard error code.
+ *
+ * This function internally converts the error code to the absl::StatusCode which is used in the
+ * signal table. If @error is non-zero, the function will set IIF_SIGNAL_TABLE_FLAG_ERROR_BIT flag.
+ *
+ * Since this function will be called by the `iif_fence_signal{_with_status}` function which holds
+ * the kernel fence object lock, we don't have to hold any locks here.
+ */
+void iif_fence_table_set_error(struct iif_fence_table *fence_table, unsigned int fence_id,
+			       int error);
+
 #endif /* __IIF_IIF_FENCE_TABLE_H__ */

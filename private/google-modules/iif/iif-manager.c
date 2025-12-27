@@ -18,15 +18,21 @@
 #include <linux/idr.h>
 #include <linux/kref.h>
 #include <linux/of.h>
+#include <linux/platform_device.h>
 #include <linux/rwsem.h>
 #include <linux/slab.h>
 
+#include <iif/iif-config.h>
 #include <iif/iif-direct.h>
 #include <iif/iif-fence-table.h>
 #include <iif/iif-fence.h>
 #include <iif/iif-manager.h>
 #include <iif/iif-shared.h>
 #include <iif/iif.h>
+
+#if IS_STANDALONE_IIF
+#include <iif/iif-platform.h>
+#endif /* IS_STANDALONE_IIF */
 
 static int iif_manager_set_direct_fence_ops(struct iif_manager *mgr, struct iif_fence *iif)
 {
@@ -103,6 +109,60 @@ struct iif_manager *iif_manager_init(const struct device_node *np)
 	return mgr;
 }
 EXPORT_SYMBOL_GPL(iif_manager_init);
+
+#if IS_STANDALONE_IIF
+static void devm_iif_manager_put(struct device *dev, void *res)
+{
+	struct iif_manager **mgrp = res;
+
+	iif_manager_put(*mgrp);
+}
+
+struct iif_manager *iif_manager_get_from_pdev(struct platform_device *pdev)
+{
+	struct iif_manager *mgr;
+
+	if (!iif_platform_is_iif_device(pdev))
+		return ERR_PTR(-ENODEV);
+
+	mgr = platform_get_drvdata(pdev);
+	if (!mgr)
+		return ERR_PTR(-EPROBE_DEFER);
+
+	return iif_manager_get(mgr);
+}
+EXPORT_SYMBOL_GPL(iif_manager_get_from_pdev);
+
+struct iif_manager *devm_iif_manager_get_from_pdev(struct device *dev, struct platform_device *pdev)
+{
+	struct iif_manager *mgr, **mgrp;
+
+	mgrp = devres_alloc(devm_iif_manager_put, sizeof(*mgrp), GFP_KERNEL);
+	if (!mgrp)
+		return ERR_PTR(-ENOMEM);
+
+	mgr = iif_manager_get_from_pdev(pdev);
+	if (IS_ERR(mgr)) {
+		devres_free(mgrp);
+	} else {
+		*mgrp = mgr;
+		devres_add(dev, mgrp);
+	}
+
+	return mgr;
+}
+EXPORT_SYMBOL_GPL(devm_iif_manager_get_from_pdev);
+#else /* !IS_STANDALONE_IIF */
+struct iif_manager *iif_manager_get_from_pdev(struct platform_device *pdev)
+{
+	return ERR_PTR(-ENODEV);
+}
+
+struct iif_manager *devm_iif_manager_get_from_pdev(struct device *dev, struct platform_device *pdev)
+{
+	return ERR_PTR(-ENODEV);
+}
+#endif /* IS_STANDALONE_IIF */
 
 struct iif_manager *iif_manager_get(struct iif_manager *mgr)
 {

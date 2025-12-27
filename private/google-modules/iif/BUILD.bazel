@@ -36,11 +36,12 @@ ddk_module(
     ]),
     out = "iif.ko",
     kernel_build = "//private/devices/google/common:kernel",
+    local_defines = [
+        "CONFIG_IIF",
+    ],
     visibility = [
         "//private/devices/google:__subpackages__",
-        "//private/google-modules/edgetpu:__subpackages__",
-        "//private/google-modules/gxp:__subpackages__",
-        "//private/google-modules/powervr:__subpackages__",
+        "//private/google-modules:__subpackages__",
     ],
     deps = [
         ":iif_headers",

@@ -14,6 +14,7 @@
 
 #define pr_fmt(fmt) "iif: " fmt
 
+#include <linux/errno.h>
 #include <linux/io.h>
 #include <linux/of.h>
 #include <linux/of_address.h>
@@ -24,6 +25,91 @@
 
 #define IIF_FENCE_WAIT_TABLE_PROP_NAME "iif-fence-wait-table-region"
 #define IIF_FENCE_SIGNAL_TABLE_PROP_NAME "iif-fence-signal-table-region"
+
+static enum iif_signal_table_fence_error iif_fence_table_to_signal_table_error_code(int errno)
+{
+	switch (errno) {
+	case 0:
+		return IIF_ERROR_OK;
+	case -ECANCELED:
+		return IIF_ERROR_CANCELLED;
+	case -EINVAL:
+	case -EFAULT:
+		return IIF_ERROR_INVALID_ARGUMENT;
+	case -ETIME:
+	case -ETIMEDOUT:
+		return IIF_ERROR_DEADLINE_EXCEEDED;
+	case -ENOENT:
+	case -ENODEV:
+		return IIF_ERROR_NOT_FOUND;
+	case -EEXIST:
+		return IIF_ERROR_ALREADY_EXISTS;
+	case -EACCES:
+		return IIF_ERROR_PERMISSION_DENIED;
+	case -ENOMEM:
+	case -ENOSPC:
+		return IIF_ERROR_RESOURCE_EXHAUSTED;
+	case -EBUSY:
+		return IIF_ERROR_FAILED_PRECONDITION;
+	case -EDEADLK:
+	case -EOWNERDEAD:
+	case -EALREADY:
+		return IIF_ERROR_ABORTED;
+	case -ERANGE:
+	case -EOVERFLOW:
+		return IIF_ERROR_OUT_OF_RANGE;
+	case -EOPNOTSUPP:
+		return IIF_ERROR_UNIMPLEMENTED;
+	case -EIO:
+		return IIF_ERROR_INTERNAL;
+	case -EAGAIN:
+		return IIF_ERROR_UNAVAILABLE;
+	case -EBADMSG:
+	case -ENOTRECOVERABLE:
+		return IIF_ERROR_DATA_LOSS;
+	case -EPERM:
+		return IIF_ERROR_UNAUTHENTICATED;
+	default:
+		return IIF_ERROR_UNKNOWN;
+	}
+}
+
+static int iif_fence_table_to_linux_error_code(enum iif_signal_table_fence_error status)
+{
+	switch (status) {
+	case IIF_ERROR_OK:
+		return 0;
+	case IIF_ERROR_CANCELLED:
+		return -ECANCELED;
+	case IIF_ERROR_INVALID_ARGUMENT:
+		return -EINVAL;
+	case IIF_ERROR_DEADLINE_EXCEEDED:
+		return -ETIMEDOUT;
+	case IIF_ERROR_NOT_FOUND:
+		return -ENOENT;
+	case IIF_ERROR_ALREADY_EXISTS:
+		return -EEXIST;
+	case IIF_ERROR_PERMISSION_DENIED:
+		return -EACCES;
+	case IIF_ERROR_RESOURCE_EXHAUSTED:
+	case IIF_ERROR_FAILED_PRECONDITION:
+	case IIF_ERROR_ABORTED:
+		return -EBUSY;
+	case IIF_ERROR_OUT_OF_RANGE:
+		return -ERANGE;
+	case IIF_ERROR_UNIMPLEMENTED:
+		return -EOPNOTSUPP;
+	case IIF_ERROR_UNAVAILABLE:
+		return -EAGAIN;
+	case IIF_ERROR_UNAUTHENTICATED:
+		return -EPERM;
+	case IIF_ERROR_DATA_LOSS:
+	case IIF_ERROR_INTERNAL:
+	case IIF_ERROR_UNKNOWN:
+	default:
+		return -EIO;
+	}
+}
 
 static int iif_fence_table_get_resource(const struct device_node *np, const char *name,
 					struct resource *r)
@@ -126,6 +212,7 @@ void iif_fence_table_init_single_shot_fence_entry(struct iif_fence_table *fence_
 	fence_table->wait_table[fence_id].reusable = 0;
 	fence_table->signal_table[fence_id].remaining_signals = total_signalers;
 	fence_table->signal_table[fence_id].flag = 0;
+	fence_table->signal_table[fence_id].error = 0;
 }
 
 void iif_fence_table_init_reusable_fence_entry(struct iif_fence_table *fence_table,
@@ -139,6 +226,7 @@ void iif_fence_table_init_reusable_fence_entry(struct iif_fence_table *fence_tab
 	fence_table->signal_table[fence_id].timeline = 0;
 	fence_table->signal_table[fence_id].flag = 0;
 	fence_table->signal_table[fence_id].timeout = timeout;
+	fence_table->signal_table[fence_id].error = 0;
 }
 
 void iif_fence_table_set_waiting_ip(struct iif_fence_table *fence_table, unsigned int fence_id,
@@ -224,4 +312,28 @@ void iif_fence_table_set_flag(struct iif_fence_table *fence_table, unsigned int 
 u8 iif_fence_table_get_flag(struct iif_fence_table *fence_table, unsigned int fence_id)
 {
 	return fence_table->signal_table[fence_id].flag;
+}
+
+int iif_fence_table_get_error(struct iif_fence_table *fence_table, unsigned int fence_id)
+{
+	u8 flag = iif_fence_table_get_flag(fence_table, fence_id);
+
+	if (!(flag & BIT(IIF_SIGNAL_TABLE_FLAG_ERROR_BIT)))
+		return 0;
+
+	return iif_fence_table_to_linux_error_code(fence_table->signal_table[fence_id].error);
+}
+
+void iif_fence_table_set_error(struct iif_fence_table *fence_table, unsigned int fence_id,
+			       int error)
+{
+	u8 flag = iif_fence_table_get_flag(fence_table, fence_id);
+
+	if (!error)
+		return;
+
+	fence_table->signal_table[fence_id].error =
+		iif_fence_table_to_signal_table_error_code(error);
+	iif_fence_table_set_flag(fence_table, fence_id,
+				 flag | BIT(IIF_SIGNAL_TABLE_FLAG_ERROR_BIT));
 }

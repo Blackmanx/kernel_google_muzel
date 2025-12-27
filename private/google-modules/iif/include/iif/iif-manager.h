@@ -17,9 +17,11 @@
 #include <linux/idr.h>
 #include <linux/kref.h>
 #include <linux/of.h>
+#include <linux/platform_device.h>
 #include <linux/rwsem.h>
 #include <linux/types.h>
 
+#include <iif/iif-config.h>
 #include <iif/iif-fence-table.h>
 #include <iif/iif-shared.h>
 
@@ -318,6 +320,33 @@ struct iif_manager {
  * function.
  */
 struct iif_manager *iif_manager_init(const struct device_node *np);
+
+/**
+ * iif_manager_get_from_pdev() - Gets an IIF manager from an IIF platform device.
+ * @pdev: The IIF platform device.
+ *
+ * This function increases the refcount of the returned IIF manager. Therefore, the caller must call
+ * the `iif_manager_put()` function to release it back once they don't need it anymore.
+ *
+ * If the function returns -EPROBE_DEFER, it means that the IIF device hasn't been probed yet. In
+ * this case, if the caller has a strong dependency on the IIF, they must defer their probe as well.
+ *
+ * Returns the IIF manager on success. Otherwise, an errno pointer.
+ */
+struct iif_manager *iif_manager_get_from_pdev(struct platform_device *pdev);
+
+/**
+ * devm_iif_manager_get_from_pdev() - Gets a device managed IIF manager from an IIF platform device.
+ * @dev: The device which will manage holding the refcount of the returned IIF manager.
+ * @pdev: The IIF platform device.
+ *
+ * This function works the same with `iif_manager_get_from_pdev()`, but the refcount of returned IIF
+ * manager will be managed by @dev. Thus, the caller doesn't need to call `iif_manager_put()`.
+ *
+ * Returns the IIF manager on success. Otherwise, an errno pointer.
+ */
+struct iif_manager *devm_iif_manager_get_from_pdev(struct device *dev,
+						   struct platform_device *pdev);
 
 /* Increases the reference count of @mgr. */
 struct iif_manager *iif_manager_get(struct iif_manager *mgr);

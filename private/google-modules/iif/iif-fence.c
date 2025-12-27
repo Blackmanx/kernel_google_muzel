@@ -463,7 +463,6 @@ static void iif_fences_submit_signaler_locked(struct iif_fence **fences, int num
 
 /*
  * Checks whether a waiter can be submitted to @fences.
- * If there are unsubmitted signalers, the caller should retry submitting waiters later.
  *
  * Returns 0 on success. Otherwise, a negative errno.
  */
@@ -473,9 +472,6 @@ static int iif_fences_are_waiter_submittable_locked(struct iif_fence **fences, i
 
 	for (i = 0; i < num_fences; i++) {
 		lockdep_assert_held(&fences[i]->fence_lock);
-
-		if (iif_fence_unsubmitted_signalers_locked(fences[i]))
-			return -EAGAIN;
 
 		if (iif_fence_has_retired_locked(fences[i]))
 			return -EPERM;
@@ -632,13 +628,8 @@ static void iif_fence_notify_poll_cb_locked(struct iif_fence *fence)
 	fence->poll_cb_pended = false;
 }
 
-/*
- * The poll callback which will be registered to direct fences.
- *
- * It is supposed to be called when the signaler IP driver calls `iif_fence_signal()` which holds
- * @iif->fence_lock.
- */
-static void iif_fence_direct_poll_cb_func(struct iif_fence *iif,
+/* The poll callback which will be registered to sync-unit fences. */
+static void iif_fence_poll_cb_func_locked(struct iif_fence *iif,
 					  const struct iif_fence_status *status)
 {
 	lockdep_assert_held(&iif->fence_lock);
@@ -657,6 +648,16 @@ static void iif_fence_direct_poll_cb_func(struct iif_fence *iif,
 
 	/* Notifies registered poll callbacks. */
 	iif_fence_notify_poll_cb_locked(iif);
+}
+
+/* The poll callback which will be registered to sync-unit fences. */
+static void iif_fence_poll_cb_func(struct iif_fence *iif, const struct iif_fence_status *status)
+{
+	unsigned long flags;
+
+	write_lock_irqsave(&iif->fence_lock, flags);
+	iif_fence_poll_cb_func_locked(iif, status);
+	write_unlock_irqrestore(&iif->fence_lock, flags);
 }
 
 /*
@@ -1145,15 +1146,14 @@ int iif_fence_init_with_params(struct iif_manager *mgr, struct iif_fence *fence,
 		return id;
 	}
 
-	if (params->flags & IIF_FLAGS_DIRECT) {
-		fence->sync_unit_poll_cb.iif = fence;
-		fence->sync_unit_poll_cb.func = iif_fence_direct_poll_cb_func;
-	} else {
-		/* TODO(b/389607552): Support registering poll callbacks to sync-unit drivers. */
-		iif_fence_ops_fence_retire(fence);
-		iif_manager_unset_fence_ops(mgr, fence);
-		return -EOPNOTSUPP;
-	}
+	/*
+	 * Direct fences use the `_locked()` one directly as the callback will be invoked inside of
+	 * the `iif_fence_signal_*()` function call which holds @iif->fence_lock.
+	 */
+	fence->sync_unit_poll_cb.func = (params->flags & IIF_FLAGS_DIRECT) ?
+						iif_fence_poll_cb_func_locked :
+						iif_fence_poll_cb_func;
+	fence->sync_unit_poll_cb.iif = fence;
 
 	ret = iif_fence_ops_add_poll_cb(fence);
 	if (ret < 0) {
@@ -1322,15 +1322,10 @@ EXPORT_SYMBOL_GPL(iif_fence_submit_signaler);
 
 int iif_fence_submit_waiter(struct iif_fence *fence, enum iif_ip_type ip)
 {
-	int unsubmitted = iif_fence_unsubmitted_signalers(fence);
-
 	might_sleep();
 
 	if (ip >= IIF_IP_NUM)
 		return -EINVAL;
-
-	if (unsubmitted)
-		return unsubmitted;
 
 	return iif_fence_submit_signaler_and_waiter(&fence, 1, NULL, 0, ip);
 }
