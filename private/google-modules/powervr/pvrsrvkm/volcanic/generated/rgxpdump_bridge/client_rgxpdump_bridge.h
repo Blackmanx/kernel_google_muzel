@@ -64,6 +64,9 @@ IMG_INTERNAL PVRSRV_ERROR BridgePDumpComputeCRCSignatureCheck(IMG_HANDLE hBridge
 IMG_INTERNAL PVRSRV_ERROR BridgePDumpCRCSignatureCheck(IMG_HANDLE hBridge,
 						       IMG_UINT32 ui32PDumpFlags);
 
+IMG_INTERNAL PVRSRV_ERROR BridgePDumpTRPSignatureCheck(IMG_HANDLE hBridge,
+						       IMG_UINT32 ui32PDumpFlags);
+
 IMG_INTERNAL PVRSRV_ERROR BridgePDumpValCheckPreCommand(IMG_HANDLE hBridge,
 							IMG_UINT32 ui32PDumpFlags);
 

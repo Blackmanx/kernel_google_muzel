@@ -96,6 +96,8 @@ typedef enum
  *     |                 |
  *     |                 |
  *     +-----------------+
+ *     |   Device info   |  FILE_SIZE - 4K - ui32DeviceInfoSize
+ *     +-----------------+
  *     | FW info header  |  FILE_SIZE - 4K
  *     +-----------------+
  *     |                 |
@@ -105,7 +107,7 @@ typedef enum
  *                          FILE_SIZE
  */
 
-#define FW_INFO_VERSION  (2)
+#define FW_INFO_VERSION  (3)
 
 /* Firmware is built for open source driver and uses open source version numbering */
 #define FW_INFO_FLAGS_OPEN_SOURCE (1U)
@@ -125,6 +127,10 @@ typedef struct
 	IMG_UINT16 ui16PVRVersionMajor;  /* DDK major version number */
 	IMG_UINT16 ui16PVRVersionMinor;  /* DDK minor version number */
 	IMG_UINT32 ui32PVRVersionBuild;  /* DDK build number */
+
+	/* FW_INFO_VERSION 3 */
+	IMG_UINT32 ui32DeviceInfoSize;   /* Device info size (in bytes). */
+	IMG_UINT32 ui32Padding;
 } RGX_FW_INFO_HEADER;
 
 typedef struct
@@ -136,6 +142,14 @@ typedef struct
 	IMG_UINT32 ui32AllocSize;
 	IMG_UINT32 ui32AllocOffset;
 } RGX_FW_LAYOUT_ENTRY;
+
+typedef struct
+{
+	IMG_UINT64 ui64BRNMaskSize;      /* BRN Mask size (in IMG_UINT64s) */
+	IMG_UINT64 ui64ERNMaskSize;      /* ERN Mask size (in IMG_UINT64s) */
+	IMG_UINT64 ui64FeatureMaskSize;  /* Feature Mask size (in IMG_UINT64s) */
+	IMG_UINT64 ui64FeatureParamSize; /* Feature Parameter size (in IMG_UINT64s) */
+} RGX_FW_DEVICE_INFO_HEADER;
 
 #endif /* RGX_FW_INFO_H */
 

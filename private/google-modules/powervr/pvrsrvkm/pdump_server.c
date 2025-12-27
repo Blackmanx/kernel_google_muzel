@@ -72,6 +72,8 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 #include "pdumpdesc.h"
 #include "rgxpdump.h"
+#include "rgxfwmemctx.h"
+#include "devicemem_pdump.h"
 
 
 /* Allow temporary buffer size override */
@@ -2363,6 +2365,7 @@ PVRSRV_ERROR PDumpSetFrameKM(CONNECTION_DATA *psConnection,
 	{
 		return PVRSRV_OK;
 	}
+
 
 
 #if defined(PDUMP_TRACE_STATE)

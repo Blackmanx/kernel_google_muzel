@@ -3722,8 +3722,10 @@ PVRSRV_ERROR PVRSRVRGXGetHWPerfTimeStampKM(
 		IMG_UINT64              *pui64TimeStamp)
 {
 	PVR_UNREFERENCED_PARAMETER(psConnection);
-	*pui64TimeStamp = RGXTimeCorrGetClockus64(psDeviceNode);
-	return PVRSRV_OK;
+	PVR_UNREFERENCED_PARAMETER(psDeviceNode);
+	PVR_UNREFERENCED_PARAMETER(pui64TimeStamp);
+
+	return PVRSRV_ERROR_NOT_IMPLEMENTED;
 }
 
 PVRSRV_ERROR RGXHWPerfControl(
@@ -3843,13 +3845,15 @@ PVRSRV_ERROR RGXHWPerfAcquireEvents(
 		IMG_PBYTE*  ppBuf,
 		IMG_UINT32* pui32BufLen)
 {
-	PVRSRV_ERROR			eError;
-	RGX_KM_HWPERF_DEVDATA*	psDevData = (RGX_KM_HWPERF_DEVDATA*)hDevData;
-	IMG_PBYTE				pDataDest;
-	IMG_UINT32			ui32TlPackets = 0;
-	IMG_PBYTE			pBufferEnd;
-	PVRSRVTL_PPACKETHDR psHDRptr;
-	PVRSRVTL_PACKETTYPE ui16TlType;
+	PVRSRV_ERROR		  eError;
+	RGX_KM_HWPERF_DEVDATA*	  psDevData = (RGX_KM_HWPERF_DEVDATA*)hDevData;
+	IMG_PBYTE		  pDataDest;
+#if (defined(PVRSRV_NEED_PVR_DPF) && defined(DEBUG)) || defined(DOXYGEN)
+	IMG_UINT32 ui32TlPackets = 0;
+#endif
+	IMG_PBYTE		  pBufferEnd;
+	PVRSRVTL_PPACKETHDR	  psHDRptr;
+	PVRSRVTL_PACKETTYPE	  ui16TlType;
 
 	/* Reset the output arguments in case we discover an error */
 	*ppBuf = NULL;
@@ -3924,7 +3928,9 @@ PVRSRV_ERROR RGXHWPerfAcquireEvents(
 		psHDRptr = GET_NEXT_PACKET_ADDR(psHDRptr);
 		/* Updated to keep track of the next packet to be read. */
 		psDevData->pTlBufRead[eStreamId] = (IMG_PBYTE) ((void *)psHDRptr);
+#if (defined(PVRSRV_NEED_PVR_DPF) && defined(DEBUG)) || defined(DOXYGEN)
 		ui32TlPackets++;
+#endif
 	}
 
 	PVR_DPF((PVR_DBG_VERBOSE, "RGXHWPerfAcquireEvents: TL Packets processed %03d", ui32TlPackets));

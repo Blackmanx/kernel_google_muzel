@@ -5,7 +5,7 @@
 #include "img_types.h"
 #include "sysconfig.h"
 
-#if defined(PVRSRV_ANDROID_TRACE_GPU_WORK_PERIOD)
+#if defined(PVRSRV_ANDROID_TRACE_GPU_WORK_PERIOD) && defined(SUPPORT_LINUX_DVFS)
 /**
  * init_pixel_uid_tis() - Initialise time-in-state infrastructure.
  * @pixel_dev:	System layer private data
@@ -32,7 +32,7 @@ void work_period_callback(IMG_HANDLE hSysData,
 			  IMG_UINT32 frequency,
 			  IMG_UINT64 time_ns);
 
-#else /* defined(PVRSRV_ANDROID_TRACE_GPU_WORK_PERIOD) */
+#else /* defined(PVRSRV_ANDROID_TRACE_GPU_WORK_PERIOD) && defined(SUPPORT_LINUX_DVFS) */
 
 static __maybe_unused
 int init_pixel_uid_tis(struct pixel_gpu_device *pixel_dev)

@@ -360,6 +360,7 @@ PVRSRV_ERROR RGXPollReg64(const void *hPrivate,
                           IMG_UINT64 ui64RegValue,
                           IMG_UINT64 ui64RegMask);
 
+#if defined(RGX_FEATURE_META_MAX_VALUE_IDX)
 /*!
 *******************************************************************************
 
@@ -397,7 +398,7 @@ PVRSRV_ERROR RGXWriteMetaRegThroughSP(const void *hPrivate,
 PVRSRV_ERROR RGXReadMetaRegThroughSP(const void *hPrivate,
                                      IMG_UINT32 ui32RegAddr,
                                      IMG_UINT32* ui32RegValue);
-
+#endif
 /*!
 *******************************************************************************
 
@@ -747,6 +748,7 @@ void RGXTrampolineRemapConfig(const void *hPrivate,
 #endif
 #endif /* defined(RGX_FEATURE_MIPS_BIT_MASK) */
 
+#if defined(RGX_FEATURE_META_MAX_VALUE_IDX)
 /*!
 *******************************************************************************
 
@@ -761,6 +763,7 @@ void RGXTrampolineRemapConfig(const void *hPrivate,
 
 ******************************************************************************/
 IMG_BOOL RGXDoFWSlaveBoot(const void *hPrivate);
+#endif
 
 /*!
 *******************************************************************************

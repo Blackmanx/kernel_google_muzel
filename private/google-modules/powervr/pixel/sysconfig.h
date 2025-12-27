@@ -20,7 +20,8 @@
 #include "of.h"
 #include "gpu_uevent.h"
 
-#define FW_ABI_VERSION 6
+#define FW_ABI_VERSION 25
+#define PIXEL_PA_RANGE_16K_PAGE_ABI_VERSION 15
 
 struct pixel_gpu_secure;
 
@@ -38,12 +39,25 @@ struct pixel_gpu_power_state_stats {
 	ktime_t last_exit_ns;
 };
 
+/*
+ * Number of elements aligns with the number of columns for pf_state_rates under
+ * gpu_pf_state device in the device tree
+ */
+enum GPU_PF_STATE_ELEMS {
+	FAB_FABHBW_VOTE,
+	FAB_MEMSS_VOTE,
+	FAB_GMC_VOTE,
+	FAB_TOTAL_VOTES,
+};
+
 struct pixel_gpu_device {
 	struct device *dev;
 	struct device *gpu_core_logic_pd;
 	struct device *sswrp_gpu_pd;
 	struct device_link *core_logic_link;
+#if defined(SUPPORT_LINUX_DVFS)
 	struct device_link *pf_state_link;
+#endif
 	struct notifier_block core_logic_notifier;
 	struct notifier_block sswrp_notifier;
 	bool notifiers_registered;
@@ -76,6 +90,9 @@ struct pixel_gpu_device {
 
 	struct pixel_of_properties of_properties;
 	struct pixel_of_pdevs of_pdevs;
+
+	u32 **fab_votes;
+	u32 fab_votes_opp_count;
 
 	struct slc_data slc_data;
 #if defined(SUPPORT_TRUSTED_DEVICE)

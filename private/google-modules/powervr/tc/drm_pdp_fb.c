@@ -139,7 +139,12 @@ static int pdp_fbdev_probe(struct drm_fb_helper *helper,
 
 	pdp_obj = to_pdp_obj(obj);
 
-	vaddr = ioremap(pdp_obj->cpu_addr, obj->size);
+	if (pdp_obj->cma_alloc) {
+		vaddr = (void __iomem *)pdp_obj->vaddr;
+	} else {
+		vaddr = ioremap(pdp_obj->cpu_addr, obj->size);
+	}
+
 	if (!vaddr) {
 		err = PTR_ERR(vaddr);
 		goto err_gem_destroy;
@@ -178,7 +183,8 @@ static int pdp_fbdev_probe(struct drm_fb_helper *helper,
 	return 0;
 
 err_gem_unmap:
-	iounmap(vaddr);
+	if (!pdp_obj->cma_alloc)
+		iounmap(vaddr);
 
 err_gem_destroy:
 	pdp_gem_object_free_priv(gem_priv, obj);
@@ -259,7 +265,7 @@ void pdp_fbdev_destroy(struct pdp_fbdev *pdp_fbdev)
 	pdp_fb = &pdp_fbdev->fb;
 
 	pdp_obj = to_pdp_obj(pdp_fb->obj[0]);
-	if (pdp_obj) {
+	if (pdp_obj && !pdp_obj->cma_alloc) {
 		info = pdp_fbdev->helper.COMPAT_FB_INFO;
 		iounmap((void __iomem *)info->screen_base);
 	}

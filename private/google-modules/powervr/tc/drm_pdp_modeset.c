@@ -211,7 +211,6 @@ out:
 
 static const struct drm_mode_config_funcs pdp_mode_config_funcs = {
 	.fb_create = pdp_fb_create,
-	.output_poll_changed = NULL,
 	.atomic_check = drm_atomic_helper_check,
 	.atomic_commit = drm_atomic_helper_commit,
 };
@@ -232,6 +231,10 @@ int pdp_modeset_early_init(struct pdp_drm_private *dev_priv)
 	case PDP_VERSION_APOLLO:
 		dev->mode_config.max_width = PDP_WIDTH_MAX;
 		dev->mode_config.max_height = PDP_HEIGHT_MAX;
+		break;
+	case PDP_VERSION_ORION_SOC:
+		dev->mode_config.max_width = 1280;
+		dev->mode_config.max_height = 720;
 		break;
 	case PDP_VERSION_ODIN:
 		if (dev_priv->subversion == PDP_ODIN_ORION) {
@@ -260,7 +263,7 @@ int pdp_modeset_early_init(struct pdp_drm_private *dev_priv)
 	DRM_INFO("%s async flip support is %s\n",
 		 dev->driver->name, async_flip_enable ? "enabled" : "disabled");
 
-#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 17, 0))
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 1, 0))
 	dev->mode_config.allow_fb_modifiers = true;
 #endif
 
@@ -281,6 +284,7 @@ int pdp_modeset_early_init(struct pdp_drm_private *dev_priv)
 	switch (dev_priv->version) {
 	case PDP_VERSION_APOLLO:
 	case PDP_VERSION_ODIN:
+	case PDP_VERSION_ORION_SOC:
 		dev_priv->connector = pdp_dvi_connector_create(dev);
 		if (IS_ERR(dev_priv->connector)) {
 			DRM_ERROR("failed to create a connector\n");

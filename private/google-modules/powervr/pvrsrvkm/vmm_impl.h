@@ -47,6 +47,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #define VMM_IMPL_H
 
 #include "img_types.h"
+#include "pvrsrv.h"
 #include "pvrsrv_error.h"
 #include "pvrsrv_device.h"
 
@@ -132,7 +133,8 @@ typedef enum _VMM_CONF_PARAM_
 		5.1 - Perform any post-processing like parameter unpacking, etc.
 		5.2 - Continue execution in guest VM
  */
-typedef struct _VMM_PVZ_CONNECTION_
+
+typedef struct _VMM_PVZ_CLIENT_CONNECTION_
 {
 	struct {
 		/*
@@ -149,7 +151,10 @@ typedef struct _VMM_PVZ_CONNECTION_
 
 		PVRSRV_ERROR (*pfnUnmapDevPhysHeap)(void);
 	} sClientFuncTab;
+} VMM_PVZ_CLIENT_CONNECTION;
 
+typedef struct _VMM_PVZ_SERVER_CONNECTION_
+{
 	struct {
 		/*
 			Corresponding server side entries to handle guest PVZ calls
@@ -187,7 +192,7 @@ typedef struct _VMM_PVZ_CONNECTION_
 										IMG_UINT32 ui32DevID);
 
 	} sVmmFuncTab;
-} VMM_PVZ_CONNECTION;
+} VMM_PVZ_SERVER_CONNECTION;
 
 /*!
 *******************************************************************************
@@ -198,9 +203,10 @@ typedef struct _VMM_PVZ_CONNECTION_
                 connection to the host.
  @Return        PVRSRV_OK on success. Otherwise, a PVRSRV error code
 ******************************************************************************/
-PVRSRV_ERROR VMMCreatePvzConnection(VMM_PVZ_CONNECTION **psPvzConnection,
-									PVRSRV_DEVICE_CONFIG *psDevConfig);
-void VMMDestroyPvzConnection(VMM_PVZ_CONNECTION *psPvzConnection,
-							 PVRSRV_DEVICE_CONFIG *psDevConfig);
+PVRSRV_ERROR VMMCreatePvzServerConnection(IMG_HANDLE *phPvzConnection);
+PVRSRV_ERROR VMMCreatePvzClientConnection(IMG_HANDLE *phPvzConnection);
+
+void VMMDestroyPvzServerConnection(IMG_HANDLE *phPvzConnection);
+void VMMDestroyPvzClientConnection(IMG_HANDLE *phPvzConnection);
 
 #endif /* VMM_IMPL_H */

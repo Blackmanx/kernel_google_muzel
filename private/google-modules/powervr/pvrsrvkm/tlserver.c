@@ -82,6 +82,7 @@ TLServerOpenStreamKM(const IMG_CHAR*   pszName,
 	                               IMG_TRUE : IMG_FALSE;
 	IMG_BOOL		bNoOpenCB    = ui32Mode & PVRSRV_STREAM_FLAG_IGNORE_OPEN_CALLBACK ?
 	                               IMG_TRUE : IMG_FALSE;
+	IMG_BOOL		bDeferredFree = IMG_FALSE;
 	PTL_GLOBAL_DATA psGD = TLGGD();
 
 #if defined(PVR_DPF_FUNCTION_TRACE_ON)
@@ -107,7 +108,11 @@ TLServerOpenStreamKM(const IMG_CHAR*   pszName,
 		{
 			if ((psNode = TLFindStreamNodeByName(pszName)) == NULL)
 			{
-				PVR_DPF((PVR_DBG_MESSAGE, "Stream %s does not exist, waiting...", pszName));
+#if defined(PVR_DPF_FUNCTION_TRACE_ON)
+				PVR_DPF((PVR_DBG_WARNING,
+				         "--> %s: Stream %s does not exist, waiting...",
+				         __func__,  pszName));
+#endif
 
 				/* Release TL_GLOBAL_DATA lock before sleeping */
 				OSLockRelease (psGD->hTLGDLock);
@@ -173,6 +178,11 @@ TLServerOpenStreamKM(const IMG_CHAR*   pszName,
 		PVR_LOG_GOTO_IF_NOMEM(psNewSD, eError, e0);
 
 		psNode->uiWRefCount++;
+
+#if defined(PVR_DPF_FUNCTION_TRACE_ON)
+		PVR_DPF((PVR_DBG_WARNING, "%s: WO: psSD->hReadEvent = '%p'",
+		         __func__, psNewSD->hReadEvent));
+#endif
 	}
 	else
 	{
@@ -205,11 +215,26 @@ TLServerOpenStreamKM(const IMG_CHAR*   pszName,
 			goto e1;
 		}
 
-		PVR_DPF((PVR_DBG_VERBOSE,
-		        "TLServerOpenStreamKM evList=%p, evObj=%p",
+#if defined(PVR_DPF_FUNCTION_TRACE_ON)
+		PVR_DPF((PVR_DBG_WARNING,
+		        "%s: hEvent=%p, evList=%p, evObj=%p", __func__,
+		        hEvent,
 		        psNode->hReadEventObj,
 		        psNode->psRDesc->hReadEvent));
+
+		OSEventObjectDumpDebugInfo(hEvent);
+#endif	/* PVR_DPF_FUNCTION_TRACE_ON */
 	}
+
+#if defined(PVR_DPF_FUNCTION_TRACE_ON)
+	PVR_DPF((PVR_DBG_WARNING,
+	         "--> %s: Stream '%s' RDesc %p flags = 0x%x,"
+	         " WDesc %p flags = 0x%x", __func__,
+	         pszName,
+	         psNode->psRDesc, (psNode->psRDesc ? psNode->psRDesc->ui32Flags :0),
+	         psNode->psWDesc, (psNode->psWDesc ? psNode->psWDesc->ui32Flags :0)
+	));
+#endif
 
 	/* Copy the import handle back to the user mode API to enable access to
 	 * the stream buffer from user-mode process. */
@@ -218,6 +243,17 @@ TLServerOpenStreamKM(const IMG_CHAR*   pszName,
 	PVR_LOG_GOTO_IF_ERROR(eError, "DevmemLocalGetImportHandle", e2);
 
 	psGD->uiClientCnt++;
+
+	/* If we have a consumer of the stream consuming the data with the
+	 * DeferredFree flag set we need to increment the Stream and SNode
+	 * reference counts.
+	 */
+	if (TL_HAS_DEFERRED_FREE(psGD->uiTLDeferredFrees))
+	{
+		psStream->i32RefCount = 1;
+		psStream->psNode->i32RefCount = 1;
+		bDeferredFree = IMG_TRUE;
+	}
 
 	/* Global data updated. Now release global lock */
 	OSLockRelease (psGD->hTLGDLock);
@@ -238,9 +274,9 @@ TLServerOpenStreamKM(const IMG_CHAR*   pszName,
 	}
 
 	/* psNode->uiWRefCount is set to '1' on stream create so the first open
-	 * is '2'. */
+	 * is '2'for non DeferredFree streams, '3' for DeferredFree streams. */
 	if (bIsWriteOnly && psStream->psNotifStream != NULL &&
-	    psNode->uiWRefCount == 2)
+	    psNode->uiWRefCount == (bDeferredFree ? 3 : 2))
 	{
 		TLStreamMarkStreamOpen(psStream);
 	}
@@ -281,7 +317,7 @@ TLServerCloseStreamKM(PTL_STREAM_DESC psSD)
 	 * call will update the TL_SNODE's descriptor value */
 	OSLockAcquire (psGD->hTLGDLock);
 	/* Quick exit if there are no streams */
-	if (psGD->psHead == NULL)
+	if (dllist_is_empty(&psGD->sNodeListHead))
 	{
 		OSLockRelease (psGD->hTLGDLock);
 		PVR_DPF_RETURN_RC(PVRSRV_ERROR_HANDLE_NOT_FOUND);
@@ -302,27 +338,57 @@ TLServerCloseStreamKM(PTL_STREAM_DESC psSD)
 	 * client is removed */
 	psStream = psNode->psStream;
 
+#if defined(PVR_DPF_FUNCTION_TRACE_ON)
+	PVR_DPF((PVR_DBG_WARNING,
+	         "%s: Closing '%s' stream RefCounts {%p}, %d, {%p}, %d", __func__,
+	         psStream->szName, &psStream->i32RefCount, psStream->i32RefCount,
+	         &psNode->i32RefCount, psNode->i32RefCount));
+	PVR_DPF((PVR_DBG_WARNING,
+	         "%s: Snode WRef [%x] RRefCount %x, WRefCount %x", __func__,
+	         psNode->uiWRefCount,
+	         psNode->psRDesc ? psNode->psRDesc->uiRefCount : 0,
+	         psNode->psWDesc ? psNode->psWDesc->uiRefCount : 0));
+#endif
+
 	/* Close event handle because event object list might be destroyed in
 	 * TLUnrefDescAndTryFreeStreamNode(). */
-	if (!bIsWriteOnly)
+	if (!TL_HAS_DEFERRED_FREE(psGD->uiTLDeferredFrees))
 	{
-		/* Reset the read position on close if the stream requires it. */
-		TLStreamResetReadPos(psStream);
-
-		/* Close and free the event handle resource used by this descriptor */
-		eError = OSEventObjectClose(psSD->hReadEvent);
-		if (eError != PVRSRV_OK)
+		/* Only perform final close calls if there is no top-level consumer
+		 * present.
+		 */
+		if (!bIsWriteOnly)
 		{
-			/* Log error but continue as it seems best */
-			PVR_LOG_ERROR(eError, "OSEventObjectClose");
-			eError = PVRSRV_ERROR_UNABLE_TO_DESTROY_EVENT;
+			/* Reset the read position on close if the stream requires it. */
+			TLStreamResetReadPos(psStream);
+
+			/* Close and free the event handle resource used by this descriptor */
+
+			/* Dump event info if we're closing it ... */
+#if defined(PVR_DPF_FUNCTION_TRACE_ON)
+			PVR_DPF((PVR_DBG_WARNING, "%s: SD->hReadEvent = '%p'",
+			         __func__, psSD->hReadEvent));
+			OSEventObjectDumpDebugInfo(psSD->hReadEvent);
+#endif
+
+#if defined(PVR_DPF_FUNCTION_TRACE_ON)
+			PVR_DPF((PVR_DBG_WARNING, "%s: Node->hReadEventObj = '%p'",
+			         __func__, psNode->hReadEventObj));
+#endif
+			eError = OSEventObjectClose(psSD->hReadEvent);
+			if (eError != PVRSRV_OK)
+			{
+				/* Log error but continue as it seems best */
+				PVR_LOG_ERROR(eError, "OSEventObjectClose");
+				eError = PVRSRV_ERROR_UNABLE_TO_DESTROY_EVENT;
+			}
 		}
-	}
-	else if (psNode->uiWRefCount == 2 && psStream->psNotifStream != NULL)
-	{
-		/* psNode->uiWRefCount is set to '1' on stream create so the last close
-		 * before destruction is '2'. */
-		TLStreamMarkStreamClose(psStream);
+		else if (psNode->uiWRefCount == 2 && psStream->psNotifStream != NULL)
+		{
+			/* psNode->uiWRefCount is set to '1' on stream create so the
+			 * last close before destruction is '2'. */
+			TLStreamMarkStreamClose(psStream);
+		}
 	}
 
 	/* Remove descriptor from stream object/list */
@@ -341,6 +407,10 @@ TLServerCloseStreamKM(PTL_STREAM_DESC psSD)
 	/* Destroy the stream if its TL_SNODE was removed from TL_GLOBAL_DATA */
 	if (bDestroyStream)
 	{
+#if defined(PVR_DPF_FUNCTION_TRACE_ON)
+		PVR_DPF((PVR_DBG_WARNING, "%s: Destroying '%s'", __func__,
+		         psStream->szName));
+#endif
 		TLStreamDestroy (psStream);
 		psStream = NULL;
 	}
@@ -385,7 +455,7 @@ TLServerReserveStreamKM(PTL_STREAM_DESC psSD,
 	}
 
 	/* Quick exit if there are no streams */
-	if (psGD->psHead == NULL)
+	if (dllist_is_empty(&psGD->sNodeListHead))
 	{
 		OSLockRelease(psGD->hTLGDLock);
 		PVR_DPF_RETURN_RC(PVRSRV_ERROR_STREAM_ERROR);
@@ -458,7 +528,7 @@ TLServerCommitStreamKM(PTL_STREAM_DESC psSD,
 	}
 
 	/* Quick exit if there are no streams */
-	if (psGD->psHead == NULL)
+	if (dllist_is_empty(&psGD->sNodeListHead))
 	{
 		OSLockRelease(psGD->hTLGDLock);
 		PVR_DPF_RETURN_RC(PVRSRV_ERROR_STREAM_ERROR);
@@ -506,7 +576,7 @@ TLServerDiscoverStreamsKM(const IMG_CHAR *pszNamePattern,
 
 	OSLockAcquire(psGD->hTLGDLock);
 	/* Quick exit if there are no streams */
-	if (TLGGD()->psHead == NULL)
+	if (dllist_is_empty(&psGD->sNodeListHead))
 	{
 		OSLockRelease(psGD->hTLGDLock);
 		*pui32NumFound = 0;
@@ -547,7 +617,7 @@ TLServerAcquireDataKM(PTL_STREAM_DESC psSD,
 	 * call will update the TL_SNODE's descriptor value */
 	OSLockAcquire(psGD->hTLGDLock);
 	/* Quick exit if there are no streams */
-	if (psGD->psHead == NULL)
+	if (dllist_is_empty(&psGD->sNodeListHead))
 	{
 		OSLockRelease(psGD->hTLGDLock);
 		PVR_DPF_RETURN_RC(PVRSRV_ERROR_STREAM_ERROR);
@@ -695,7 +765,7 @@ TLServerReleaseDataKM(PTL_STREAM_DESC psSD,
 	 * call will update the TL_SNODE's descriptor value */
 	OSLockAcquire(psGD->hTLGDLock);
 	/* Quick exit if there are no streams */
-	if (psGD->psHead == NULL)
+	if (dllist_is_empty(&psGD->sNodeListHead))
 	{
 		OSLockRelease(psGD->hTLGDLock);
 		PVR_DPF_RETURN_RC(PVRSRV_ERROR_STREAM_ERROR);
@@ -743,7 +813,7 @@ TLServerWriteDataKM(PTL_STREAM_DESC psSD,
 	}
 
 	/* Quick exit if there are no streams */
-	if (psGD->psHead == NULL)
+	if (dllist_is_empty(&psGD->sNodeListHead))
 	{
 		OSLockRelease(psGD->hTLGDLock);
 		PVR_DPF_RETURN_RC(PVRSRV_ERROR_STREAM_ERROR);

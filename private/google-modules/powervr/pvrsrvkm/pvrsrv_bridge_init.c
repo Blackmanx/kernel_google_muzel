@@ -133,10 +133,8 @@ void DeinitSYNCFALLBACKBridge(void);
 #endif
 PVRSRV_ERROR InitRGXTIMERQUERYBridge(void);
 void DeinitRGXTIMERQUERYBridge(void);
-#if defined(SUPPORT_DI_BRG_IMPL)
 PVRSRV_ERROR InitDIBridge(void);
 void DeinitDIBridge(void);
-#endif
 
 PVRSRV_ERROR
 ServerBridgeInit(void)
@@ -266,10 +264,8 @@ ServerBridgeInit(void)
 	PVR_LOG_IF_ERROR(eError, "InitSYNCFALLBACKBridge");
 #endif
 
-#if defined(SUPPORT_DI_BRG_IMPL)
 	eError = InitDIBridge();
 	PVR_LOG_IF_ERROR(eError, "InitDIBridge");
-#endif
 
 	eError = OSPlatformBridgeInit();
 	PVR_LOG_IF_ERROR(eError, "OSPlatformBridgeInit");
@@ -281,9 +277,7 @@ void ServerBridgeDeInit(void)
 {
 	OSPlatformBridgeDeInit();
 
-#if defined(SUPPORT_DI_BRG_IMPL)
 	DeinitDIBridge();
-#endif
 
 #if defined(SUPPORT_FALLBACK_FENCE_SYNC)
 	DeinitSYNCFALLBACKBridge();

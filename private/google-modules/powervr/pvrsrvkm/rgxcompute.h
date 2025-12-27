@@ -89,8 +89,8 @@ PVRSRV_ERROR PVRSRVRGXCreateComputeContextKM(CONNECTION_DATA			*psConnection,
 											 IMG_UINT32					ui32FrameworkCommandSize,
 											 IMG_PBYTE					pabyFrameworkCommand,
 											 IMG_HANDLE					hMemCtxPrivData,
-											 IMG_UINT32					ui32StaticComputeContextStateSize,
-											 IMG_PBYTE					pStaticComputeContextState,
+											 IMG_UINT32					ui32CompContextDataSize,
+											 IMG_PBYTE					pCompData,
 											 IMG_UINT32					ui32PackedCCBSizeU88,
 											 IMG_UINT32					ui32ContextFlags,
 											 IMG_UINT64					ui64RobustnessAddress,
@@ -188,11 +188,6 @@ PVRSRV_ERROR PVRSRVRGXSetComputeContextPriorityKM(CONNECTION_DATA *psConnection,
 												  PVRSRV_DEVICE_NODE *psDeviceNode,
 												  RGX_SERVER_COMPUTE_CONTEXT *psComputeContext,
 												  IMG_INT32 i32Priority);
-
-PVRSRV_ERROR PVRSRVRGXSetComputeContextPropertyKM(RGX_SERVER_COMPUTE_CONTEXT *psComputeContext,
-												  RGX_CONTEXT_PROPERTY eContextProperty,
-												  IMG_UINT64 ui64Input,
-												  IMG_UINT64 *pui64Output);
 
 PVRSRV_ERROR PVRSRVRGXGetLastDeviceErrorKM(CONNECTION_DATA    *psConnection,
                                            PVRSRV_DEVICE_NODE *psDeviceNode,

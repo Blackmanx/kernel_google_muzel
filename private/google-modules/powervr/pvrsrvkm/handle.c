@@ -184,8 +184,6 @@ static HANDLE_IMPL_FUNCTAB const *gpsHandleFuncs;
 
 static POS_LOCK gKernelHandleLock;
 static IMG_BOOL gbLockInitialised = IMG_FALSE;
-/* Pointer to process handle base currently being freed */
-static PVRSRV_HANDLE_BASE *g_psProcessHandleBaseBeingFreed;
 /* Lock for the process handle base table */
 static POS_LOCK g_hProcessHandleBaseLock;
 /* Hash table with process handle bases */
@@ -2241,23 +2239,11 @@ PVRSRV_ERROR PVRSRVFreeHandleBase(PVRSRV_HANDLE_BASE *psBase, IMG_UINT64 ui64Max
 	FREE_HANDLE_DATA sHandleData = {NULL};
 	IMG_UINT32 i;
 	PVRSRV_ERROR eError;
-	IMG_PID uiCleanupPid = PVRSRVCleanupThreadGetPid();
-	uintptr_t uiCleanupTid = PVRSRVCleanupThreadGetTid();
 	IMG_UINT32 ui32ErrorCount = 0;
 
 	PVR_ASSERT(gpsHandleFuncs);
 
 	LockHandle(psBase);
-
-	/* If this is a process handle base being freed by the cleanup
-	 * thread, store this in g_psProcessHandleBaseBeingFreed
-	 */
-	if ((OSGetCurrentProcessID() == uiCleanupPid) &&
-	    (OSGetCurrentThreadID() == uiCleanupTid) &&
-	    (psBase->eType == PVRSRV_HANDLE_BASE_TYPE_PROCESS))
-	{
-		g_psProcessHandleBaseBeingFreed = psBase;
-	}
 
 	sHandleData.psBase = psBase;
 	sHandleData.ui64TimeStart = OSClockns64();
@@ -2345,11 +2331,6 @@ PVRSRV_ERROR PVRSRVFreeHandleBase(PVRSRV_HANDLE_BASE *psBase, IMG_UINT64 ui64Max
 	return eError;
 
 ExitUnlock:
-	if ((OSGetCurrentProcessID() == uiCleanupPid) &&
-		(OSGetCurrentThreadID() == uiCleanupTid))
-	{
-		g_psProcessHandleBaseBeingFreed = NULL;
-	}
 	UnlockHandle(psBase);
 
 	return eError;

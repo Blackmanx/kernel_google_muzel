@@ -1,7 +1,11 @@
 /*************************************************************************/ /*!
-@File           pvr_dvfs_proactive.h
-@Title          System level interface for DVFS and PDVFS
+@File           rgxinit_internal.h
+@Title          RGX initialisation header file
 @Copyright      Copyright (c) Imagination Technologies Ltd. All Rights Reserved
+@Description    Header for common RGX initialisation functions used in
+                architecture specific rgxinit.c files. Functions declared in
+                this header would usually be found statically defined within an
+                architecture specific rgxinit.c file.
 @License        Dual MIT/GPLv2
 
 The contents of this file are subject to the MIT license as set out below.
@@ -40,63 +44,54 @@ IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 */ /**************************************************************************/
 
-#ifndef PVR_PDVFS_DEVICE_H
-#define PVR_PDVFS_DEVICE_H
+#ifndef RGX_INIT_INTERNAL_H
+#define RGX_INIT_INTERNAL_H
 
-#if defined(SUPPORT_PDVFS)
+#include "device.h"
+#include "rgxdevice.h"
+
 /*************************************************************************/ /*!
-@Function       InitPDVFS
-
-@Description    Initialise the device for Proactive DVFS support.
-                Prepares the OPP table from the devicetree, if enabled.
-
-@Input          psDeviceNode       Device node
+@Function       RGXDevVersionString
+@Description    Gets the version string for the given device node and returns
+                a pointer to it in ppszVersionString. It is then the
+                responsibility of the caller to free this memory.
+@Input          psDeviceNode        Device node from which to obtain the
+                                    version string
+@Output	        ppszVersionString   Contains the version string upon return
 @Return         PVRSRV_ERROR
 */ /**************************************************************************/
-PVRSRV_ERROR InitPDVFS(PPVRSRV_DEVICE_NODE psDeviceNode);
+PVRSRV_ERROR RGXDevVersionString(PVRSRV_DEVICE_NODE *psDeviceNode,
+                                 IMG_CHAR **ppszVersionString);
 
-/*************************************************************************/ /*!
-@Function       DeinitPDVFS
-
-@Description    De-initialise the device for Proactive DVFS support.
-
-@Input          psDeviceNode       Device node
-@Return         None
-*/ /**************************************************************************/
-void DeinitPDVFS(PPVRSRV_DEVICE_NODE psDeviceNode);
-
-#if defined(SUPPORT_PDVFS_DEVFREQ)
-/*************************************************************************/ /*!
-@Function       RegisterPDVFSDevice
-
-@Description    Register the device for Proactive DVFS support.
-                Prepares the OPP table from the devicetree, if enabled.
-
-@Input          psDeviceNode       Device node
+/**************************************************************************/ /*!
+@Function       RGXDevClockSpeed
+@Description    Gets the clock speed for the given device node and returns
+                it in pui32RGXClockSpeed.
+@Input          psDeviceNode        Device node
+@Output         pui32RGXClockSpeed  Variable for storing the clock speed
 @Return         PVRSRV_ERROR
 */ /**************************************************************************/
-PVRSRV_ERROR RegisterPDVFSDevice(PPVRSRV_DEVICE_NODE psDeviceNode);
+PVRSRV_ERROR RGXDevClockSpeed(PVRSRV_DEVICE_NODE *psDeviceNode,
+                              IMG_PUINT32  pui32RGXClockSpeed);
 
+#if !defined(NO_HARDWARE)
 /*************************************************************************/ /*!
-@Function       UnregisterPDVFSDevice
+@Function       SampleIRQCount
+@Description    Utility function taking snapshots of RGX FW interrupt count.
+@Input          psDevInfo    Device Info structure
 
-@Description    Unregister the device for Proactive DVFS support.
+@Return         IMG_BOOL     Returns IMG_TRUE if RGX FW IRQ is not equal to
+                             sampled RGX FW IRQ count for any RGX FW thread.
+ */ /*************************************************************************/
+IMG_BOOL SampleIRQCount(PVRSRV_RGXDEV_INFO *psDevInfo);
 
-@Input          psDeviceNode       Device node
-@Return         None
-*/ /**************************************************************************/
-void UnregisterPDVFSDevice(PPVRSRV_DEVICE_NODE psDeviceNode);
-#endif /* SUPPORT_PDVFS_DEVFREQ */
+IMG_BOOL RGXAckHwIrq(PVRSRV_RGXDEV_INFO *psDevInfo,
+                     IMG_UINT32 ui32IRQStatusReg,
+                     IMG_UINT32 ui32IRQStatusEventMsk,
+                     IMG_UINT32 ui32IRQClearReg,
+                     IMG_UINT32 ui32IRQClearMask);
 
-/*************************************************************************/ /*!
-@Function       ResumePDVFS
-
-@Description    Restore firmware state controlled by the DVFS governor after power on.
-
-@Input          psDeviceNode       Device node
-@Return			PVRSRV_ERROR
-*/ /**************************************************************************/
-PVRSRV_ERROR ResumePDVFS(PPVRSRV_DEVICE_NODE psDeviceNode);
+IMG_BOOL RGXAckIrqDedicated(PVRSRV_RGXDEV_INFO *psDevInfo);
 #endif
 
-#endif /* PVR_PDVFS_DEVICE_H */
+#endif /* RGX_INIT_INTERNAL_H */

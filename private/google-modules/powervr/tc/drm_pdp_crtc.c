@@ -90,6 +90,9 @@ static bool pdp_clocks_set(struct drm_crtc *crtc,
 	bool res;
 
 	switch (dev_priv->version) {
+	case PDP_VERSION_ORION_SOC:
+		res = true;
+		break;
 	case PDP_VERSION_ODIN: {
 		pdp_odin_set_updates_enabled(crtc->dev->dev,
 						pdp_crtc->pdp_reg, false);
@@ -147,6 +150,7 @@ void pdp_crtc_set_plane_enabled(struct drm_crtc *crtc, bool enable)
 
 	switch (dev_priv->version) {
 	case PDP_VERSION_ODIN:
+	case PDP_VERSION_ORION_SOC:
 		pdp_odin_set_plane_enabled(crtc->dev->dev,
 					   pdp_crtc->pdp_reg,
 					   0, enable);
@@ -173,6 +177,7 @@ static void pdp_crtc_set_syncgen_enabled(struct drm_crtc *crtc, bool enable)
 
 	switch (dev_priv->version) {
 	case PDP_VERSION_ODIN:
+	case PDP_VERSION_ORION_SOC:
 		pdp_odin_set_syncgen_enabled(crtc->dev->dev,
 					     pdp_crtc->pdp_reg,
 					     enable);
@@ -250,6 +255,7 @@ static void pdp_crtc_mode_set(struct drm_crtc *crtc,
 
 	switch (dev_priv->version) {
 	case PDP_VERSION_ODIN:
+	case PDP_VERSION_ORION_SOC:
 		pdp_odin_set_updates_enabled(crtc->dev->dev,
 					     pdp_crtc->pdp_reg, false);
 		pdp_odin_reset_planes(crtc->dev->dev,
@@ -312,7 +318,8 @@ static bool pdp_crtc_helper_mode_fixup(struct drm_crtc *crtc,
 {
 	struct pdp_drm_private *dev_priv = crtc->dev->dev_private;
 
-	if (dev_priv->version == PDP_VERSION_ODIN
+	if ((dev_priv->version == PDP_VERSION_ODIN ||
+		dev_priv->version == PDP_VERSION_ORION_SOC)
 		&& mode->hdisplay == 1920
 		&& mode->vdisplay == 1080) {
 
@@ -496,8 +503,8 @@ static void pdp_crtc_destroy(struct drm_crtc *crtc)
 	DRM_DEBUG_DRIVER("[CRTC:%d]\n", crtc->base.id);
 
 	drm_crtc_cleanup(crtc);
-
-	iounmap(pdp_crtc->pll_reg);
+	if (pdp_crtc->pll_reg)
+		iounmap(pdp_crtc->pll_reg);
 
 	iounmap(pdp_crtc->pdp_reg);
 	release_mem_region(pdp_crtc->pdp_reg_phys_base, pdp_crtc->pdp_reg_size);
@@ -749,6 +756,7 @@ void pdp_crtc_set_vblank_enabled(struct drm_crtc *crtc, bool enable)
 	struct pdp_crtc *pdp_crtc = to_pdp_crtc(crtc);
 
 	switch (dev_priv->version) {
+	case PDP_VERSION_ORION_SOC:
 	case PDP_VERSION_ODIN:
 		pdp_odin_set_vblank_enabled(crtc->dev->dev,
 					    pdp_crtc->pdp_reg,
@@ -777,6 +785,7 @@ void pdp_crtc_irq_handler(struct drm_crtc *crtc)
 	bool handled;
 
 	switch (dev_priv->version) {
+	case PDP_VERSION_ORION_SOC:
 	case PDP_VERSION_ODIN:
 		handled = pdp_odin_check_and_clear_vblank(dev->dev,
 							  pdp_crtc->pdp_reg);

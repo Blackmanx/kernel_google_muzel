@@ -97,6 +97,16 @@ static const struct odin_displaymode odin_modes[] = {
 };
 
 /*
+ * For Fenrir/Loki, only 2 modes are supported.
+ * 1080p id=5, m=37, od1=5, od2=5
+ * 720p id=5, m=37, od1=10, od2=5
+ */
+static const struct odin_displaymode fenrir_modes[] = {
+	{.w = 1920, .h = 1080, .id = 5, .m = 37, .od1 = 5, .od2 = 5},
+	{.w = 1280, .h = 720, .id = 5, .m = 37, .od1 = 10, .od2 = 5},
+};
+
+/*
  * For Orion, only the listed modes below are supported.
  * 1920x1080 mode is currently not supported.
  */
@@ -373,6 +383,8 @@ static const struct odin_displaymode *get_odin_mode(int w, int h,
 
 	if (pv == PDP_ODIN_ORION)
 		pdp_modes = (struct odin_displaymode *)orion_modes;
+	else if (pv == PDP_ODIN_FENRIR)
+		pdp_modes = (struct odin_displaymode *)fenrir_modes;
 	else
 		pdp_modes = (struct odin_displaymode *)odin_modes;
 
@@ -446,11 +458,13 @@ bool pdp_odin_clocks_set(struct device *dev,
 	 * Hold the PDP MMCM in reset while changing the clock regs.
 	 * Set the PDP bit of ODN_CORE_CLK_GEN_RESET high to reset.
 	 */
-	value = core_rreg32(odn_core_reg, ODN_CORE_CLK_GEN_RESET);
-	value = REG_VALUE_SET(value, 0x1,
-			      ODN_CLK_GEN_RESET_PDP_MMCM_SHIFT,
-			      ODN_CLK_GEN_RESET_PDP_MMCM_MASK);
-	core_wreg32(odn_core_reg, ODN_CORE_CLK_GEN_RESET, value);
+	if (pdpsubv != PDP_ODIN_FENRIR) {
+		value = core_rreg32(odn_core_reg, ODN_CORE_CLK_GEN_RESET);
+		value = REG_VALUE_SET(value, 0x1,
+				  ODN_CLK_GEN_RESET_PDP_MMCM_SHIFT,
+				  ODN_CLK_GEN_RESET_PDP_MMCM_MASK);
+		core_wreg32(odn_core_reg, ODN_CORE_CLK_GEN_RESET, value);
+	}
 
 	/* Pixel clock Input divider */
 	get_odin_clock_settings(odispl->id, &lo_time, &hi_time,
@@ -579,17 +593,19 @@ bool pdp_odin_clocks_set(struct device *dev,
 	 * Take the PDP MMCM out of reset.
 	 * Set the PDP bit of ODN_CORE_CLK_GEN_RESET to 0.
 	 */
-	value = core_rreg32(odn_core_reg, ODN_CORE_CLK_GEN_RESET);
-	value = REG_VALUE_LO(value, 1, ODN_CLK_GEN_RESET_PDP_MMCM_SHIFT,
-			     ODN_CLK_GEN_RESET_PDP_MMCM_MASK);
-	core_wreg32(odn_core_reg, ODN_CORE_CLK_GEN_RESET, value);
+	if (pdpsubv != PDP_ODIN_FENRIR) {
+		value = core_rreg32(odn_core_reg, ODN_CORE_CLK_GEN_RESET);
+		value = REG_VALUE_LO(value, 1, ODN_CLK_GEN_RESET_PDP_MMCM_SHIFT,
+				 ODN_CLK_GEN_RESET_PDP_MMCM_MASK);
+		core_wreg32(odn_core_reg, ODN_CORE_CLK_GEN_RESET, value);
+	}
 
 	/*
 	 * Wait until MMCM_LOCK_STATUS_PDPP bit is '1' in register
 	 * MMCM_LOCK_STATUS. Issue an error if this does not
 	 * go to '1' within 500ms.
 	 */
-	{
+	if (pdpsubv != PDP_ODIN_FENRIR) {
 		int count;
 		bool locked = false;
 

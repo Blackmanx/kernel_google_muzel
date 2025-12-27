@@ -106,10 +106,16 @@ typedef struct gpu_secure_req_firmware_t {
 	 */
 	uint32_t use_tf_a;
 
+	/**
+	 * The page size shift that the host uses, this is used to communicate in
+	 * case the host uses 16k page size.
+	 */
+	uint32_t host_page_shift;
+
 	/*
 	 * Any new additional fields must be added here.
 	 */
-	uint8_t reserved1[404];
+	uint8_t reserved1[400];
 } PACKED_ALIGNED(8)
 gpu_secure_req_firmware_t;
 

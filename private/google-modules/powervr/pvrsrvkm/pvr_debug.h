@@ -171,7 +171,7 @@ __noreturn void klocwork_abort(void);
 		if (unlikely(!(EXPR)))										\
 		{															\
 			PVRSRVDebugPrintf(DBGPRIV_FATAL, __FILE__, __LINE__,	\
-							  "Debug assertion failed!");			\
+							  "Debug assertion '%s' failed!", #EXPR);	\
 			WARN_ON(1);												\
 		}															\
 	} while (false)
@@ -334,6 +334,20 @@ PVRSRVDebugAssertFail(const IMG_CHAR *pszFile,
 		MSC_SUPPRESS_4127 \
 		} while (false)
 
+	#define PVR_LOG_RETURN_ERROR(_rc, _msg) do \
+		{ \
+			PVR_DPF((PVR_DBG_ERROR, ("%s: "_msg), __func__)); \
+			return _rc; \
+			MSC_SUPPRESS_4127 \
+		} while (false)
+
+	#define PVR_LOG_GOTO_ERROR(_rc, _msg, _go) do \
+		{ \
+			PVR_DPF((PVR_DBG_ERROR, ("%s: "_msg), __func__)); \
+			goto _go; \
+			MSC_SUPPRESS_4127 \
+		} while (false)
+
 	#define PVR_LOG_RETURN_IF_NOMEM(_expr, _call) do \
 		{ \
 			if (unlikely(_expr == NULL)) \
@@ -449,6 +463,17 @@ PVRSRVDebugAssertFail(const IMG_CHAR *pszFile,
 				HTBLOGK(HTB_SF_MAIN_DBG_COND_ERROR_T, PVRSRV_ERROR_UNEXPECTED_TRUE_EXPR, HTB_FILE_NAME, __LINE__); \
 				PVR_DPF((PVR_DBG_ERROR, "%s in %s()", _msg, __func__)); \
 				return _rc; \
+			} \
+		MSC_SUPPRESS_4127 \
+		} while (false)
+
+	#define PVR_LOG_RETURN_VOID_IF_INVALID_PARAM(_expr, _param) do \
+		{ \
+			if (unlikely(!(_expr))) \
+			{ \
+				HTBLOGK(HTB_SF_MAIN_DBG_ERROR, PVRSRV_ERROR_INVALID_PARAMS, HTB_FILE_NAME, __LINE__); \
+				PVR_DPF((PVR_DBG_ERROR, "%s invalid in %s()", _param, __func__)); \
+				return; \
 			} \
 		MSC_SUPPRESS_4127 \
 		} while (false)
@@ -601,8 +626,11 @@ PVRSRVDebugAssertFail(const IMG_CHAR *pszFile,
 	#define PVR_LOG_IF_ERROR_VA(_lvl, _rc, _msg, ...) (void)(_rc)
 	#define PVR_LOG_IF_FALSE_VA(_lvl, _expr, _msg, ...) (void)(_expr)
 
+	#define PVR_LOG_RETURN_ERROR(_rc, _msg) do { return _rc; MSC_SUPPRESS_4127 } while (false)
+	#define PVR_LOG_GOTO_ERROR(_rc, _msg, _go) do { goto _go; MSC_SUPPRESS_4127 } while (false)
+
 	#define PVR_LOG_RETURN_IF_NOMEM(_expr, _call) do { if (unlikely(_expr == NULL)) { return PVRSRV_ERROR_OUT_OF_MEMORY; } MSC_SUPPRESS_4127 } while (false)
-	#define PVR_LOG_GOTO_IF_NOMEM(_expr, _err, _go) do { if (unlikely(_expr == NULL)) { _err = PVRSRV_ERROR_OUT_OF_MEMORY; goto _go; } MSC_SUPPRESS_4127	} while (false)
+	#define PVR_LOG_GOTO_IF_NOMEM(_expr, _err, _go) do { if (unlikely(_expr == NULL)) { _err = PVRSRV_ERROR_OUT_OF_MEMORY; goto _go; } MSC_SUPPRESS_4127 } while (false)
 
 	#define PVR_LOG_RETURN_IF_ERROR(_rc, _call) do { if (unlikely(_rc != PVRSRV_OK)) { return (_rc); } MSC_SUPPRESS_4127 } while (false)
 	#define PVR_LOG_RETURN_IF_ERROR_VA(_rc, _msg, ...) do { if (unlikely(_rc != PVRSRV_OK)) { return (_rc); } MSC_SUPPRESS_4127 } while (false)
@@ -623,6 +651,7 @@ PVRSRVDebugAssertFail(const IMG_CHAR *pszFile,
 	#define PVR_LOG_GOTO_IF_FALSE(_expr, _msg, _go) do { if (unlikely(!(_expr))) { goto _go; } MSC_SUPPRESS_4127 } while (false)
 	#define PVR_LOG_GOTO_IF_FALSE_VA(_expr, _go, _msg, ...) do { if (unlikely(!(_expr))) { goto _go; } MSC_SUPPRESS_4127 } while (false)
 
+	#define PVR_LOG_RETURN_VOID_IF_INVALID_PARAM(_expr, _param) do { if (unlikely(!(_expr))) { return; } MSC_SUPPRESS_4127 } while (false)
 	#define PVR_LOG_RETURN_IF_INVALID_PARAM(_expr, _param) do { if (unlikely(!(_expr))) { return PVRSRV_ERROR_INVALID_PARAMS; } MSC_SUPPRESS_4127 } while (false)
 	#define PVR_LOG_GOTO_IF_INVALID_PARAM(_expr, _err, _go) do { if (unlikely(!(_expr))) { _err = PVRSRV_ERROR_INVALID_PARAMS; goto _go; } MSC_SUPPRESS_4127 } while (false)
 
@@ -694,6 +723,15 @@ IMG_EXPORT void IMG_CALLCONV PVRSRVDebugPrintfDumpCCB(void);
 #define PVR_RETURN_IF_FALSE(_expr, _rc) do \
 	{ if (unlikely(!(_expr))) { \
 		return _rc; } \
+	MSC_SUPPRESS_4127 \
+	} while (false)
+
+/* Note: Use only when a log message due to the error absolutely should not
+ *       be printed. Otherwise use PVR_LOG_RETURN_IF_INVALID_PARAM macro.
+ */
+#define PVR_RETURN_VOID_IF_INVALID_PARAM(_expr) do \
+	{ if (unlikely(!(_expr))) { \
+		return; } \
 	MSC_SUPPRESS_4127 \
 	} while (false)
 
@@ -829,7 +867,8 @@ void IMG_CALLCONV PVRSRVReleasePrintf(const IMG_CHAR *pszFormat, ...) __printf(1
  @Input          vaArgs      va_list arguments to print using pszFormat.
  @Return         None
  */ /**************************************************************************/
-void IMG_CALLCONV PVRSRVReleasePrintfVArgs(const IMG_CHAR *pszFormat, va_list vaArgs);
+void IMG_CALLCONV PVRSRVReleasePrintfVArgs(const IMG_CHAR *pszFormat, va_list vaArgs)
+	__printf(1, 0);
 #endif
 
 /* PVR_TRACE() handling */
@@ -861,7 +900,7 @@ IMG_EXPORT void IMG_CALLCONV PVRSRVTrace(const IMG_CHAR* pszFormat, ... )
 #ifdef INLINE_IS_PRAGMA
 #pragma inline(TRUNCATE_64BITS_TO_32BITS)
 #endif
-	INLINE static IMG_UINT32 TRUNCATE_64BITS_TO_32BITS(IMG_UINT64 uiInput)
+	static INLINE IMG_UINT32 TRUNCATE_64BITS_TO_32BITS(IMG_UINT64 uiInput)
 	{
 		IMG_UINT32 uiTruncated;
 
@@ -874,7 +913,7 @@ IMG_EXPORT void IMG_CALLCONV PVRSRVTrace(const IMG_CHAR* pszFormat, ... )
 #ifdef INLINE_IS_PRAGMA
 #pragma inline(TRUNCATE_64BITS_TO_SIZE_T)
 #endif
-	INLINE static size_t TRUNCATE_64BITS_TO_SIZE_T(IMG_UINT64 uiInput)
+	static INLINE size_t TRUNCATE_64BITS_TO_SIZE_T(IMG_UINT64 uiInput)
 	{
 		size_t uiTruncated;
 
@@ -887,7 +926,7 @@ IMG_EXPORT void IMG_CALLCONV PVRSRVTrace(const IMG_CHAR* pszFormat, ... )
 #ifdef INLINE_IS_PRAGMA
 #pragma inline(TRUNCATE_SIZE_T_TO_32BITS)
 #endif
-	INLINE static IMG_UINT32 TRUNCATE_SIZE_T_TO_32BITS(size_t uiInput)
+	static INLINE IMG_UINT32 TRUNCATE_SIZE_T_TO_32BITS(size_t uiInput)
 	{
 		IMG_UINT32 uiTruncated;
 
@@ -987,6 +1026,9 @@ IMG_EXPORT void IMG_CALLCONV PVRSRVTrace(const IMG_CHAR* pszFormat, ... )
     @def PVR_LOG_RETURN_IF_TRUE
     @brief Prints error message if expression is true and returns given error.
 
+    @def PVR_LOG_RETURN_VOID_IF_INVALID_PARAM
+    @brief Prints error message if expression is false and returns (used in function that return void).
+
     @def PVR_LOG_RETURN_IF_INVALID_PARAM
     @brief Prints error message if expression is false and returns PVRSRV_ERROR_INVALID_PARAMS.
 
@@ -998,6 +1040,9 @@ IMG_EXPORT void IMG_CALLCONV PVRSRVTrace(const IMG_CHAR* pszFormat, ... )
 
     @def PVR_RETURN_IF_FALSE
     @brief Returns passed error code if expression is false.
+
+    @def PVR_RETURN_VOID_IF_INVALID_PARAM
+    @brief Returns if expression is false (used in function that return void).
 
     @def PVR_RETURN_IF_INVALID_PARAM
     @brief Returns PVRSRV_ERROR_INVALID_PARAMS if expression is false.

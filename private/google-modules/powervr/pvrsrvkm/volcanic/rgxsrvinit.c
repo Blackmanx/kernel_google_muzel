@@ -79,6 +79,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "rgxlayer_impl.h"
 #include "rgxfwimageutils.h"
 #include "rgxfwutils.h"
+#include "rgxpower.h"
 
 #include "rgx_bvnc_defs_km.h"
 
@@ -236,7 +237,7 @@ static INLINE void GetApphints(PVRSRV_RGXDEV_INFO *psDevInfo, RGX_INIT_APPHINTS 
 	IMG_UINT32 ui32AppHintDefault;
 	IMG_BOOL bAppHintDefault;
 	IMG_UINT32 ui32ParamTemp;
-#if defined(__linux__)
+#if defined(SUPPORT_DI_APPHINT_IMPL)
 	IMG_UINT64 ui64AppHintDefault;
 #endif
 
@@ -328,7 +329,7 @@ static INLINE void GetApphints(PVRSRV_RGXDEV_INFO *psDevInfo, RGX_INIT_APPHINTS 
 	}
 
 
-#if defined(__linux__)
+#if defined(SUPPORT_DI_APPHINT_IMPL)
 	/* name changes */
 	{
 		IMG_UINT64 ui64Tmp;
@@ -438,6 +439,18 @@ static INLINE void GetApphints(PVRSRV_RGXDEV_INFO *psDevInfo, RGX_INIT_APPHINTS 
 	                     &ui32AppHintDefault,    &psHints->ui32EnableIdleCycleStealing);
 	ui32AppHintDefault = PVRSRV_APPHINT_FAULTDETECTIONTIMEINTERVAL_USEC;
 	OSGetAppHintUINT32(APPHINT_NO_DEVICE,    pvAppHintState,  FaultDetectionTimeInterval, &ui32AppHintDefault, &psHints->ui32FDTI);
+#if defined(PVRSRV_FDTI_MULTIPLIER) && (PVRSRV_FDTI_MULTIPLIER != 0)
+	/* Adjust FDTI for slow platforms */
+	PVR_DPF((PVR_DBG_WARNING, "FDTI %u will be adjusted by multiplier %u", psHints->ui32FDTI, PVRSRV_FDTI_MULTIPLIER));
+	if (psHints->ui32FDTI > IMG_UINT32_MAX/PVRSRV_FDTI_MULTIPLIER)
+	{
+		psHints->ui32FDTI = IMG_UINT32_MAX;
+	}
+	else
+	{
+		psHints->ui32FDTI *= PVRSRV_FDTI_MULTIPLIER;
+	}
+#endif
 	ui32AppHintDefault = PVRSRV_APPHINT_ICSTIMEINTERVAL_THRESHOLD;
 	OSGetAppHintUINT32(APPHINT_NO_DEVICE,    pvAppHintState,  ICSTimeIntervalThreshold, &ui32AppHintDefault, &psHints->ui32ICSThreshold);
 	bAppHintDefault = IMG_FALSE;
@@ -534,13 +547,19 @@ static INLINE void GetFWConfigFlags(PVRSRV_DEVICE_NODE *psDeviceNode,
 	if (RGX_IS_FEATURE_VALUE_SUPPORTED(psDevInfo, PIPELINED_DATAMASTERS_VERSION)  &&
 		(RGX_GET_FEATURE_VALUE(psDevInfo, PIPELINED_DATAMASTERS_VERSION) > 0))
 	{
+#if defined(SUPPORT_TRP) || defined(SUPPORT_WGP)
+		psHints->bEnableCrossDMPause = false;
+#else
 		ui32FWConfigFlags |= psHints->bEnableCrossDMPause ? RGXFWIF_INICFG_ENABLE_CROSSDM_PAUSE : 0;
+#endif
 
+#if defined(RGX_FEATURE_PIPELINED_DATAMASTERS_FEBE_OVERLAP_BIT_MASK)
 		if (!RGX_IS_FEATURE_SUPPORTED(psDevInfo, PIPELINED_DATAMASTERS_FEBE_OVERLAP))
 		{
 			/* Pipeline DM roadblocks are currently enabled pre-DXS. */
 			ui32FWConfigFlags |= RGXFWIF_INICFG_DM_PIPELINE_ROADBLOCKS_EN;
 		}
+#endif
 	}
 #endif
 
@@ -867,7 +886,9 @@ static PVRSRV_ERROR InitFirmware(PVRSRV_DEVICE_NODE *psDeviceNode)
 
 #if defined(SUPPORT_TRUSTED_DEVICE) && !defined(NO_HARDWARE) && !defined(SUPPORT_SECURITY_VALIDATION)
 	IMG_BOOL bUseSecureFWData =
+#if defined(RGX_FEATURE_META_MAX_VALUE_IDX)
 								RGX_IS_FEATURE_VALUE_SUPPORTED(psDevInfo, META) ||
+#endif
 #if defined(RGX_FEATURE_MIPS_BIT_MASK)
 	                            (RGX_IS_FEATURE_SUPPORTED(psDevInfo, MIPS) &&
 	                             RGX_GET_FEATURE_VALUE(psDevInfo, PHYS_BUS_WIDTH) > 32) ||
@@ -1076,11 +1097,18 @@ static PVRSRV_ERROR InitFirmware(PVRSRV_DEVICE_NODE *psDeviceNode)
 		uFWParams.sRISCV.uiFWCorememDataSize    = uiFWCorememDataAllocSize;
 	}
 
-
+#if !(defined(SUPPORT_TRUSTED_DEVICE) && defined(RGX_PREMAP_FW_HEAPS)) || defined(NO_HARDWARE) || defined(SUPPORT_SECURITY_VALIDATION)
 	/*
-	 * On Volcanic the TEE handles the loading of all Firmware sections.
+	 * TRUSTED_DEVICE builds with RGX_PREMAP_FW_HEAPS:
+	 * The TEE handles the loading of all Firmware sections.
+	 *
+	 * TRUSTED_DEVICE builds without RGX_PREMAP_FW_HEAPS:
+	 * The TEE handles the loading of all Firmware sections.
+	 * When the trusted device is enabled and the FW code lives
+	 * in secure memory we will only setup the data segments here,
+	 * while the code segments will be loaded to secure memory
+	 * by the trusted device.
 	 */
-#if !defined(SUPPORT_TRUSTED_DEVICE) || defined(NO_HARDWARE) || defined(SUPPORT_SECURITY_VALIDATION)
 	if (!psDeviceNode->bAutoVzFwIsUp)
 	{
 		eError = RGXProcessFWImage(&psDevInfo->sLayerParams,
@@ -1097,6 +1125,7 @@ static PVRSRV_ERROR InitFirmware(PVRSRV_DEVICE_NODE *psDeviceNode)
 					 __func__, eError));
 			goto release_fw_allocations;
 		}
+#if !defined(SUPPORT_TRUSTED_DEVICE) || defined(NO_HARDWARE) || defined(SUPPORT_SECURITY_VALIDATION)
 		RGXFwSharedMemCacheOpExec(pvFWCodeHostAddr,
 		                          sizeof(psDevInfo->psRGXFWCodeMemDesc->uiAllocSize),
 		                          PVRSRV_CACHE_OP_FLUSH);
@@ -1116,10 +1145,16 @@ static PVRSRV_ERROR InitFirmware(PVRSRV_DEVICE_NODE *psDeviceNode)
 			                          sizeof(psDevInfo->psRGXFWIfCorememDataStoreMemDesc->uiAllocSize),
 			                          PVRSRV_CACHE_OP_FLUSH);
 		}
+#endif
 	}
-#else
-	sFWParams.uFWP = uFWParams;
-	RGXTDProcessFWImage(psDeviceNode, &sFWParams);
+#endif
+
+#if defined(SUPPORT_TRUSTED_DEVICE) && !defined(NO_HARDWARE) && !defined(SUPPORT_SECURITY_VALIDATION)
+	if (psRGXFW)
+	{
+		sFWParams.uFWP = uFWParams;
+		RGXTDProcessFWImage(psDeviceNode, &sFWParams);
+	}
 #endif
 
 	/*
@@ -1173,7 +1208,7 @@ static PVRSRV_ERROR InitFirmware(PVRSRV_DEVICE_NODE *psDeviceNode)
 						   PDUMP_FLAGS_CONTINUOUS);
 	}
 
-#if !defined(SUPPORT_TRUSTED_DEVICE) || defined(NO_HARDWARE) || defined(SUPPORT_SECURITY_VALIDATION) || defined(RGX_FEATURE_MIPS_BIT_MASK)
+#if !(defined(SUPPORT_TRUSTED_DEVICE) && defined(RGX_PREMAP_FW_HEAPS)) || defined(NO_HARDWARE) || defined(SUPPORT_SECURITY_VALIDATION)
 	/*
 	 * Release Firmware allocations and clean up
 	 */
@@ -1256,18 +1291,18 @@ static void InitialiseHWPerfCounters(PVRSRV_DEVICE_NODE *psDeviceNode,
 	/* Initialise the number of blocks in the RGXFWIF_HWPERF_CTL structure.
 	 * This allows Firmware to validate that it has been correctly configured.
 	 */
-	psHWPerfInitDataInt->ui32NumBlocks = RGXHWPerfMaxDefinedBlks(pvDevice);
+	psHWPerfInitDataInt->ui32BlocksNumRangeCheckBeforeUse = RGXHWPerfMaxDefinedBlks(pvDevice);
 
 	PDUMPCOMMENTWITHFLAGS(psDeviceNode, PDUMP_FLAGS_CONTINUOUS,
 	    "HWPerf Block count = %u.",
-	    psHWPerfInitDataInt->ui32NumBlocks);
+	    psHWPerfInitDataInt->ui32BlocksNumRangeCheckBeforeUse);
 #if defined(PDUMP)
 	/* Ensure that we record the BVNC specific ui32NumBlocks in the PDUMP data
 	 * so that when we playback we have the correct value present.
 	 */
 	DevmemPDumpLoadMemValue32(psHWPerfDataMemDesc,
-	    (size_t)&(psHWPerfInitDataInt->ui32NumBlocks) - (size_t)(psHWPerfInitDataInt),
-	    psHWPerfInitDataInt->ui32NumBlocks, PDUMP_FLAGS_CONTINUOUS);
+	    (size_t)&(psHWPerfInitDataInt->ui32BlocksNumRangeCheckBeforeUse) - (size_t)(psHWPerfInitDataInt),
+	    psHWPerfInitDataInt->ui32BlocksNumRangeCheckBeforeUse, PDUMP_FLAGS_CONTINUOUS);
 #endif	/* defined(PDUMP) */
 
 	PDUMPCOMMENTWITHFLAGS(psDeviceNode, PDUMP_FLAGS_CONTINUOUS,
@@ -1574,15 +1609,18 @@ PVRSRV_ERROR RGXInit(PVRSRV_DEVICE_NODE *psDeviceNode)
 		psDevInfo->bRGXPowered = IMG_TRUE;
 	}
 
+#if defined(RGX_FEATURE_WATCHDOG_TIMER_BIT_MASK)
 	/* Set which HW Safety Events will be handled by the driver */
 	psDevInfo->ui32HostSafetyEventMask |= RGX_IS_FEATURE_SUPPORTED(psDevInfo, WATCHDOG_TIMER) ?
 										  RGX_CR_EVENT_STATUS__AXT_IF_EQ2_AND_PIPEDM_EQ0__WDT_TIMEOUT_EN : 0;
+#endif
 	psDevInfo->ui32HostSafetyEventMask |= (RGX_DEVICE_HAS_FEATURE_VALUE(&psDevInfo->sLayerParams, ECC_RAMS)
 										   && (RGX_DEVICE_GET_FEATURE_VALUE(&psDevInfo->sLayerParams, ECC_RAMS) > 0)) ?
 										  RGX_CR_EVENT_STATUS_FAULT_FW_EN : 0;
+#if defined(RGX_FEATURE_RISCV_DUAL_LOCKSTEP_BIT_MASK)
 	psDevInfo->ui32HostSafetyEventMask |= RGX_IS_FEATURE_SUPPORTED(psDevInfo, RISCV_DUAL_LOCKSTEP) ?
 										  RGX_CR_EVENT_STATUS_FAULT_FW_EN : 0;
-
+#endif
 #if defined(PDUMP)
 	PDUMPCOMMENTWITHFLAGS(psDeviceNode, PDUMP_FLAGS_CONTINUOUS,
 	                      "Register defs revision: %d", RGX_CR_DEFS_KM_REVISION);
@@ -1667,6 +1705,14 @@ PVRSRV_ERROR RGXInit(PVRSRV_DEVICE_NODE *psDeviceNode)
 		goto cleanup;
 	}
 
+
+	if (!PVRSRV_VZ_MODE_IS(GUEST, DEVNODE, psDeviceNode))
+	{
+		RGXInitGpuUtilStats(psDeviceNode, &psDevInfo->sGpuUtilStats);
+#if defined(SUPPORT_LINUX_DVFS)
+		RGXInitGpuUtilStats(psDeviceNode, &psDevInfo->sDVFSGpuUtilStats);
+#endif
+	}
 
 	eError = PVRSRV_OK;
 

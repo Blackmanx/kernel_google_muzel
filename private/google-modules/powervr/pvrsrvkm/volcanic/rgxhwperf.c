@@ -61,6 +61,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "rgxhwperf.h"
 #include "rgxapi_km.h"
 #include "rgxfwutils.h"
+#include "rgx_fwif_km.h"
 #include "rgxtimecorr.h"
 #include "devicemem.h"
 #include "devicemem_pdump.h"
@@ -83,6 +84,8 @@ RGX_CNT_BLK_TYPE_MODEL_DIRECT_LIST,
 RGX_CNT_BLK_TYPE_MODEL_INDIRECT_LIST
 #undef X
 };
+
+static_assert(ARRAY_SIZE(gasCntBlkTypeModel) <= RGXFWIF_HWPERF_CTRL_BLKS_MAX, "Number of control blocks exceeds limit.");
 
 IMG_INTERNAL IMG_UINT32
 RGXGetHWPerfBlockConfig(const RGXFW_HWPERF_CNTBLK_TYPE_MODEL **ppsModel)
@@ -230,7 +233,8 @@ PVRSRV_ERROR RGXServerFeatureFlagsToHWPerfFlags(PVRSRV_RGXDEV_INFO *psDevInfo, R
 
 	/* Determine if we've got the new RAY_TRACING feature supported. This is
 	 * only determined by comparing the RAY_TRACING_ARCHITECTURE value */
-	if (RGX_IS_FEATURE_VALUE_SUPPORTED(psDevInfo, RAY_TRACING_ARCH))
+	if (RGX_IS_FEATURE_VALUE_SUPPORTED(psDevInfo, RAY_TRACING_ARCH) &&
+		RGX_GET_FEATURE_VALUE(psDevInfo, RAY_TRACING_ARCH) > 0)
 	{
 		psBVNC->ui32BvncKmFeatureFlags |= RGX_HWPERF_FEATURE_RAYTRACING_FLAG;
 	}
@@ -239,6 +243,13 @@ PVRSRV_ERROR RGXServerFeatureFlagsToHWPerfFlags(PVRSRV_RGXDEV_INFO *psDevInfo, R
 	{
 		psBVNC->ui32BvncKmFeatureFlags |= RGX_HWPERF_FEATURE_CXT_TOP_INFRASTRUCTURE_FLAG;
 	}
+
+#if defined(RGX_FEATURE_ERYX_TOP_INFRASTRUCTURE)
+	if (RGX_IS_FEATURE_SUPPORTED(psDevInfo, ERYX_TOP_INFRASTRUCTURE))
+	{
+		psBVNC->ui32BvncKmFeatureFlags |= RGX_HWPERF_FEATURE_EX_TOP_INFRASTRUCTURE_FLAG;
+	}
+#endif
 
 #ifdef SUPPORT_WORKLOAD_ESTIMATION
 	if (!PVRSRV_VZ_MODE_IS(GUEST, DEVINFO, psDevInfo))
@@ -517,7 +528,7 @@ PVRSRV_ERROR PVRSRVRGXGetConfiguredHWPerfCounters(PVRSRV_DEVICE_NODE *psDevNode,
 
 		PVR_RETURN_IF_ERROR(PVRSRVPowerLock(psDevNode));
 
-		for (i = 0; i < psHWPerfCtl->ui32NumBlocks; i++)
+		for (i = 0; i < psHWPerfCtl->ui32BlocksNumRangeCheckBeforeUse; i++)
 		{
 			if (psHWPerfCtl->sBlkCfg[i].uiBlockID != ui32BlockID)
 			{
@@ -584,7 +595,7 @@ PVRSRV_ERROR PVRSRVRGXGetEnabledHWPerfBlocks(PVRSRV_DEVICE_NODE *psDevNode,
 
 	PVR_RETURN_IF_ERROR(PVRSRVPowerLock(psDevNode));
 
-	for (i = 0; i < psHWPerfCtl->ui32NumBlocks; i++)
+	for (i = 0; i < psHWPerfCtl->ui32BlocksNumRangeCheckBeforeUse; i++)
 	{
 		if (psHWPerfCtl->sBlkCfg[i].uiEnabled)
 		{

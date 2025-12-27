@@ -185,7 +185,7 @@ IMG_INTERNAL PVRSRV_ERROR BridgeDevmemIntRegisterPFNotifyKM(IMG_HANDLE hBridge,
 IMG_INTERNAL PVRSRV_ERROR BridgePhysHeapGetMemInfo(IMG_HANDLE hBridge,
 						   IMG_UINT32 ui32PhysHeapCount,
 						   PVRSRV_PHYS_HEAP * peaPhysHeapID,
-						   PHYS_HEAP_MEM_STATS_V1 * pasapPhysHeapMemStats);
+						   PHYS_HEAP_MEM_STATS * pasapPhysHeapMemStats);
 
 IMG_INTERNAL PVRSRV_ERROR BridgeGetDefaultPhysicalHeap(IMG_HANDLE hBridge,
 						       PVRSRV_PHYS_HEAP * peHeap);
@@ -226,9 +226,10 @@ IMG_INTERNAL PVRSRV_ERROR BridgeDevmemXIntMapVRangeToBackingPage(IMG_HANDLE hBri
 								 PVRSRV_MEMALLOCFLAGS_T uiFlags,
 								 IMG_UINT32 ui32VirtPageOffset);
 
-IMG_INTERNAL PVRSRV_ERROR BridgePhysHeapGetMemInfo2(IMG_HANDLE hBridge,
-						    IMG_UINT32 ui32PhysHeapCount,
-						    PVRSRV_PHYS_HEAP * peaPhysHeapID,
-						    PHYS_HEAP_MEM_STATS_V2 * pasapPhysHeapMemStats);
+IMG_INTERNAL PVRSRV_ERROR BridgeDevmemIntFindCPUAddress(IMG_HANDLE hBridge,
+							IMG_HANDLE hDevmemServerHeap,
+							IMG_UINT64 ui64Size,
+							IMG_UINT64 ui64AddrHint,
+							IMG_UINT64 * pui64Addr);
 
 #endif /* CLIENT_MM_BRIDGE_H */

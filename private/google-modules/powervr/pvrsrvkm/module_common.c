@@ -75,7 +75,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 #include "ospvr_gputrace.h"
 
-#include "km_apphint.h"
+#include "os_apphintkm.h"
 #include "srvinit.h"
 
 #include "pvr_ion_stats.h"
@@ -483,8 +483,6 @@ int PVRSRVDeviceResume(struct drm_device *psDev)
 	return 0;
 }
 
-static DEFINE_MUTEX(sServicesSyncOpenMutex);
-
 /**************************************************************************/ /*!
 @Function     PVRSRVDeviceServicesOpen
 @Description  Services device open.
@@ -503,8 +501,6 @@ int PVRSRVDeviceServicesOpen(PVRSRV_DEVICE_NODE *psDeviceNode,
 	PVRSRV_ERROR eError;
 	int iErr = 0;
 
-	mutex_lock(&sServicesSyncOpenMutex);
-
 	if (!psPVRSRVData)
 	{
 		PVR_DPF((PVR_DBG_ERROR, "%s: No device data", __func__));
@@ -512,6 +508,7 @@ int PVRSRVDeviceServicesOpen(PVRSRV_DEVICE_NODE *psDeviceNode,
 		goto out;
 	}
 
+	PVRSRVDeviceInitPvzLock(psDeviceNode);
 	if (psDeviceNode->eDevState == PVRSRV_DEVICE_STATE_CREATED)
 	{
 		eError = PVRSRVCommonDeviceInitialise(psDeviceNode);
@@ -519,6 +516,7 @@ int PVRSRVDeviceServicesOpen(PVRSRV_DEVICE_NODE *psDeviceNode,
 		{
 			PVR_DPF((PVR_DBG_ERROR, "%s: Failed to initialise device (%s)",
 					 __func__, PVRSRVGetErrorString(eError)));
+			PVRSRVDeviceInitPvzUnlock(psDeviceNode);
 			iErr = -ENODEV;
 			goto out;
 		}
@@ -527,13 +525,18 @@ int PVRSRVDeviceServicesOpen(PVRSRV_DEVICE_NODE *psDeviceNode,
 	{
 		PVR_DPF((PVR_DBG_ERROR, "%s: Driver already in bad state. Device open failed.",
 				 __func__));
+		PVRSRVDeviceInitPvzUnlock(psDeviceNode);
 		iErr = -ENODEV;
 		goto out;
 	}
+	PVRSRVDeviceInitPvzUnlock(psDeviceNode);
 
 	if (psDRMFile->driver_priv != NULL)
 	{
 		psConnectionPriv = (PVRSRV_CONNECTION_PRIV*)psDRMFile->driver_priv;
+
+		PVR_ASSERT(psConnectionPriv->ui32Type != DKF_CONNECTION_FLAG_INVALID);
+		PVR_ASSERT(psConnectionPriv->ui32Type <= DKF_CONNECTION_FLAG_SERVICES);
 
 		/* If there is already a valid connection, we can reuse it */
 		if (psConnectionPriv->ui32Type == DKF_CONNECTION_FLAG_SERVICES)
@@ -586,7 +589,6 @@ int PVRSRVDeviceServicesOpen(PVRSRV_DEVICE_NODE *psDeviceNode,
 out:
 	if (psDRMFile->driver_priv != psConnectionPriv)
 		kfree(psConnectionPriv);
-	mutex_unlock(&sServicesSyncOpenMutex);
 	return iErr;
 }
 
@@ -610,8 +612,6 @@ static int PVRSRVDeviceSyncOpen(PVRSRV_DEVICE_NODE *psDeviceNode,
 	PVRSRV_ERROR eError;
 	int iErr = 0;
 
-	mutex_lock(&sServicesSyncOpenMutex);
-
 	if (!psPVRSRVData)
 	{
 		PVR_DPF((PVR_DBG_ERROR, "%s: No device data", __func__));
@@ -622,6 +622,9 @@ static int PVRSRVDeviceSyncOpen(PVRSRV_DEVICE_NODE *psDeviceNode,
 	if (psDRMFile->driver_priv != NULL)
 	{
 		psConnectionPriv = (PVRSRV_CONNECTION_PRIV*)psDRMFile->driver_priv;
+
+		PVR_ASSERT(psConnectionPriv->ui32Type != DKF_CONNECTION_FLAG_INVALID);
+		PVR_ASSERT(psConnectionPriv->ui32Type <= DKF_CONNECTION_FLAG_SERVICES);
 
 		/* If there is already a valid connection, we can reuse it */
 		if (psConnectionPriv->ui32Type == DKF_CONNECTION_FLAG_SYNC)
@@ -639,17 +642,15 @@ static int PVRSRVDeviceSyncOpen(PVRSRV_DEVICE_NODE *psDeviceNode,
 			iErr = -EINVAL;
 			goto out;
 		}
+#else
+		/* It's valid for the driver_priv to point to a services connection allocation,
+		 * when PVRSRV_DEVICE_INIT_MODE != PVRSRV_LINUX_DEV_INIT_ON_CONNECT. This
+		 * function will extend the driver_priv with further initialisation to
+		 * `psConnectionPriv->pvSyncConnectionData`.
+		 */
 #endif
 	}
-
-	/* It's valid for the driver_priv to point to a services connection allocation,
-	 * when PVRSRV_DEVICE_INIT_MODE != PVRSRV_LINUX_DEV_INIT_ON_CONNECT. This
-	 * function will extend the driver_priv with further initialisation to
-	 * `psConnectionPriv->pvSyncConnectionData`.
-	 *
-	 * However, this case is invalid when PVRSRV_DEVICE_INIT_MODE == PVRSRV_LINUX_DEV_INIT_ON_CONNECT;
-	 * driver_priv should be NULL at this point and a new allocation be initialised. */
-	if (psConnectionPriv == NULL)
+	else
 	{
 		/* Allocate psConnectionPriv (stores private data and release pfn under driver_priv) */
 		psConnectionPriv = kzalloc(sizeof(*psConnectionPriv), GFP_KERNEL);
@@ -696,13 +697,10 @@ static int PVRSRVDeviceSyncOpen(PVRSRV_DEVICE_NODE *psDeviceNode,
 	}
 #endif
 
-#if (PVRSRV_DEVICE_INIT_MODE == PVRSRV_LINUX_DEV_INIT_ON_CONNECT)
 #if defined(SUPPORT_NATIVE_FENCE_SYNC) && !defined(USE_PVRSYNC_DEVNODE)
+#if (PVRSRV_DEVICE_INIT_MODE == PVRSRV_LINUX_DEV_INIT_ON_CONNECT)
 	psConnectionPriv->pfDeviceRelease = pvr_sync_close;
 #endif
-	psConnectionPriv->pvConnectionData = (void*)psConnection;
-#else
-	psConnectionPriv->pvSyncConnectionData = (void*)psConnection;
 #endif
 
 	psConnectionPriv->ui32Type = DKF_CONNECTION_FLAG_SYNC;
@@ -711,9 +709,7 @@ static int PVRSRVDeviceSyncOpen(PVRSRV_DEVICE_NODE *psDeviceNode,
 out:
 	if (psDRMFile->driver_priv != psConnectionPriv)
 		kfree(psConnectionPriv);
-	mutex_unlock(&sServicesSyncOpenMutex);
 	return iErr;
-
 #else /* if defined(SUPPORT_NATIVE_FENCE_SYNC) */
 	/* Ioctl should not be being called (no DDK support for native sync) */
 	PVR_DPF((PVR_DBG_ERROR, "%s: only supported when SUPPORT_NATIVE_FENCE_SYNC=1", __func__));
@@ -772,7 +768,10 @@ drm_pvr_srvkm_init(struct drm_device *dev, void *arg, struct drm_file *psDRMFile
 {
 	struct drm_pvr_srvkm_init_data *data = arg;
 	struct pvr_drm_private *priv = dev->dev_private;
+	static DEFINE_MUTEX(sInitMutex);
 	int iErr = 0;
+
+	mutex_lock(&sInitMutex);
 
 	switch (data->init_module)
 	{
@@ -811,6 +810,8 @@ drm_pvr_srvkm_init(struct drm_device *dev, void *arg, struct drm_file *psDRMFile
 			iErr = -EINVAL;
 		}
 	}
+
+	mutex_unlock(&sInitMutex);
 
 	return iErr;
 }

@@ -258,7 +258,7 @@ PMRContiguousSparseMappingTest(PVRSRV_DEVICE_NODE *psDeviceNode, PVRSRV_MEMALLOC
 									 aui32MappingTableSecondAlloc,
 									 0,
 									 NULL,
-									 uiFlags | SPARSE_RESIZE_ALLOC);
+									 SPARSE_RESIZE_ALLOC);
 		PVR_LOG_GOTO_IF_ERROR(eError, "PMR_ChangeSparseMem", ErrorUnrefSpacingPMR);
 
 		/* Allocate some more memory from the same physheap so that we can ensure
@@ -290,7 +290,7 @@ PMRContiguousSparseMappingTest(PVRSRV_DEVICE_NODE *psDeviceNode, PVRSRV_MEMALLOC
 									 aui32MappingTableThirdAlloc,
 									 0,
 									 NULL,
-									 uiFlags | SPARSE_RESIZE_ALLOC);
+									 SPARSE_RESIZE_ALLOC);
 		PVR_LOG_GOTO_IF_ERROR(eError, "PMR_ChangeSparseMem", ErrorUnrefSecondSpacingPMR);
 
 		/*
@@ -641,118 +641,101 @@ ErrorFreePMRPageListMem:
 	return eError;
 }
 
-#define DO_MEMTEST_FOR_PATTERNS(StartAddr, EndAddr, Patterns, NumOfPatterns, Error, ptr, i) \
-	for (i = 0; i < NumOfPatterns; i++) \
-	{ \
-		/* Write pattern */ \
-		for (ptr = StartAddr; ptr < EndAddr; ptr++) \
-		{ \
-			*ptr = Patterns[i]; \
-		} \
+#define DO_MEMTEST_FOR_PATTERNS(StartAddr, EndAddr, Patterns, NumOfPatterns) \
+	({ \
+		PVRSRV_ERROR eError = PVRSRV_OK; \
+		typeof(StartAddr) puiPtr; \
+		IMG_UINT32 i; \
 		\
-		/* Read back and validate pattern */ \
-		for (ptr = StartAddr; ptr < EndAddr ; ptr++) \
+		for (i = 0; i < NumOfPatterns; i++) \
 		{ \
-			if (*ptr != Patterns[i]) \
+			/* Write pattern */ \
+			for (puiPtr = StartAddr; puiPtr < EndAddr; puiPtr++) \
 			{ \
-				Error = PVRSRV_ERROR_MEMORY_TEST_FAILED; \
+				*puiPtr = Patterns[i]; \
+			} \
+			\
+			/* Read back and validate pattern */ \
+			for (puiPtr = StartAddr; puiPtr < EndAddr ; puiPtr++) \
+			{ \
+				if (*puiPtr != Patterns[i]) \
+				{ \
+					eError = PVRSRV_ERROR_MEMORY_TEST_FAILED; \
+					break; \
+				} \
+			} \
+			\
+			if (eError != PVRSRV_OK) \
+			{ \
 				break; \
 			} \
 		} \
 		\
-		if (Error != PVRSRV_OK) \
+		if (eError != PVRSRV_OK) \
 		{ \
-			break; \
+			PVR_DPF((PVR_DBG_ERROR, "%s: Test failed. Got (0x%" IMG_UINT64_FMTSPECx " expected " \
+			         "(0x%" IMG_UINT64_FMTSPECx ")!", __func__, (IMG_UINT64) *puiPtr, \
+			         (IMG_UINT64) Patterns[i])); \
 		} \
-	}
+		\
+		eError; \
+	})
 
 static PVRSRV_ERROR
 TestPatternU8(void *pvKernAddr, size_t uiMappedSize)
 {
-	IMG_UINT8 *StartAddr = (IMG_UINT8 *) pvKernAddr;
-	IMG_UINT8 *EndAddr = ((IMG_UINT8 *) pvKernAddr) + (uiMappedSize / sizeof(IMG_UINT8));
-	IMG_UINT8 *p;
-	IMG_UINT32 i;
-	PVRSRV_ERROR eError = PVRSRV_OK;
+	IMG_UINT8 *puiStartAddr = (IMG_UINT8 *) pvKernAddr;
+	IMG_UINT8 *puiEndAddr = ((IMG_UINT8 *) pvKernAddr) + (uiMappedSize / sizeof(IMG_UINT8));
 
 	PVR_ASSERT((uiMappedSize % sizeof(IMG_UINT8)) == 0);
 
-	DO_MEMTEST_FOR_PATTERNS(StartAddr, EndAddr, gui8Patterns, sizeof(gui8Patterns)/sizeof(IMG_UINT8), eError, p, i);
-	if (eError != PVRSRV_OK)
-	{
-		PVR_DPF((PVR_DBG_ERROR,
-		         "%s: Test failed. Got (0x%hhx), expected (0x%hhx)!",
-		         __func__, *p, gui8Patterns[i]));
-	}
-
-	return eError;
+	return DO_MEMTEST_FOR_PATTERNS(puiStartAddr,
+	                               puiEndAddr,
+	                               gui8Patterns,
+	                               ARRAY_SIZE(gui8Patterns));
 }
 
 
 static PVRSRV_ERROR
 TestPatternU16(void *pvKernAddr, size_t uiMappedSize)
 {
-	IMG_UINT16 *StartAddr = (IMG_UINT16 *) pvKernAddr;
-	IMG_UINT16 *EndAddr = ((IMG_UINT16 *) pvKernAddr) + (uiMappedSize / sizeof(IMG_UINT16));
-	IMG_UINT16 *p;
-	IMG_UINT32 i;
-	PVRSRV_ERROR eError = PVRSRV_OK;
+	IMG_UINT16 *puiStartAddr = (IMG_UINT16 *) pvKernAddr;
+	IMG_UINT16 *puiEndAddr = ((IMG_UINT16 *) pvKernAddr) + (uiMappedSize / sizeof(IMG_UINT16));
 
 	PVR_ASSERT((uiMappedSize % sizeof(IMG_UINT16)) == 0);
 
-	DO_MEMTEST_FOR_PATTERNS(StartAddr, EndAddr, gui16Patterns, sizeof(gui16Patterns)/sizeof(IMG_UINT16), eError, p, i);
-	if (eError != PVRSRV_OK)
-	{
-		PVR_DPF((PVR_DBG_ERROR,
-		         "%s: Test failed. Got (0x%hx), expected (0x%hx)!",
-		         __func__, *p, gui16Patterns[i]));
-	}
-
-	return eError;
+	return DO_MEMTEST_FOR_PATTERNS(puiStartAddr,
+	                               puiEndAddr,
+	                               gui16Patterns,
+	                               ARRAY_SIZE(gui16Patterns));
 }
 
 static PVRSRV_ERROR
 TestPatternU32(void *pvKernAddr, size_t uiMappedSize)
 {
-	IMG_UINT32 *StartAddr = (IMG_UINT32 *) pvKernAddr;
-	IMG_UINT32 *EndAddr = ((IMG_UINT32 *) pvKernAddr) + (uiMappedSize / sizeof(IMG_UINT32));
-	IMG_UINT32 *p;
-	IMG_UINT32 i;
-	PVRSRV_ERROR eError = PVRSRV_OK;
+	IMG_UINT32 *puiStartAddr = (IMG_UINT32 *) pvKernAddr;
+	IMG_UINT32 *puiEndAddr = ((IMG_UINT32 *) pvKernAddr) + (uiMappedSize / sizeof(IMG_UINT32));
 
 	PVR_ASSERT((uiMappedSize % sizeof(IMG_UINT32)) == 0);
 
-	DO_MEMTEST_FOR_PATTERNS(StartAddr, EndAddr, gui32Patterns, sizeof(gui32Patterns)/sizeof(IMG_UINT32), eError, p, i);
-	if (eError != PVRSRV_OK)
-	{
-		PVR_DPF((PVR_DBG_ERROR,
-		         "%s: Test failed. Got (0x%x), expected (0x%x)!",
-		         __func__, *p, gui32Patterns[i]));
-	}
-
-	return eError;
+	return DO_MEMTEST_FOR_PATTERNS(puiStartAddr,
+	                               puiEndAddr,
+	                               gui32Patterns,
+	                               ARRAY_SIZE(gui32Patterns));
 }
 
 static PVRSRV_ERROR
 TestPatternU64(void *pvKernAddr, size_t uiMappedSize)
 {
-	IMG_UINT64 *StartAddr = (IMG_UINT64 *) pvKernAddr;
-	IMG_UINT64 *EndAddr = ((IMG_UINT64 *) pvKernAddr) + (uiMappedSize / sizeof(IMG_UINT64));
-	IMG_UINT64 *p;
-	IMG_UINT32 i;
-	PVRSRV_ERROR eError = PVRSRV_OK;
+	IMG_UINT64 *puiStartAddr = (IMG_UINT64 *) pvKernAddr;
+	IMG_UINT64 *puiEndAddr = ((IMG_UINT64 *) pvKernAddr) + (uiMappedSize / sizeof(IMG_UINT64));
 
 	PVR_ASSERT((uiMappedSize % sizeof(IMG_UINT64)) == 0);
 
-	DO_MEMTEST_FOR_PATTERNS(StartAddr, EndAddr, gui64Patterns, sizeof(gui64Patterns)/sizeof(IMG_UINT64), eError, p, i);
-	if (eError != PVRSRV_OK)
-	{
-		PVR_DPF((PVR_DBG_ERROR,
-		         "%s: Test failed. Got (0x%llx), expected (0x%llx)!",
-		         __func__, *p, gui64Patterns[i]));
-	}
-
-	return eError;
+	return DO_MEMTEST_FOR_PATTERNS(puiStartAddr,
+	                               puiEndAddr,
+	                               gui64Patterns,
+	                               ARRAY_SIZE(gui64Patterns));
 }
 
 static PVRSRV_ERROR

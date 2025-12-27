@@ -239,6 +239,7 @@ typedef IMG_UINT32 RGX_HWPERF_FEATURE_FLAGS;
 #define RGX_HWPERF_FEATURE_AX_TOP_INFRASTRUCTURE_FLAG      0x00008000U
 #define RGX_HWPERF_FEATURE_BX_TOP_INFRASTRUCTURE_FLAG      0x00010000U
 #define RGX_HWPERF_FEATURE_DX_TOP_INFRASTRUCTURE_FLAG      0x00020000U
+#define RGX_HWPERF_FEATURE_EX_TOP_INFRASTRUCTURE_FLAG      0x00040000U
 
 /* ! Define for RGX_HWPERF_DM type. The values are architecture specific */
 typedef IMG_UINT32 RGX_HWPERF_DM;
@@ -309,6 +310,12 @@ RGX_FW_STRUCT_SIZE_ASSERT(RGX_HWPERF_V2_PACKET_HDR);
  * packet for a variable size payload packet, rounded up to 8 bytes to
  * align packets for 64 bit architectures. */
 #define RGX_HWPERF_MAKE_SIZE_VARIABLE(_size)      ((IMG_UINT32)(RGX_HWPERF_SIZE_MASK&((IMG_UINT32)sizeof(RGX_HWPERF_V2_PACKET_HDR)+PVR_ALIGN((_size), PVRSRVTL_PACKET_ALIGNMENT))))
+
+/*! Macro which takes the overall packet size and extracts the payload size.
+ *  Essentially a convenience macro for subtracting header size from a packet.
+ *  To be used prior to packet data initialisation.
+ */
+#define RGX_HWPERF_EXTRACT_PAYLOAD_SIZE(_size)    ((IMG_UINT32)_size - sizeof(RGX_HWPERF_V2_PACKET_HDR))
 
 /*! Macro to obtain the size of the packet */
 #define RGX_HWPERF_GET_SIZE(_packet_addr)         ((IMG_UINT16)(((_packet_addr)->ui32Size) & RGX_HWPERF_SIZE_MASK))
@@ -598,6 +605,9 @@ RGX_FW_STRUCT_OFFSET_ASSERT(RGX_HWPERF_HW_DATA, aui32CountBlksStream);
  * and stream index. May be used in decoding the counter block stream words
  * of a RGX_HWPERF_HW_DATA structure. */
 #define RGX_HWPERF_GET_CNT_MASK(_data_addr, _idx) RGX_HWPERF_GET_CNT_MASKW((_data_addr)->aui32CountBlksStream[(_idx)])
+
+/*! Validates a counter ID is a valid register address. */
+#define RGX_HWPERF_IS_CNT_VALID(_word)          (((_word) <= (~RGX_HWPERF_CNTBLK_ID_MASK)) && (((_word) & 0x7U) == 0U))
 
 
 /*! Context switch packet event */
@@ -932,7 +942,7 @@ typedef union
 
 	struct RGX_RESOURCE_CAPTURE_TILE_LIFETIME_BUFFERS
 	{
-		IMG_UINT32 uiReserved;
+		IMG_UINT32 ui32BufInfoCount;
 		RGX_RESOURCE_PER_TLT_BUFFER_INFO sTLTBufInfo[IMG_FLEX_ARRAY_MEMBER];
 	} sTLTBuffers;
 } RGX_RESOURCE_CAPTURE_DETAIL;

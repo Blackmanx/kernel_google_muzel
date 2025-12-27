@@ -126,14 +126,7 @@ typedef enum _PHYS_HEAP_TYPE_
 /* Force PHYS_HEAP_MEM_STATS size to be a multiple of 8 bytes
  * (as type is a parameter in bridge calls)
  */
-typedef struct PHYS_HEAP_MEM_STATS_V1_TAG
-{
-	IMG_UINT64 ui64TotalSize;     /*!< Total number of bytes in the heap. */
-	IMG_UINT64 ui64FreeSize;      /*!< Remaining number of bytes free for allocation. */
-	IMG_UINT32 ui32PhysHeapFlags; /*!< Flags associated within the heap. */
-	PHYS_HEAP_TYPE ePhysHeapType; /*!< The type of physheap. */
-} PHYS_HEAP_MEM_STATS_V1;
-typedef struct PHYS_HEAP_MEM_STATS_V2_TAG
+typedef struct PHYS_HEAP_MEM_STATS_TAG
 {
 	IMG_UINT64 ui64TotalSize;     /*!< Total number of bytes in the heap. */
 	IMG_UINT64 ui64FreeSize;      /*!< Remaining number of bytes free for allocation. */
@@ -142,8 +135,7 @@ typedef struct PHYS_HEAP_MEM_STATS_V2_TAG
 	IMG_UINT64 ui64DevicesInSPAS; /*!< A bitmap of devices that are linked to the heap via a SPAS.
 	                                   Where a device is encoded as a bit using the following:
 	                                   (1 << psDevNode->sDevId.ui32InternalID) */
-} PHYS_HEAP_MEM_STATS_V2;
-typedef PHYS_HEAP_MEM_STATS_V2 PHYS_HEAP_MEM_STATS, *PHYS_HEAP_MEM_STATS_PTR;
+} PHYS_HEAP_MEM_STATS, *PHYS_HEAP_MEM_STATS_PTR;
 
 static const char *const _pszPhysHeapStrings[] = {
 #define X(_name) #_name,

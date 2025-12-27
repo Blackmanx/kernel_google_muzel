@@ -207,8 +207,15 @@ static unsigned long mtk_mfg_get_static_power(struct devfreq *df,
 	if (!tz)
 		return 0;
 
+	/* Can't use thermal_zone_get_temp because it takes
+	 * thermal_zone_device::lock, but in some init paths, we reach this
+	 * with the lock already taken, resulting in deadlock.
+	 * Starting with Linux 6.10, just use the default temperature for the
+	 * power modelling. */
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 10, 0))
 	if (tz->ops->get_temp(tz, &temperature))
 		dev_warn(mfg->dev, "Failed to read temperature\n");
+#endif
 	do_div(temperature, 1000);
 
 	for (i = 0; i < POWER_TABLE_NUM_VOLT; i++) {

@@ -44,6 +44,7 @@
 #include <linux/version.h>
 #include <linux/component.h>
 #include <linux/platform_device.h>
+#include <linux/of_device.h>
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 5, 0))
 #include <drm/drm_drv.h>
@@ -73,7 +74,9 @@
 
 #define DRIVER_NAME "pdp"
 #define DRIVER_DESC "Imagination Technologies PDP DRM Display Driver"
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 11, 0))
 #define DRIVER_DATE "20150612"
+#endif
 
 #include <drm/drm_atomic_helper.h>
 
@@ -95,6 +98,15 @@ MODULE_PARM_DESC(display_enable, "Enable all displays (default: Y)");
 module_param(output_device, uint, 0444);
 MODULE_PARM_DESC(output_device, "PDP output device (default: PDP1)");
 
+static const enum pdp_version loki_pdp_version = PDP_VERSION_ODIN;
+
+static const struct of_device_id img_pdp_of_match[] = {
+	{ .compatible = "img,pdp_loki", .data = &loki_pdp_version },
+	{},
+};
+
+MODULE_DEVICE_TABLE(of, img_pdp_of_match);
+
 struct pdp_gem_private *pdp_gem_get_private(struct drm_device *dev)
 {
 	struct pdp_drm_private *dev_priv = dev->dev_private;
@@ -109,6 +121,23 @@ static void pdp_irq_handler(void *data)
 
 	list_for_each_entry(crtc, &dev->mode_config.crtc_list, head)
 		pdp_crtc_irq_handler(crtc);
+}
+
+static enum pdp_version pdp_get_version(struct drm_device *dev)
+{
+	const struct of_device_id *id;
+	struct platform_device *pdev = to_platform_device(dev->dev);
+	enum pdp_version version = PDP_VERSION_UNKNOWN;
+
+	/* Try to match OF first, then id_table */
+	id = of_match_device(img_pdp_of_match, &pdev->dev);
+
+	if (id != NULL && id->data != NULL)
+		version = *(enum pdp_version *)(id->data);
+	else if (pdev->id_entry != NULL)
+		version = (enum pdp_version) pdev->id_entry->driver_data;
+
+	return version;
 }
 
 static int pdp_early_load(struct drm_device *dev)
@@ -126,9 +155,11 @@ static int pdp_early_load(struct drm_device *dev)
 
 	dev->dev_private = dev_priv;
 	dev_priv->dev = dev;
-	dev_priv->version = (enum pdp_version)
-		to_platform_device(dev->dev)->id_entry->driver_data;
+	dev_priv->version = pdp_get_version(dev);
 	dev_priv->display_enabled = display_enable;
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0))
+	atomic_set(&dev_priv->open_count, 0);
+#endif
 
 #if !defined(SUPPORT_PLATO_DISPLAY)
 	/* PDP output device selection */
@@ -207,7 +238,8 @@ static int pdp_early_load(struct drm_device *dev)
 	}
 
 	if (dev_priv->version == PDP_VERSION_APOLLO ||
-		dev_priv->version == PDP_VERSION_ODIN) {
+		dev_priv->version == PDP_VERSION_ODIN ||
+		dev_priv->version == PDP_VERSION_ORION_SOC) {
 #if !defined(SUPPORT_PLATO_DISPLAY)
 		err = tc_set_interrupt_handler(dev->dev->parent,
 					   dev_priv->pdp_interrupt,
@@ -258,7 +290,8 @@ static int pdp_early_load(struct drm_device *dev)
 
 err_uninstall_interrupt_handle:
 	if (dev_priv->version == PDP_VERSION_APOLLO ||
-		dev_priv->version == PDP_VERSION_ODIN) {
+		dev_priv->version == PDP_VERSION_ODIN ||
+		dev_priv->version == PDP_VERSION_ORION_SOC) {
 #if !defined(SUPPORT_PLATO_DISPLAY)
 		tc_set_interrupt_handler(dev->dev->parent,
 					     dev_priv->pdp_interrupt,
@@ -326,7 +359,8 @@ static void pdp_late_unload(struct drm_device *dev)
 
 	DRM_INFO("unloading %s device.\n", to_platform_device(dev->dev)->name);
 	if (dev_priv->version == PDP_VERSION_APOLLO ||
-		dev_priv->version == PDP_VERSION_ODIN) {
+		dev_priv->version == PDP_VERSION_ODIN ||
+		dev_priv->version == PDP_VERSION_ORION_SOC) {
 #if !defined(SUPPORT_PLATO_DISPLAY)
 		tc_disable_interrupt(dev->dev->parent, dev_priv->pdp_interrupt);
 		tc_set_interrupt_handler(dev->dev->parent,
@@ -483,10 +517,45 @@ static const struct drm_ioctl_desc pdp_ioctls[] = {
 				DRM_AUTH),
 };
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0))
+static int pdp_drm_open(struct inode *inode, struct file *filp)
+{
+	int ret = drm_open(inode, filp);
+
+	if (!ret) {
+		struct drm_file *file_priv = filp->private_data;
+		struct drm_device *dev = file_priv->minor->dev;
+		struct pdp_drm_private *dev_priv = dev->dev_private;
+
+		atomic_fetch_inc(&dev_priv->open_count);
+	}
+	return ret;
+}
+
+static int pdp_drm_release(struct inode *inode, struct file *filp)
+{
+	struct drm_file *file_priv = filp->private_data;
+	struct drm_device *dev = file_priv->minor->dev;
+	struct pdp_drm_private *dev_priv = dev->dev_private;
+
+	int ret = drm_release(inode, filp);
+
+	if (!ret && atomic_dec_and_test(&dev_priv->open_count))
+		pdp_lastclose(dev);
+
+	return ret;
+}
+#endif
+
 static const struct file_operations pdp_driver_fops = {
 	.owner		= THIS_MODULE,
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0))
+	.open		= pdp_drm_open,
+	.release	= pdp_drm_release,
+#else
 	.open		= drm_open,
 	.release	= drm_release,
+#endif
 	.unlocked_ioctl	= drm_ioctl,
 	.mmap		= drm_gem_mmap,
 	.poll		= drm_poll,
@@ -495,13 +564,18 @@ static const struct file_operations pdp_driver_fops = {
 #ifdef CONFIG_COMPAT
 	.compat_ioctl	= drm_compat_ioctl,
 #endif
+
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0))
+	.fop_flags	= FOP_UNSIGNED_OFFSET,
+#endif
 };
 
 static struct drm_driver pdp_drm_driver = {
 	.load				= NULL,
 	.unload				= NULL,
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 12, 0))
 	.lastclose			= pdp_lastclose,
-
+#endif
 
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 7, 0))
 	.enable_vblank			= pdp_enable_vblank,
@@ -529,7 +603,9 @@ static struct drm_driver pdp_drm_driver = {
 
 	.name				= DRIVER_NAME,
 	.desc				= DRIVER_DESC,
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 11, 0))
 	.date				= DRIVER_DATE,
+#endif
 	.major				= PVRVERSION_MAJ,
 	.minor				= PVRVERSION_MIN,
 	.patchlevel			= PVRVERSION_BUILD,
@@ -627,10 +703,16 @@ static int pdp_probe(struct platform_device *pdev)
 	return component_master_add_with_match(dev, &pdp_component_ops, match);
 }
 
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 11, 0))
 static int pdp_remove(struct platform_device *pdev)
+#else
+static void pdp_remove(struct platform_device *pdev)
+#endif
 {
 	component_master_del(&pdev->dev, &pdp_component_ops);
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 11, 0))
 	return 0;
+#endif
 }
 
 #else // !SUPPORT_PLATO_DISPLAY
@@ -673,7 +755,11 @@ err_drm_dev_put:
 	return	ret;
 }
 
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 11, 0))
 static int pdp_remove(struct platform_device *pdev)
+#else
+static void pdp_remove(struct platform_device *pdev)
+#endif
 {
 	struct drm_device *ddev = platform_get_drvdata(pdev);
 
@@ -691,18 +777,22 @@ static int pdp_remove(struct platform_device *pdev)
 
 	drm_dev_put(ddev);
 
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 11, 0))
 	return 0;
+#endif
 }
 
 #endif  // SUPPORT_PLATO_DISPLAY
 
 static void pdp_shutdown(struct platform_device *pdev)
 {
+	drm_atomic_helper_shutdown(platform_get_drvdata(pdev));
 }
 
 static struct platform_device_id pdp_platform_device_id_table[] = {
 	{ .name = APOLLO_DEVICE_NAME_PDP, .driver_data = PDP_VERSION_APOLLO },
 	{ .name = ODN_DEVICE_NAME_PDP, .driver_data = PDP_VERSION_ODIN },
+	{ .name = "orion_soc_pdp", .driver_data = PDP_VERSION_ORION_SOC },
 #if defined(SUPPORT_PLATO_DISPLAY)
 #if defined(PLATO_MULTI_DEVICE)
 	{ .name = PLATO_MAKE_DEVICE_NAME_PDP(0),
@@ -727,6 +817,7 @@ static struct platform_driver pdp_platform_driver = {
 	.driver		= {
 		.owner  = THIS_MODULE,
 		.name	= DRIVER_NAME,
+		.of_match_table	= of_match_ptr(img_pdp_of_match),
 	},
 	.id_table	= pdp_platform_device_id_table,
 };

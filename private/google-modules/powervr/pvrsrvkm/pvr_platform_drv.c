@@ -95,8 +95,8 @@ static const struct kernel_param_ops pvr_num_devices_ops = {
 	.get = param_get_uint,
 };
 
-#define STR(s) #s
-#define STRINGIFY(s) STR(s)
+#define STR_MACRO(s) #s
+#define STRINGIFY(s) STR_MACRO(s)
 
 module_param_cb(num_devices, &pvr_num_devices_ops, &pvr_num_devices, 0444);
 MODULE_PARM_DESC(num_devices,
@@ -222,7 +222,11 @@ err_drm_dev_put:
 	return	ret;
 }
 
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 11, 0))
 static int pvr_remove(struct platform_device *pdev)
+#else
+static void pvr_remove(struct platform_device *pdev)
+#endif
 {
 	struct drm_device *ddev = platform_get_drvdata(pdev);
 
@@ -237,7 +241,9 @@ static int pvr_remove(struct platform_device *pdev)
 	pvr_drm_unload(ddev);
 
 	drm_dev_put(ddev);
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 11, 0))
 	return 0;
+#endif
 }
 
 static void pvr_shutdown(struct platform_device *pdev)
@@ -252,6 +258,9 @@ static void pvr_shutdown(struct platform_device *pdev)
 static const struct of_device_id pvr_of_ids[] = {
 #if defined(SYS_RGX_OF_COMPATIBLE)
 	{ .compatible = SYS_RGX_OF_COMPATIBLE, },
+#endif
+#if defined(SYS_RGX_OF_COMPATIBLE2)
+	{ .compatible = SYS_RGX_OF_COMPATIBLE2, },
 #endif
 	{},
 };

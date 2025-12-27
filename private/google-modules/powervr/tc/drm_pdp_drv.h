@@ -102,6 +102,9 @@ struct pdp_drm_private {
 	struct drm_encoder *encoder;
 
 	bool display_enabled;
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0))
+	atomic_t open_count;
+#endif
 };
 
 struct pdp_crtc {

@@ -57,9 +57,6 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "pvr_debug.h"
 #include "connection_server.h"
 #include "pvr_bridge.h"
-#if defined(SUPPORT_RGX)
-#include "rgx_bridge.h"
-#endif
 #include "srvcore.h"
 #include "handle.h"
 
@@ -76,7 +73,7 @@ static PVRSRV_ERROR _PhysmemWrapExtMempsPMRPtrIntRelease(void *pvData)
 	return eError;
 }
 
-static IMG_INT
+static size_t
 PVRSRVBridgePhysmemWrapExtMem(IMG_UINT32 ui32DispatchTableEntry,
 			      IMG_UINT8 * psPhysmemWrapExtMemIN_UI8,
 			      IMG_UINT8 * psPhysmemWrapExtMemOUT_UI8,
@@ -131,7 +128,7 @@ PhysmemWrapExtMem_exit:
 		}
 	}
 
-	return 0;
+	return offsetof(PVRSRV_BRIDGE_OUT_PHYSMEMWRAPEXTMEM, eError);
 }
 
 /* ***************************************************************************

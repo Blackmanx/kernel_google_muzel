@@ -131,15 +131,17 @@ X(PhysHeapHybridDefault2CpuLocal,   BOOL,           ALWAYS,      0,             
 \
 X(DebugDumpFWTLogType,              UINT32,         ALWAYS,      PVRSRV_APPHINT_DEBUGDUMPFWTLOGTYPE,           NO_PARAM_TABLE,   ALWAYS   ) \
 \
-X(EnableIdleCycleStealing,          UINT32,         VALIDATION,  PVRSRV_APPHINT_ENABLEIDLECYCLESTEALING,       NO_PARAM_TABLE,   ALWAYS   ) \
+X(EnableIdleCycleStealing,          UINT32,         ICS,  PVRSRV_APPHINT_ENABLEIDLECYCLESTEALING,       NO_PARAM_TABLE,   ALWAYS   ) \
 \
-X(FaultDetectionTimeInterval,       UINT32,         VALIDATION,  PVRSRV_APPHINT_FAULTDETECTIONTIMEINTERVAL_USEC, NO_PARAM_TABLE,   ALWAYS   ) \
+X(FaultDetectionTimeInterval,       UINT32,         ICS,  PVRSRV_APPHINT_FAULTDETECTIONTIMEINTERVAL_USEC, NO_PARAM_TABLE,   ALWAYS   ) \
 \
-X(ICSTimeIntervalThreshold,         UINT32,         VALIDATION,  PVRSRV_APPHINT_ICSTIMEINTERVAL_THRESHOLD,     NO_PARAM_TABLE,   ALWAYS   ) \
+X(ICSTimeIntervalThreshold,         UINT32,         ICS,  PVRSRV_APPHINT_ICSTIMEINTERVAL_THRESHOLD,     NO_PARAM_TABLE,   ALWAYS   ) \
 \
-X(ICSTestModeOn,                    BOOL,           VALIDATION,  0,                                            NO_PARAM_TABLE,   ALWAYS   ) \
+X(ICSTestModeOn,                    BOOL,           ICS,  0,                                            NO_PARAM_TABLE,   ALWAYS   ) \
 \
-X(FaultInjection,                   UINT32,         VALIDATION,  0,                                            NO_PARAM_TABLE,   ALWAYS   )
+X(FaultInjection,                   UINT32,         VALIDATION,  0,                                            NO_PARAM_TABLE,   ALWAYS   ) \
+\
+X(DisableTBTriggers,                UINT32,         VALIDATION,  0,                                            NO_PARAM_TABLE,   ALWAYS   ) \
 
 /*
 *******************************************************************************
@@ -212,7 +214,8 @@ X(NEVER) \
 X(DEBUG) \
 X(PDUMP) \
 X(VALIDATION) \
-X(GPUVIRT_VAL)
+X(GPUVIRT_VAL) \
+X(ICS)
 
 #define APPHINT_RT_CLASS_LIST \
 X(ALWAYS) \
@@ -248,6 +251,13 @@ X(NEVER)
 #else
 	#define APPHINT_ENABLED_CLASS_GPUVIRT_VAL IMG_FALSE
 	#define apphint_modparam_class_GPUVIRT_VAL(a, b, c)
+#endif
+#if defined(SUPPORT_ICS)
+	#define APPHINT_ENABLED_CLASS_ICS IMG_TRUE
+	#define apphint_modparam_class_ICS(a, b, c) apphint_modparam_enable(a, b, c)
+#else
+	#define APPHINT_ENABLED_CLASS_ICS IMG_FALSE
+	#define apphint_modparam_class_ICS(a, b, c)
 #endif
 
 /*

@@ -480,9 +480,23 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 	#include <linux/bug.h>
 #endif
 
-/* Get a structure's address from the address of a member */
-#define IMG_CONTAINER_OF(ptr, type, member) \
-	(type *) ((uintptr_t) (ptr) - offsetof(type, member))
+/* Get a structure's address using the address of one of its members
+ * unless the member's address is NULL in the first place */
+#define _IMG_CONTAINER_OF_NOASSERT(ptr, type, field) \
+        (unlikely((ptr) == NULL) ? NULL : (type*) ((uintptr_t) (ptr) - offsetof(type, field)))
+
+#if defined(__KLOCWORK__)
+#define IMG_CONTAINER_OF(ptr, type, field) \
+        ((type*) ((uintptr_t) (ptr) - offsetof(type, field)))
+#elif defined(__GNUC__) && defined(DEBUG) && defined(PVR_ASSERT)
+#define IMG_CONTAINER_OF(ptr, type, field) \
+        ({ \
+                PVR_ASSERT(ptr != NULL); \
+                _IMG_CONTAINER_OF_NOASSERT(ptr, type, field); \
+        })
+#else
+#define IMG_CONTAINER_OF(ptr, type, field) _IMG_CONTAINER_OF_NOASSERT(ptr, type, field)
+#endif
 
 /* Get a new pointer with an offset (in bytes) from a base address, useful
  * when traversing byte buffers and accessing data in buffers through struct
@@ -490,6 +504,13 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  * Note, this macro is not equivalent to or replacing offsetof() */
 #define IMG_OFFSET_ADDR(addr, offset_in_bytes) \
 	(void*)&(((IMG_UINT8*)(void*)(addr))[offset_in_bytes])
+
+/* Get a new pointer (user space) with an offset (in bytes) from a base address,
+ * useful when traversing byte buffers and accessing data in buffers through
+ * struct pointers.
+ * Note, this macro is not equivalent to or replacing offsetof() */
+#define IMG_OFFSET_ADDR_USER(addr, offset_in_bytes) \
+	(void __user*)&(((IMG_UINT8 __user*)(void __user*)(addr))[offset_in_bytes])
 
 /* Get a new pointer with an offset (in bytes) from a base address, version
  * for volatile memory.

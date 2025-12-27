@@ -89,15 +89,9 @@ CopyToUserWrapper(CONNECTION_DATA *psConnection,
 }
 #endif
 
-IMG_INT
-DummyBW(IMG_UINT32 ui32DispatchTableEntry,
-        IMG_UINT8 *psBridgeIn,
-        IMG_UINT8 *psBridgeOut,
-        CONNECTION_DATA *psConnection);
-
 typedef PVRSRV_ERROR (*ServerResourceDestroyFunction)(IMG_HANDLE, IMG_HANDLE);
 
-typedef IMG_INT (*BridgeWrapperFunction)(IMG_UINT32 ui32DispatchTableEntry,
+typedef size_t (*BridgeWrapperFunction)(IMG_UINT32 ui32DispatchTableEntry,
 									 IMG_UINT8 *psBridgeIn,
 									 IMG_UINT8 *psBridgeOut,
 									 CONNECTION_DATA *psConnection);
@@ -222,6 +216,11 @@ PVRSRVGetDevClockSpeedKM(CONNECTION_DATA * psConnection,
                          IMG_PUINT32  pui32RGXClockSpeed);
 
 PVRSRV_ERROR
+PVRSRVGetMaxClockSpeedKM(CONNECTION_DATA * psConnection,
+                         PVRSRV_DEVICE_NODE *psDeviceNode,
+                         IMG_PUINT32  pui32RGXClockSpeed);
+
+PVRSRV_ERROR
 PVRSRVHWOpTimeoutKM(CONNECTION_DATA *psConnection,
                     PVRSRV_DEVICE_NODE *psDeviceNode);
 
@@ -248,6 +247,10 @@ PVRSRV_ERROR PVRSRVFindProcessMemStatsKM(IMG_PID pid,
 PVRSRV_ERROR PVRSRVGetSLCSizeKM(CONNECTION_DATA *psConnection,
                                       PVRSRV_DEVICE_NODE *psDeviceNode,
                                       IMG_UINT32 *pui32SLCSizeInBytes);
+
+PVRSRV_ERROR PVRSRVGetSocFreqKM(CONNECTION_DATA *psConnection,
+                                      PVRSRV_DEVICE_NODE *psDeviceNode,
+                                      IMG_UINT32 *pui32SocFreq);
 
 static INLINE
 PVRSRV_ERROR DestroyServerResource(const SHARED_DEV_CONNECTION hConnection,

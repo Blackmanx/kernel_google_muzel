@@ -40,8 +40,8 @@ IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 */ /**************************************************************************/
 #include "img_defs.h"
-#if defined(__linux__)
-#include "km_apphint.h"
+#if defined(SUPPORT_DI_APPHINT_IMPL)
+#include "os_apphintkm.h"
 #include "device.h"
 #else
 #include "services_client_porting.h"
@@ -55,7 +55,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 #define APPHINT_NO_DEVICE (NULL)
 
-#if defined(__linux__) && !defined(DOXYGEN)
+#if defined(SUPPORT_DI_APPHINT_IMPL) && !defined(DOXYGEN)
 static INLINE IMG_UINT os_get_apphint_UINT32(PVRSRV_DEVICE_NODE *device, void *state, APPHINT_ID id, const IMG_UINT32 *pAppHintDefault, IMG_UINT32 *pVal) {
 	return !pvr_apphint_get_uint32(device, id, pVal);
 }
@@ -88,7 +88,7 @@ static INLINE IMG_UINT os_get_apphint_STRING(PVRSRV_DEVICE_NODE *device, void *s
 #define OSFreeAppHintState(state) \
 	PVR_UNREFERENCED_PARAMETER(state)
 
-#else /* defined(__linux__) && !defined(DOXYGEN) */
+#else /* defined(SUPPORT_DI_APPHINT_IMPL) && !defined(DOXYGEN) */
 
 /**************************************************************************/ /*!
 @def OSGetAppHintUINT32(state, name, appHintDefault, value)

@@ -930,32 +930,9 @@ void RGXAcquireBootDataAddr(const void *hPrivate, IMG_DEV_VIRTADDR *psBootDataAd
 
 void *RGXCalculateHostFWDataAddress(const void *hPrivate, void *pvHostFWDataAddr)
 {
-#if defined(RGX_FEATURE_HOST_SECURITY_VERSION_MAX_VALUE_IDX)
-	RGX_LAYER_PARAMS *psParams;
-	PVRSRV_RGXDEV_INFO *psDevInfo;
-	IMG_UINT8 *ui8HostFWDataAddr = (IMG_UINT8*)pvHostFWDataAddr;
-	IMG_UINT32 ui32Offset = 0U;
-
-	PVR_ASSERT(hPrivate != NULL);
-	psParams = (RGX_LAYER_PARAMS*)hPrivate;
-	psDevInfo = psParams->psDevInfo;
-
-	if (RGX_GET_FEATURE_VALUE(psDevInfo, HOST_SECURITY_VERSION) >= 4)
-	{
-		ui32Offset =
-			PVR_ALIGN(RGXGetFWImageSectionAllocSize(hPrivate, RISCV_UNCACHED_CODE),
-			          RGXRISCVFW_REMAP_CONFIG_DEVVADDR_ALIGN) +
-			PVR_ALIGN(RGXGetFWImageSectionAllocSize(hPrivate, RISCV_CACHED_CODE),
-			          RGXRISCVFW_REMAP_CONFIG_DEVVADDR_ALIGN);
-	}
-
-	ui8HostFWDataAddr -= ui32Offset;
-	return (void*)ui8HostFWDataAddr;
-#else
 	PVR_UNREFERENCED_PARAMETER(hPrivate);
 
 	return pvHostFWDataAddr;
-#endif
 }
 
 IMG_BOOL RGXDeviceAckIrq(const void *hPrivate)

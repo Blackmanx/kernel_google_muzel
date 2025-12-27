@@ -207,8 +207,6 @@ pvr_exp_fence_context_signal_fences(void *data)
 	struct pvr_exp_fence_context *fctx = (struct pvr_exp_fence_context *)data;
 	struct pvr_exp_fence *pvr_exp_fence, *tmp;
 	unsigned long fence_ctx_flags;
-	int chkpt_ct = 0;
-	int chkpt_sig_ct = 0;
 
 	LIST_HEAD(signal_list);
 
@@ -225,7 +223,7 @@ pvr_exp_fence_context_signal_fences(void *data)
 	 */
 	spin_lock_irqsave(&fctx->list_lock, fence_ctx_flags);
 	list_for_each_entry_safe(pvr_exp_fence, tmp, &fctx->signal_list, signal_head) {
-		chkpt_ct++;
+
 		/* We check here if the export fence has been placed into the finalised state before checking
 		 * if it has been signalled. This is because we need to know that the checkpoint will not be
 		 * removed mid check by a rollback. We also know that a fence that hasn't been finalised cannot
@@ -233,7 +231,6 @@ pvr_exp_fence_context_signal_fences(void *data)
 		 */
 		if (pvr_exp_fence_sync_is_finalised(pvr_exp_fence) &&
 		    pvr_exp_fence_sync_is_signaled(pvr_exp_fence, PVRSRV_FENCE_FLAG_SUPPRESS_HWP_PKT)) {
-			chkpt_sig_ct++;
 			list_move_tail(&pvr_exp_fence->signal_head, &signal_list);
 		}
 	}

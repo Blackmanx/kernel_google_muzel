@@ -49,7 +49,6 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "rgxta3d.h"
 #include "pdump_km.h"
 #include "mmu_common.h"
-#include "devicemem_server.h"
 #include "osfunc.h"
 #include "vmm_pvz_server.h"
 #include "vz_vm.h"

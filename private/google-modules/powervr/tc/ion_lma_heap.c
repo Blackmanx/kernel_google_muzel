@@ -312,9 +312,6 @@ struct ion_heap *ion_lma_heap_create(struct ion_platform_heap *heap_data,
 {
 	struct ion_lma_heap *lma_heap;
 	size_t size = heap_data->size;
-	struct page *page;
-
-	page = pfn_to_page(PFN_DOWN(heap_data->base));
 
 	/* Do not zero the LMA heap from the CPU. This is very slow with
 	 * the current TCF (w/ no DMA engine). We will use the TLA to clear

@@ -308,13 +308,13 @@ return_:                                                                        
 /* drm_ioctl() already copies the data over, see comment on drm_ioctl_t */
 #define PVR_SYNC_IOCTL_DISPATCH_DATA(pUM, pKM) pUM
 #define PVR_SYNC_IOCTL_DISPATCH_COPY_WRAPPER(dir, name, structure, copy) \
-INLINE static int pvr_sync_ioctl_dispatch_copy_ ## dir ## __ ## name (structure __user *pUM, structure *pKM) \
+static INLINE int pvr_sync_ioctl_dispatch_copy_ ## dir ## __ ## name (structure __user *pUM, structure *pKM) \
 { return 0; }
 #else /* !defined(USE_PVRSYNC_DEVNODE) */
 /* Generates a function to copy over the arguments to/from user-mode */
 #define PVR_SYNC_IOCTL_DISPATCH_DATA(pUM, pKM) pKM
 #define PVR_SYNC_IOCTL_DISPATCH_COPY_WRAPPER(dir, name, structure, copy)                                     \
-INLINE static int pvr_sync_ioctl_dispatch_copy_ ## dir ## __ ## name (structure __user *pUM, structure *pKM) \
+static INLINE int pvr_sync_ioctl_dispatch_copy_ ## dir ## __ ## name (structure __user *pUM, structure *pKM) \
 {                                                                                                            \
 	/* May be unused if there are no in/out args */                                                          \
 	PVR_UNREFERENCED_PARAMETER(pUM);                                                                         \

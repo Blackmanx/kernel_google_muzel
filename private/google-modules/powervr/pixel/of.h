@@ -43,5 +43,7 @@ struct pixel_of_properties {
 };
 
 struct pixel_of_pdevs {
+#if defined(SUPPORT_LINUX_DVFS) || defined(SUPPORT_PDVFS)
 	struct platform_device *gpu_pf_state_pdev;
+#endif
 };

@@ -548,8 +548,7 @@ PVRSRVSyncRecordAddKM(CONNECTION_DATA *psConnection,
 
 	if (!(GetInfoPageDebugFlagsKM() & DEBUG_FEATURE_FULL_SYNC_TRACKING_ENABLED))
 	{
-		PVR_DPF((PVR_DBG_ERROR, "%s: Full sync tracking debug feature not enabled!", __func__));
-		return PVRSRV_ERROR_NOT_SUPPORTED;
+		PVR_LOG_RETURN_ERROR(PVRSRV_ERROR_NOT_SUPPORTED, "Full sync tracking debug feature not enabled!");
 	}
 
 	RGXSRV_HWPERF_ALLOC(psDevNode, SYNC,
@@ -624,8 +623,7 @@ PVRSRVSyncRecordRemoveByHandleKM(
 
 	if (!(GetInfoPageDebugFlagsKM() & DEBUG_FEATURE_FULL_SYNC_TRACKING_ENABLED))
 	{
-		PVR_DPF((PVR_DBG_ERROR, "%s: Full sync tracking debug feature not enabled!", __func__));
-		return PVRSRV_ERROR_NOT_SUPPORTED;
+		PVR_LOG_RETURN_ERROR(PVRSRV_ERROR_NOT_SUPPORTED, "Full sync tracking debug feature not enabled!");
 	}
 
 	PVR_RETURN_IF_INVALID_PARAM(hRecord);
@@ -1221,23 +1219,16 @@ static void SyncRecordListDeinit(PVRSRV_DEVICE_NODE *psDevNode)
 
 PVRSRV_ERROR SyncServerInit(PVRSRV_DEVICE_NODE *psDevNode)
 {
-	PVRSRV_ERROR eError;
-
-	if (GetInfoPageDebugFlagsKM() & DEBUG_FEATURE_FULL_SYNC_TRACKING_ENABLED)
+	if (!(GetInfoPageDebugFlagsKM() & DEBUG_FEATURE_FULL_SYNC_TRACKING_ENABLED))
 	{
-		eError = SyncRecordListInit(psDevNode);
-		PVR_GOTO_IF_ERROR(eError, fail_record_list);
+		return PVRSRV_OK;
 	}
 
-	return PVRSRV_OK;
-
-fail_record_list:
-	return eError;
+	return SyncRecordListInit(psDevNode);
 }
 
 void SyncServerDeinit(PVRSRV_DEVICE_NODE *psDevNode)
 {
-
 	if (GetInfoPageDebugFlagsKM() & DEBUG_FEATURE_FULL_SYNC_TRACKING_ENABLED)
 	{
 		SyncRecordListDeinit(psDevNode);

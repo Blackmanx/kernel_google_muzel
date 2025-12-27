@@ -94,16 +94,6 @@ PVRSRV_ERROR
 PVRSRVRGXDestroyKickSyncContextKM(RGX_SERVER_KICKSYNC_CONTEXT * psKicksyncContext);
 
 /**************************************************************************/ /*!
-@Function       PVRSRVRGXSetKickSyncContextPropertyKM
-@Description    Server-side implementation of RGXSetKickSyncContextProperty
-@Return         PVRSRV_OK on success. Otherwise, a PVRSRV_ error code
- */ /**************************************************************************/
-PVRSRV_ERROR PVRSRVRGXSetKickSyncContextPropertyKM(RGX_SERVER_KICKSYNC_CONTEXT *psKickSyncContext,
-                                                   RGX_CONTEXT_PROPERTY eContextProperty,
-                                                   IMG_UINT64 ui64Input,
-                                                   IMG_UINT64 *pui64Output);
-
-/**************************************************************************/ /*!
 @Function       PVRSRVRGXKickSyncKM
 @Description    Kicks a sync only command
 @Return         PVRSRV_OK on success. Otherwise, a PVRSRV_ error code

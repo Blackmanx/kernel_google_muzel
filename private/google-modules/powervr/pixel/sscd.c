@@ -2,10 +2,13 @@
 
 #include <linux/platform_data/sscoredump.h>
 #include <uapi/misc/crashinfo.h>
+#include <linux/atomic.h>
 #include <linux/sched.h>
+#include <linux/jiffies.h>
 #include "sscd.h"
 
 #define SSCD_MAX_MSG_LEN (1 << 18) // 256 KiB buffer
+#define SSCD_RATELIMIT_MS (300000U) // 5min
 
 static void sscd_release(struct device *dev)
 {
@@ -92,6 +95,28 @@ void gpu_sscd_dump(struct pixel_gpu_device *pixel_dev, PVRSRV_ROBUSTNESS_NOTIFY_
 	char reset_reason[64] = {0};
 	char pid_tid_string[16] = {0};
 	char process_thread_group_name[(TASK_COMM_LEN * 2) + 5] = {0};
+	static atomic_long_t last_dump_ts = ATOMIC_LONG_INIT(0);
+	unsigned long last_dump_ts_val, current_ts = jiffies;
+	bool suppress_dump = false;
+
+	if (pixel_dev == NULL || pixel_dev->dev_config == NULL)
+		return;
+
+	last_dump_ts_val = atomic_long_read(&last_dump_ts);
+	if (!last_dump_ts_val || time_after(current_ts,
+				last_dump_ts_val + msecs_to_jiffies(SSCD_RATELIMIT_MS))) {
+		if (atomic_long_cmpxchg(&last_dump_ts, last_dump_ts_val,
+					current_ts) != last_dump_ts_val) {
+			suppress_dump = true;
+		}
+	} else {
+		suppress_dump = true;
+	}
+
+	if (suppress_dump) {
+		dev_info(pixel_dev->dev, "pixel: skipping powervr subsystem core dump");
+		return;
+	}
 
 	if (error->eResetReason == RGX_CONTEXT_RESET_REASON_GUILTY_LOCKUP)
 		snprintf(dm_string,
@@ -149,9 +174,6 @@ void gpu_sscd_dump(struct pixel_gpu_device *pixel_dev, PVRSRV_ROBUSTNESS_NOTIFY_
 		 process_thread_group_name,
 		 dm_string,
 		 reset_reason);
-
-	if (pixel_dev == NULL || pixel_dev->dev_config == NULL)
-		return;
 
 	dev_info(pixel_dev->dev, "PowerVR subsystem core dump in progress");
 	if (!pdata->sscd_report) {

@@ -324,6 +324,7 @@ void (OSFreeMem)(void *pvMem)
 		return;
 	}
 
+
 	if (pvMem != NULL)
 	{
 		pvMem = _pvr_alloc_stats_remove(pvMem);
@@ -408,6 +409,7 @@ void (OSFreeMemNoStats)(void *pvMem)
 	{
 		return;
 	}
+
 
 	if (pvMem != NULL)
 	{

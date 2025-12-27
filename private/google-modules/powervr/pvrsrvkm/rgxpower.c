@@ -76,11 +76,9 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #if defined(SUPPORT_PDVFS)
 #include "pvr_dvfs_proactive.h"
 #endif
-
 #if defined(PVRSRV_ANDROID_TRACE_GPU_FREQ)
-#include "pvr_gpufreq.h"
-#endif /* defined(PVRSRV_ANDROID_TRACE_GPU_FREQ) */
-
+#include "power_trace_events.h"
+#endif
 #if defined(SUPPORT_PDVFS) && (PDVFS_COM == PDVFS_COM_HOST)
 #include "rgxpdvfs.h"
 #endif
@@ -104,438 +102,321 @@ static PVRSRV_ERROR RGXFWNotifyHostTimeout(PVRSRV_RGXDEV_INFO *psDevInfo)
 	return eError;
 }
 
-#define GPU_IDLE       RGXFWIF_GPU_UTIL_STATE_IDLE
-#define GPU_ACTIVE     RGXFWIF_GPU_UTIL_STATE_ACTIVE
-#define GPU_BLOCKED    RGXFWIF_GPU_UTIL_STATE_BLOCKED
-#define GPU_INACTIVE   RGXFWIF_GPU_UTIL_STATE_INACTIVE
-#define MAX_ITERATIONS 64
-#define MAX_DIFF_TIME_NS (300000ULL)
-#define MAX_DIFF_DM_TIME_US (FAST_APPROX_NS_TO_US(MAX_DIFF_TIME_NS))
-
-PVRSRV_ERROR RGXGetGpuUtilStats(PVRSRV_DEVICE_NODE *psDeviceNode,
-								IMG_HANDLE hGpuUtilUser,
-								RGXFWIF_GPU_UTIL_STATS *psReturnStats)
+void RGXInitGpuUtilStats(PVRSRV_DEVICE_NODE *psDeviceNode,
+						 RGX_GPU_UTIL_STATS	*psGpuUtilStats)
 {
-	PVRSRV_RGXDEV_INFO *psDevInfo = psDeviceNode->pvDevice;
-	RGXFWIF_GPU_DM_STATS sStats;
-	RGXFWIF_GPU_UTIL_STATS *psAggregateStats;
-	IMG_UINT64 (*paaui64DMOSTmpCounters)[RGX_NUM_DRIVERS_SUPPORTED][RGXFWIF_GPU_UTIL_REDUCED_STATES_NUM];
-	IMG_UINT64 (*paui64DMOSTmpLastStateTime)[RGX_NUM_DRIVERS_SUPPORTED];
-	IMG_UINT64 (*paui64DMOSTmpLastState)[RGX_NUM_DRIVERS_SUPPORTED];
-	IMG_UINT64 (*paui64DMOSTmpLastPeriod)[RGX_NUM_DRIVERS_SUPPORTED];
-	IMG_UINT64 (*paui64DMOSTmpLastTime)[RGX_NUM_DRIVERS_SUPPORTED];
-	IMG_UINT32 ui32Attempts;
-	IMG_UINT32 ui32Remainder;
-	IMG_UINT64 ui64TimeNowNs, ui64TimeNowUs, ui64GpuStateTransitionNs,
-		   ui64InitialGpuStateTransitionNs;
-	IMG_UINT32 ui32DriverID;
-	IMG_UINT32 ui32MaxDMCount;
-	RGXFWIF_DM eDM;
-	bool       bCacheStateTransition = true;
+	OS_SPINLOCK_FLAGS uiFlags = 0;
+	IMG_UINT64 ui64DeviceTimestampTicks = 0;
+	IMG_UINT64 ui64OsTimestampNS = OSClockns64();
 
-	/***** (1) Initialise return stats *****/
-
-	psReturnStats->bValid = IMG_FALSE;
-
-	if (hGpuUtilUser == NULL)
-	{
-		return PVRSRV_ERROR_INVALID_PARAMS;
-	}
-	psAggregateStats = hGpuUtilUser;
-
-	/* decrease by 1 to account for excluding GP DM from the statics */;
-	ui32MaxDMCount =  psDevInfo->sDevFeatureCfg.ui32MAXDMCount-1;
-
-	/* Reset temporary counters used in the attempts loop */
-	paaui64DMOSTmpCounters  = &psAggregateStats->sTempGpuStats.aaaui64DMOSTmpCounters[0];
-	paui64DMOSTmpLastStateTime   = &psAggregateStats->sTempGpuStats.aaui64DMOSTmpLastStateTime[0];
-	paui64DMOSTmpLastState  = &psAggregateStats->sTempGpuStats.aaui64DMOSTmpLastState[0];
-	paui64DMOSTmpLastPeriod = &psAggregateStats->sTempGpuStats.aaui64DMOSTmpLastPeriod[0];
-	paui64DMOSTmpLastTime   = &psAggregateStats->sTempGpuStats.aaui64DMOSTmpLastTime[0];
-
-	RGXFwSharedMemCacheOpPtr(psDevInfo->psRGXFWIfGpuUtilFW, INVALIDATE);
-
-	/* Try to acquire GPU utilisation counters and repeat if the FW is in the middle of an update */
-	for (ui32Attempts = 0; ui32Attempts < 4; ui32Attempts++)
-	{
-		IMG_UINT64 aui64GpuTmpCounters[RGXFWIF_GPU_UTIL_STATE_NUM] = {0};
-		IMG_UINT64 ui64GpuLastPeriod = 0, ui64GpuLastState = 0, ui64GpuLastTime = 0;
-
-		ui64GpuStateTransitionNs = 0;
-		/***** (2) Get latest data from shared area *****/
-
-		FOREACH_SUPPORTED_DRIVER(ui32DriverID)
-		{
-			IMG_UINT64 aui64StatsCountersNew[RGXFWIF_GPU_UTIL_STATE_NUM];
-			IMG_UINT64 ui64GpuLastWordNew;
-			RGXFWIF_GPU_DM_STATS sStatsNew;
-			IMG_UINT32 i = 0;
-
-			ui64GpuStateTransitionNs = 0;
-			ui64GpuLastState = 0;
-
-			OSLockAcquire(psDevInfo->hGPUUtilLock);
-
-			/* Copy data from device memory */
-			memcpy(&sStatsNew, &psDevInfo->psRGXFWIfGpuUtilFW->sStats[ui32DriverID], sizeof(sStats));
-			memcpy(&ui64GpuLastWordNew, &psDevInfo->psRGXFWIfGpuUtilFW->ui64GpuStateTransitionNs, sizeof(ui64GpuStateTransitionNs));
-			memcpy(aui64StatsCountersNew, psDevInfo->psRGXFWIfGpuUtilFW->aui64GpuStateTimeNs, sizeof(aui64StatsCountersNew));
-
-			/*
-			 * Cache the first transition stamp. This allows us to detect whether a FW
-			 * state update has occurred at any subsequent point since this initial
-			 * caching.
-			 */
-			if (bCacheStateTransition) {
-				ui64InitialGpuStateTransitionNs = ui64GpuLastWordNew;
-				bCacheStateTransition = false;
-			}
-
-			/*
-			 * First attempt at detecting if the FW is in the middle of an update.
-			 * This should also help if the FW is in the middle of a 64 bit variable update.
-			 * This loop must be fast. Faster than FW updates the stats.
-			 */
-			for (i = 0; i < MAX_ITERATIONS; i++)
-			{
-				IMG_UINT32 j,k;
-				IMG_BOOL bRetry = IMG_FALSE;
-
-				if (i > 0)
-				{
-					/* On retry keep previous data */
-					ui64GpuLastWordNew = ui64GpuStateTransitionNs;
-					memcpy(aui64StatsCountersNew, aui64GpuTmpCounters, sizeof(aui64StatsCountersNew));
-					memcpy(&sStatsNew, &sStats, sizeof(sStatsNew));
-				}
-
-				/* Copy data from device memory */
-				memcpy(&sStats, &psDevInfo->psRGXFWIfGpuUtilFW->sStats[ui32DriverID], sizeof(sStats));
-				memcpy(&ui64GpuStateTransitionNs, &psDevInfo->psRGXFWIfGpuUtilFW->ui64GpuStateTransitionNs, sizeof(ui64GpuStateTransitionNs));
-				memcpy(aui64GpuTmpCounters, psDevInfo->psRGXFWIfGpuUtilFW->aui64GpuStateTimeNs, sizeof(aui64GpuTmpCounters));
-
-				/* Check for abnormal time difference between reads */
-				if (RGXFWIF_GPU_UTIL_GET_TIME(ui64GpuStateTransitionNs) - RGXFWIF_GPU_UTIL_GET_TIME(ui64GpuLastWordNew) > MAX_DIFF_TIME_NS)
-				{
-					bRetry = IMG_TRUE;
-					continue;
-				}
-
-				for (j = 0; j < RGXFWIF_GPU_UTIL_STATE_NUM; j++)
-				{
-					/* Check for abnormal time difference between reads */
-					if (aui64GpuTmpCounters[j] - aui64StatsCountersNew[j] > MAX_DIFF_TIME_NS)
-					{
-						bRetry = IMG_TRUE;
-						break;
-					}
-				}
-
-				if (bRetry)
-				{
-					continue;
-				}
-
-				/* Check for DM counters wrapped or
-				   abnormal time difference between reads. */
-				for (j = 0; j < RGXFWIF_GPU_UTIL_DM_MAX; j++)
-				{
-					if (sStats.aui32StateTransitionUsHi[j] != sStatsNew.aui32StateTransitionUsHi[j] ||
-						RGXFWIF_GPU_UTIL_GET_TIME32(sStats.aui32StateTransitionUsLo[j]) - RGXFWIF_GPU_UTIL_GET_TIME32(sStatsNew.aui32StateTransitionUsLo[j]) > MAX_DIFF_DM_TIME_US)
-					{
-						bRetry = IMG_TRUE;
-						break;
-					}
-
-					for (k = 0; k < RGXFWIF_GPU_UTIL_REDUCED_STATES_NUM; k++)
-					{
-						if (sStats.aaui32StateTimeUsHi[j][k] != sStatsNew.aaui32StateTimeUsHi[j][k] ||
-							sStats.aaui32StateTimeUsLo[j][k] - sStatsNew.aaui32StateTimeUsLo[j][k] > MAX_DIFF_DM_TIME_US)
-						{
-							bRetry = IMG_TRUE;
-							break;
-						}
-
-					}
-
-					if (bRetry)
-					{
-						break;
-					}
-				}
-
-				if (!bRetry)
-				{
-					/* Stats are good*/
-					break;
-				}
-			}
-
-			OSLockRelease(psDevInfo->hGPUUtilLock);
-
-			ui64GpuLastState = RGXFWIF_GPU_UTIL_GET_STATE(ui64GpuStateTransitionNs);
-
-			if (i == MAX_ITERATIONS)
-			{
-				PVR_DPF((PVR_DBG_WARNING,
-						 "RGXGetGpuUtilStats could not get reliable data after trying %u times", i));
-
-				return PVRSRV_ERROR_TIMEOUT;
-			}
-
-			for (eDM = 0; eDM < ui32MaxDMCount; eDM++)
-			{
-				paui64DMOSTmpLastStateTime[eDM][ui32DriverID]  =
-					((IMG_UINT64)sStats.aui32StateTransitionUsHi[eDM] << 32) + sStats.aui32StateTransitionUsLo[eDM];
-				paui64DMOSTmpLastState[eDM][ui32DriverID] = RGXFWIF_GPU_UTIL_GET_STATE(paui64DMOSTmpLastStateTime[eDM][ui32DriverID]);
-				if (paui64DMOSTmpLastState[eDM][ui32DriverID] != GPU_ACTIVE)
-				{
-					paui64DMOSTmpLastState[eDM][ui32DriverID] = GPU_INACTIVE;
-				}
-				paaui64DMOSTmpCounters[eDM][ui32DriverID][GPU_INACTIVE] = (IMG_UINT64)sStats.aaui32StateTimeUsLo[eDM][GPU_INACTIVE] +
-					((IMG_UINT64)sStats.aaui32StateTimeUsHi[eDM][GPU_INACTIVE] << 32);
-				paaui64DMOSTmpCounters[eDM][ui32DriverID][GPU_ACTIVE]  = (IMG_UINT64)sStats.aaui32StateTimeUsLo[eDM][GPU_ACTIVE] +
-					((IMG_UINT64)sStats.aaui32StateTimeUsHi[eDM][GPU_ACTIVE] << 32);
-			}
-
-		} /* FOREACH_SUPPORTED_DRIVER(ui32DriverID) */
-
-
-		/***** (3) Compute return stats *****/
-
-		/* Update temp counters to account for the time since the last update to the shared ones */
-		OSMemoryBarrier(NULL); /* Ensure the current time is read after the loop above */
 #if defined(SUPPORT_SOC_TIMER)
-		ui64TimeNowNs = RGXFWIF_GPU_UTIL_GET_TIME(RGXTimeGetSOCTimerValueNS(psDeviceNode));
+	PVRSRVRGXCurrentTime(NULL, psDeviceNode, RGX_QUERY_SOC_TIMER, &ui64DeviceTimestampTicks);
 #else
-		ui64TimeNowNs = RGXFWIF_GPU_UTIL_GET_TIME(RGXTimeCorrGetClockns64(psDeviceNode));
+	PVRSRVRGXCurrentTime(NULL, psDeviceNode, RGX_QUERY_DEVICE_TIMESTAMP, &ui64DeviceTimestampTicks);
 #endif
 
-		ui64GpuLastTime   = RGXFWIF_GPU_UTIL_GET_TIME(ui64GpuStateTransitionNs);
-		ui64GpuLastPeriod = RGXFWIF_GPU_UTIL_GET_PERIOD(ui64TimeNowNs, ui64GpuLastTime);
-		aui64GpuTmpCounters[ui64GpuLastState] += ui64GpuLastPeriod;
+	OSSpinLockAcquire(psGpuUtilStats->hSpinlock, uiFlags);
+	psGpuUtilStats->ui64LastCheckTimestampTicks = ui64DeviceTimestampTicks;
+	psGpuUtilStats->ui64LastCheckTimestampNS = ui64OsTimestampNS;
+	OSSpinLockRelease(psGpuUtilStats->hSpinlock, uiFlags);
+}
 
-		/* Get statistics for a user since its last request */
-		psReturnStats->ui64GpuStatIdle = RGXFWIF_GPU_UTIL_GET_PERIOD(aui64GpuTmpCounters[GPU_IDLE],
-		                                                             psAggregateStats->ui64GpuStatIdle);
-		psReturnStats->ui64GpuStatActive = RGXFWIF_GPU_UTIL_GET_PERIOD(aui64GpuTmpCounters[GPU_ACTIVE],
-		                                                               psAggregateStats->ui64GpuStatActive);
-		psReturnStats->ui64GpuStatBlocked = RGXFWIF_GPU_UTIL_GET_PERIOD(aui64GpuTmpCounters[GPU_BLOCKED],
-		                                                                psAggregateStats->ui64GpuStatBlocked);
-		psReturnStats->ui64GpuStatCumulative = psReturnStats->ui64GpuStatIdle +
-		                                       psReturnStats->ui64GpuStatActive +
-		                                       psReturnStats->ui64GpuStatBlocked;
-
-		/* convert time into the same units as used by fw */
-		ui64TimeNowUs  = FAST_APPROX_NS_TO_US(ui64TimeNowNs);
-		for (eDM = 0; eDM < ui32MaxDMCount; eDM++)
-		{
-			FOREACH_SUPPORTED_DRIVER(ui32DriverID)
-			{
-				paui64DMOSTmpLastTime[eDM][ui32DriverID]   = RGXFWIF_GPU_UTIL_GET_TIME(paui64DMOSTmpLastStateTime[eDM][ui32DriverID]);
-				paui64DMOSTmpLastPeriod[eDM][ui32DriverID] = RGXFWIF_GPU_UTIL_GET_PERIOD(ui64TimeNowUs , paui64DMOSTmpLastTime[eDM][ui32DriverID]);
-				paaui64DMOSTmpCounters[eDM][ui32DriverID][paui64DMOSTmpLastState[eDM][ui32DriverID]] += paui64DMOSTmpLastPeriod[eDM][ui32DriverID];
-				/* Get statistics for a user since its last request */
-				psReturnStats->aaui64DMOSStatInactive[eDM][ui32DriverID] = RGXFWIF_GPU_UTIL_GET_PERIOD(paaui64DMOSTmpCounters[eDM][ui32DriverID][GPU_INACTIVE],
-				                                                             psAggregateStats->aaui64DMOSStatInactive[eDM][ui32DriverID]);
-				psReturnStats->aaui64DMOSStatActive[eDM][ui32DriverID] = RGXFWIF_GPU_UTIL_GET_PERIOD(paaui64DMOSTmpCounters[eDM][ui32DriverID][GPU_ACTIVE],
-				                                                               psAggregateStats->aaui64DMOSStatActive[eDM][ui32DriverID]);
-				psReturnStats->aaui64DMOSStatCumulative[eDM][ui32DriverID] = psReturnStats->aaui64DMOSStatInactive[eDM][ui32DriverID] +
-				                                       psReturnStats->aaui64DMOSStatActive[eDM][ui32DriverID];
-			}
-		}
-
-		if (psAggregateStats->ui64TimeStamp != 0)
-		{
-			IMG_UINT64 ui64TimeSinceLastCall = ui64TimeNowNs - psAggregateStats->ui64TimeStamp;
-			/* We expect to return at least 75% of the time since the last call in GPU stats */
-			IMG_UINT64 ui64MinReturnedStats = ui64TimeSinceLastCall - (ui64TimeSinceLastCall / 4);
-
-			/*
-			 * If the returned stats are substantially lower than the time since
-			 * the last call, then the Host might have read a partial update from the FW.
-			 * If this happens, try sampling the shared counters again.
-			 */
-			if (psReturnStats->ui64GpuStatCumulative < ui64MinReturnedStats)
-			{
-				PVR_DPF((PVR_DBG_MESSAGE,
-				         "%s: Return stats (%" IMG_UINT64_FMTSPEC ") too low "
-				         "(call period %" IMG_UINT64_FMTSPEC ")",
-				         __func__, psReturnStats->ui64GpuStatCumulative, ui64TimeSinceLastCall));
-				PVR_DPF((PVR_DBG_MESSAGE, "%s: Attempt #%u has failed, trying again",
-				         __func__, ui32Attempts));
-
-				if (ui64GpuStateTransitionNs == ui64InitialGpuStateTransitionNs) {
-					IMG_HANDLE hOSEvent;
-					PVRSRV_DATA *psPVRSRVData = PVRSRVGetPVRSRVData();
-
-					PVR_DPF((PVR_DBG_MESSAGE,
-						 "State not updated. "
-						 "GPU likely in steady state. "
-						 "Waiting for next object "
-						 "update before retrying."));
-
-					if (OSEventObjectOpen(psPVRSRVData->hGlobalEventObject,
-							      &hOSEvent) != PVRSRV_OK) {
-						PVR_DPF((PVR_DBG_ERROR,
-						 "Failed to open event object."));
-						continue;
-					}
-
-					/* Wait 1ms */
-					OSEventObjectWaitTimeout(hOSEvent, 1000);
-
-					if (OSEventObjectClose(hOSEvent) != PVRSRV_OK) {
-						PVR_DPF((PVR_DBG_ERROR,
-						 "Failed to close event object."));
-					}
-				}
-				continue;
-			}
-		}
-
-		break;
-	}
-
-	/***** (4) Update aggregate stats for the current user *****/
-
-	psAggregateStats->ui64GpuStatIdle    += psReturnStats->ui64GpuStatIdle;
-	psAggregateStats->ui64GpuStatActive  += psReturnStats->ui64GpuStatActive;
-	psAggregateStats->ui64GpuStatBlocked += psReturnStats->ui64GpuStatBlocked;
-	psAggregateStats->ui64TimeStamp       = ui64TimeNowNs;
-
-	for (eDM = 0; eDM < ui32MaxDMCount; eDM++)
+static void _RGXGetGpuBasicUtilData(RGXFWIF_SYSDATA *psFwSysData,
+									volatile IMG_UINT64 *pui64GpuActiveTimeNS,
+									volatile IMG_UINT64 *pui64FwStatsTimestampNS,
+									volatile IMG_BOOL *pbGpuActive)
+{
+	/*
+	 * Obtain coherent values from shared memory using
+	 * repeated reads as the Firmware might update them at any time.
+	 * The lack of explicit synchronisation mechanisms reduces the
+	 * load on the Firmware and allows the driver to retrieve data
+	 * faster without having to wait for the Fw.
+	 */
+	do
 	{
-		FOREACH_SUPPORTED_DRIVER(ui32DriverID)
-		{
-			psAggregateStats->aaui64DMOSStatInactive[eDM][ui32DriverID]    += psReturnStats->aaui64DMOSStatInactive[eDM][ui32DriverID];
-			psAggregateStats->aaui64DMOSStatActive[eDM][ui32DriverID]  += psReturnStats->aaui64DMOSStatActive[eDM][ui32DriverID];
-		}
-	}
+		*pui64GpuActiveTimeNS = psFwSysData->ui64GpuActiveTimeNS;
+		*pbGpuActive = psFwSysData->bGpuActive;
+		*pui64FwStatsTimestampNS = psFwSysData->ui64FwStatsTimestampNS;
+	} while ((*pui64GpuActiveTimeNS != psFwSysData->ui64GpuActiveTimeNS) ||
+			(*pbGpuActive != psFwSysData->bGpuActive) ||
+			(*pui64FwStatsTimestampNS != psFwSysData->ui64FwStatsTimestampNS));
+}
 
-	/***** (5) Convert return stats to microseconds *****/
+static void _RGXProcessBasicUtilStats(RGX_GPU_UTIL_STATS *psReturnStats,
+									  IMG_UINT64 ui64GpuActiveTimeNS,
+									  IMG_UINT64 ui64FwStatsTimestampNS,
+									  IMG_BOOL bGpuActive,
+									  PVRSRV_DEVICE_NODE *psDeviceNode)
+{
+	IMG_UINT64 ui64MeasurementPeriodNS, ui64GpuActivePeriodNS, ui64OsTimeNS;
+	IMG_UINT64 ui64Dividend, ui64Divisor;
+	IMG_BOOL bFwOverestimate;
 
-	psReturnStats->ui64GpuStatIdle       = OSDivide64(psReturnStats->ui64GpuStatIdle, 1000, &ui32Remainder);
-	psReturnStats->ui64GpuStatActive     = OSDivide64(psReturnStats->ui64GpuStatActive, 1000, &ui32Remainder);
-	psReturnStats->ui64GpuStatBlocked    = OSDivide64(psReturnStats->ui64GpuStatBlocked, 1000, &ui32Remainder);
-	psReturnStats->ui64GpuStatCumulative = OSDivide64(psReturnStats->ui64GpuStatCumulative, 1000, &ui32Remainder);
+#if !defined(SUPPORT_SOC_TIMER)
+	PVR_UNREFERENCED_PARAMETER(psDeviceNode);
+	ui64OsTimeNS = OSClockns64();
+#else
+	ui64OsTimeNS = RGXTimeGetSOCTimerValueNS(psDeviceNode);
+#endif
+	bFwOverestimate = (ui64OsTimeNS - ui64FwStatsTimestampNS) > (ui64FwStatsTimestampNS - ui64OsTimeNS);
+#if defined(SUPPORT_LINUX_DVFS)
+	IMG_DVFS_DEVICE *psDVFSDevice =
+		&psDeviceNode->psDevConfig->sDVFS.sDVFSDevice;
+#endif
 
-	/* Check that the return stats make sense */
-	if (psReturnStats->ui64GpuStatCumulative == 0)
+	/* account for the Firmware's activity since the last utilisation check */
+	ui64GpuActiveTimeNS += ((bGpuActive) && (!bFwOverestimate)) ?
+							(ui64OsTimeNS - ui64FwStatsTimestampNS) : (0);
+
+	ui64MeasurementPeriodNS = ui64OsTimeNS - psReturnStats->ui64LastCheckTimestampNS;
+	ui64GpuActivePeriodNS = (ui64GpuActiveTimeNS - psReturnStats->ui64LastGpuActiveTimeNS);
+
+	/*
+	 * usage = active period / measurement period:
+	 * The measurement period is the difference between OS timestamps.
+	 * The active period is the difference between two snapshots of the
+	 * Firmware's GPU active time counter. The timestamps the firmware uses
+	 * to update the counters are obtained by correlating the GPU Timer
+	 * with the OS timer. This estimation has a margin of error.
+	 * Due to this inaccuracy, we can end up with active > measured here.
+	 * A consequence of one active period being longer than in reality,
+	 * is that the following period might end up shorter.
+	 * To mitigate this, when active > measured time, deduct the excess
+	 * difference from the active time saved for the next period
+	 * computation.
+	 * This way the current active cycle is 100% (active=measured) and the
+	 * the difference will carry over to the next cycle. Limit the maximum
+	 * carry over amount to the length of the current measurement period.
+	 */
+	if (ui64GpuActivePeriodNS > ui64MeasurementPeriodNS)
 	{
-		static IMG_BOOL print = IMG_TRUE;
-		/* We can enter here only if allocating the temporary stats
-		 * buffers failed, or all the RGXFWIF_GPU_UTIL_GET_PERIOD
-		 * returned 0. The latter could happen if the GPU frequency value
-		 * is not well calibrated and the FW is updating the GPU state
-		 * while the Host is reading it.
-		 * When such an event happens frequently, timers or the aggregate
-		 * stats might not be accurate...
-		 */
+		IMG_UINT64 ui64ActiveTimeDiff = ui64GpuActivePeriodNS - ui64MeasurementPeriodNS;
 
-		if (print)
-		{
-			/*
-			 * To avoid spamming the console logging system on emulated devices,
-			 * we special-case so that we will only produce a single message per
-			 * driver invocation. This should reduce the time spent logging
-			 * information which is not relevant for very slow timers found in
-			 * VP device configurations
-			 */
-			print = !PVRSRVIsVirtualPlatform(psDeviceNode);
-
-			if (ui64GpuStateTransitionNs == ui64InitialGpuStateTransitionNs) {
-				PVR_DPF((PVR_DBG_MESSAGE,
-					 "State transition not performed during this iteration."
-					 " GPU likely in steady-state with %s iteration"
-					 " not allowing enough time.", __func__));
-				return PVRSRV_OK;
-			}
-
-			PVR_DPF((PVR_DBG_WARNING,
-				 "%s could not get reliable data.",
-				 __func__));
-			return PVRSRV_ERROR_RESOURCE_UNAVAILABLE;
-		}
+		ui64GpuActiveTimeNS -= MIN(ui64ActiveTimeDiff, ui64MeasurementPeriodNS);
+		ui64GpuActivePeriodNS = ui64MeasurementPeriodNS;
 	}
 
-	psReturnStats->bValid = IMG_TRUE;
+#if defined(SUPPORT_LINUX_DVFS)
+	if (psDVFSDevice->suspend_duration >
+	    psDVFSDevice->off_period_ms * 1000000) {
+		ui64GpuActivePeriodNS -=
+			psDVFSDevice->suspend_duration;
+		psDVFSDevice->suspend_duration = 0;
+	}
+#endif
+
+	psReturnStats->ui64LastCheckTimestampNS = ui64OsTimeNS;
+	psReturnStats->ui64LastGpuActiveTimeNS = ui64GpuActiveTimeNS;
+	psReturnStats->ui64GpuActivePeriodNS = ui64GpuActivePeriodNS;
+	psReturnStats->ui64MeasurementPeriodNS = ui64MeasurementPeriodNS;
+
+	ui64Dividend = ui64GpuActivePeriodNS;
+	ui64Divisor = ui64MeasurementPeriodNS;
+
+	while (ui64Divisor > IMG_UINT32_MAX)
+	{
+		/* To allow OSDivide64r64() to work correctly, scale both dividend
+		 * and divisor until the divisor fits inside UINT32 range */
+		ui64Dividend >>= 1;
+		ui64Divisor >>= 1;
+	}
+
+	if (ui64Divisor == 0)
+	{
+		psReturnStats->bBasicStatsValid = IMG_FALSE;
+	}
+	else
+	{
+		IMG_UINT32 rem;
+
+		psReturnStats->bBasicStatsValid = IMG_TRUE;
+		psReturnStats->ui32GpuUsage = OSDivide64((ui64Dividend * 100ULL),
+												(IMG_UINT32)ui64Divisor, &rem);
+	}
+}
+
+/* Basic GPU activity tracking: can be called from a kernel IRQ context */
+PVRSRV_ERROR RGXGetGpuBasicUtilStats(PVRSRV_DEVICE_NODE *psDeviceNode,
+								RGX_GPU_UTIL_STATS *psReturnStats)
+{
+	PVRSRV_RGXDEV_INFO *psDevInfo = psDeviceNode->pvDevice;
+	IMG_UINT64 ui64GpuActiveTimeNS, ui64FwStatsTimestampNS;
+	IMG_BOOL bGpuActive;
+	OS_SPINLOCK_FLAGS uiFlags = 0;
+
+	OSSpinLockAcquire(psReturnStats->hSpinlock, uiFlags);
+
+	_RGXGetGpuBasicUtilData(psDevInfo->psRGXFWIfFwSysData,
+							&ui64GpuActiveTimeNS,
+							&ui64FwStatsTimestampNS,
+							&bGpuActive);
+
+	_RGXProcessBasicUtilStats(psReturnStats,
+							  ui64GpuActiveTimeNS,
+							  ui64FwStatsTimestampNS,
+							  bGpuActive,
+							  psDeviceNode);
+
+	OSSpinLockRelease(psReturnStats->hSpinlock, uiFlags);
 
 	return PVRSRV_OK;
 }
 
-static void _RGXUpdateGPUUtilStats(PVRSRV_RGXDEV_INFO *psDevInfo)
+static void _RGXProcessDetailedUtilStats(PVRSRV_RGXDEV_INFO *psDevInfo,
+										 RGX_GPU_UTIL_STATS *psReturnStats,
+										 IMG_UINT64 ui64GpuTimeTicks)
 {
-	RGXFWIF_GPU_UTIL_FW *psUtilFW;
-	IMG_UINT64 ui64LastPeriod;
-	IMG_UINT64 ui64LastState;
-	IMG_UINT64 ui64LastReducedState;
-	IMG_UINT64 ui64LastTime;
-	IMG_UINT64 ui64TimeNowUs, ui64TimeNowNs;
 	IMG_UINT32 ui32DriverID;
-	IMG_UINT64 ui64DMOSStatsCounter;
+	RGXFWIF_DM eDM;
+	IMG_BOOL bDetailedStatsValid = IMG_TRUE;
+	IMG_UINT64 ui64MeasurementPeriodTicks;
 
-	psUtilFW = psDevInfo->psRGXFWIfGpuUtilFW;
-	RGXFwSharedMemCacheOpPtr(psDevInfo->psRGXFWIfGpuUtilFW, INVALIDATE);
+	ui64MeasurementPeriodTicks = ui64GpuTimeTicks - psReturnStats->ui64LastCheckTimestampTicks;
+
+	for (eDM = 0; (eDM < RGXFWIF_GPU_UTIL_DM_MAX) && bDetailedStatsValid; eDM++)
+	{
+		if (ui64MeasurementPeriodTicks > IMG_UINT32_MAX || ui64MeasurementPeriodTicks == 0)
+		{
+			/* The lower 32 bits of the GPU Timer value have overflowed since the last reading.
+			 * The computed values can't be correct */
+			bDetailedStatsValid = IMG_FALSE;
+			break;
+		}
+		else
+		{
+			FOREACH_ACTIVE_DRIVER(psDevInfo, ui32DriverID)
+			{
+				IMG_UINT64 ui64DmActivePeriodTicks = psReturnStats->aaui32DmActiveTimeTicksCurrent[eDM][ui32DriverID] -
+													 psReturnStats->aaui32DmActiveTimeTicksPrev[eDM][ui32DriverID];
+				IMG_UINT32 ui32Usage;
+
+				if (ui64DmActivePeriodTicks > ui64MeasurementPeriodTicks)
+				{
+					IMG_UINT64 ui64ActiveTimeDiff = ui64DmActivePeriodTicks - ui64MeasurementPeriodTicks;
+
+					ui64GpuTimeTicks -= MIN(ui64ActiveTimeDiff, ui64MeasurementPeriodTicks);
+					ui64DmActivePeriodTicks = ui64MeasurementPeriodTicks;
+				}
+
+				if (ui64MeasurementPeriodTicks == 0)
+				{
+					bDetailedStatsValid = IMG_FALSE;
+					break;
+				}
+				else
+				{
+					IMG_UINT32 rem;
+
+					ui32Usage = OSDivide64((ui64DmActivePeriodTicks * 100),
+								(IMG_UINT32) ui64MeasurementPeriodTicks, &rem);
+					psReturnStats->ui64MeasurementPeriodTicks = ui64MeasurementPeriodTicks;
+					psReturnStats->aaui32DriverDmUsage[eDM][ui32DriverID] = ui32Usage;
+				}
+			}
+			END_FOREACH_ACTIVE_DRIVER
+		}
+	}
+
+	/* The state of the DM changed since the last read.
+	 * End the current measurement period and start another. */
+	psReturnStats->ui64LastCheckTimestampTicks = ui64GpuTimeTicks;
+
+	psReturnStats->bDetailedStatsValid = bDetailedStatsValid;
+
+	/* update the previous copy */
+	memcpy(&psReturnStats->aaui32DmActiveTimeTicksPrev,
+		   &psReturnStats->aaui32DmActiveTimeTicksCurrent,
+		   sizeof(psReturnStats->aaui32DmActiveTimeTicksCurrent));
+}
+
+/* Detailed per-DM/per-VM activity tracking: can't be called from a kernel IRQ context */
+PVRSRV_ERROR RGXGetGpuDetailedUtilStats(PVRSRV_DEVICE_NODE *psDeviceNode,
+										RGX_GPU_UTIL_STATS *psReturnStats)
+{
+	PVRSRV_ERROR eError = PVRSRV_OK;
+	PVRSRV_RGXDEV_INFO *psDevInfo = psDeviceNode->pvDevice;
+	RGXFWIF_SYSDATA *psFwSysData = psDevInfo->psRGXFWIfFwSysData;
+	IMG_UINT64 ui64GpuTimeTicks;
+	OS_SPINLOCK_FLAGS uiFlags = 0;
+	IMG_UINT64 ui64GpuActiveTimeNS, ui64FwStatsTimestampNS;
+	IMG_BOOL bGpuActive;
 
 	OSLockAcquire(psDevInfo->hGPUUtilLock);
 
-#if defined(SUPPORT_SOC_TIMER)
-	ui64TimeNowNs =
-		RGXFWIF_GPU_UTIL_GET_TIME(RGXTimeGetSOCTimerValueNS(psDevInfo->psDeviceNode));
-#else
-	ui64TimeNowNs =
-		RGXFWIF_GPU_UTIL_GET_TIME(RGXTimeCorrGetClockns64(psDevInfo->psDeviceNode));
-#endif
-
-	/* Update counters to account for the time since the last update */
-	ui64LastState  = RGXFWIF_GPU_UTIL_GET_STATE(psUtilFW->ui64GpuStateTransitionNs);
-	ui64LastTime   = RGXFWIF_GPU_UTIL_GET_TIME(psUtilFW->ui64GpuStateTransitionNs);
-	ui64LastPeriod = RGXFWIF_GPU_UTIL_GET_PERIOD(ui64TimeNowNs, ui64LastTime);
-	psUtilFW->aui64GpuStateTimeNs[ui64LastState] += ui64LastPeriod;
-
-	/* Update state and time of the latest update */
-	psUtilFW->ui64GpuStateTransitionNs = RGXFWIF_GPU_UTIL_MAKE_WORD(ui64TimeNowNs, ui64LastState);
-
-	/* convert last period into the same units as used by fw */
-	ui64TimeNowUs  = FAST_APPROX_NS_TO_US(ui64TimeNowNs);
-
-	FOREACH_SUPPORTED_DRIVER(ui32DriverID)
+	if (psDevInfo->bRGXPowered)
 	{
-		RGXFWIF_GPU_DM_STATS *psStats = &psUtilFW->sStats[ui32DriverID];
-		RGXFWIF_DM eDM;
+		RGXFWIF_KCCB_CMD sCmpKCCBCmd = { 0 };
+		IMG_UINT32 ui32kCCBCommandSlot;
+		sCmpKCCBCmd.eCmdType = RGXFWIF_KCCB_CMD_EXPORT_DETAILED_UTIL_STATS;
 
-		for (eDM = 0; eDM < RGXFWIF_GPU_UTIL_DM_MAX; eDM++)
+		/* The Firmware only exports the detailed statistics to shared memory
+		 * when explicitly requested via KCCB command due to the performance
+		 * penalty associated with accessing system memory. */
+		LOOP_UNTIL_TIMEOUT_US(MAX_HW_TIME_US)
 		{
-			ui64LastState  = (IMG_UINT64)RGXFWIF_GPU_UTIL_GET_STATE32(psStats->aui32StateTransitionUsLo[eDM]);
-			ui64LastTime   = (IMG_UINT64)RGXFWIF_GPU_UTIL_GET_TIME32(psStats->aui32StateTransitionUsLo[eDM]) +
-			                 ((IMG_UINT64)psStats->aui32StateTransitionUsHi[eDM] << 32);
-			ui64LastPeriod = RGXFWIF_GPU_UTIL_GET_PERIOD(ui64TimeNowUs, ui64LastTime);
-			/* for states statistics per DM per driver we only care about the time in Active state,
-			so we "combine" other states (Idle and Blocked) together */
-			ui64LastReducedState = (ui64LastState == RGXFWIF_GPU_UTIL_STATE_ACTIVE) ?
-			                       RGXFWIF_GPU_UTIL_STATE_ACTIVE : RGXFWIF_GPU_UTIL_STATE_INACTIVE;
-			ui64DMOSStatsCounter = (IMG_UINT64)psStats->aaui32StateTimeUsLo[eDM][ui64LastReducedState] + ui64LastPeriod;
-			psStats->aaui32StateTimeUsLo[eDM][ui64LastReducedState] = (IMG_UINT32)(ui64DMOSStatsCounter & IMG_UINT32_MAX);
-			if (ui64DMOSStatsCounter > IMG_UINT32_MAX)
-			{
-				psStats->aaui32StateTimeUsHi[eDM][ui64LastReducedState] += (IMG_UINT32)(ui64DMOSStatsCounter >> 32);
-			}
+			eError = RGXScheduleCommandAndGetKCCBSlot(psDevInfo,
+													  RGXFWIF_DM_GP,
+													  &sCmpKCCBCmd,
+													  PDUMP_FLAGS_CONTINUOUS,
+													  &ui32kCCBCommandSlot);
 
-			/* Update state and time of the latest update */
-			psStats->aui32StateTransitionUsLo[eDM] = RGXFWIF_GPU_UTIL_MAKE_WORD32((ui64TimeNowUs & (IMG_UINT64)IMG_UINT32_MAX), ui64LastState);
-			if (ui64TimeNowUs > IMG_UINT32_MAX)
+			if ((eError != PVRSRV_ERROR_RETRY) &&
+				(eError != PVRSRV_ERROR_KERNEL_CCB_FULL))
 			{
-				if (psStats->aui32StateTransitionUsHi[eDM] != (IMG_UINT32)(ui64TimeNowUs >> 32))
-				{
-					psStats->aui32StateTransitionUsHi[eDM] = (IMG_UINT32)(ui64TimeNowUs >> 32);
-				}
+				break;
 			}
+			OSWaitus(MAX_HW_TIME_US/WAIT_TRY_COUNT);
+		} END_LOOP_UNTIL_TIMEOUT_US();
+
+		if (eError == PVRSRV_OK)
+		{
+			/* Wait for FW to process the cmd */
+			eError = RGXWaitForKCCBSlotUpdate(psDevInfo, ui32kCCBCommandSlot, PDUMP_FLAGS_CONTINUOUS);
+		}
+
+		if (eError != PVRSRV_OK)
+		{
+			OSLockRelease(psDevInfo->hGPUUtilLock);
+			OSSpinLockAcquire(psReturnStats->hSpinlock, uiFlags);
+			psReturnStats->bDetailedStatsValid = IMG_FALSE;
+			psReturnStats->bBasicStatsValid = IMG_FALSE;
+			OSSpinLockRelease(psReturnStats->hSpinlock, uiFlags);
+
+			return eError;
 		}
 	}
-	RGXFwSharedMemCacheOpPtr(psDevInfo->psRGXFWIfGpuUtilFW, FLUSH);
+
+	_RGXGetGpuBasicUtilData(psDevInfo->psRGXFWIfFwSysData,
+							&ui64GpuActiveTimeNS,
+							&ui64FwStatsTimestampNS,
+							&bGpuActive);
+
+#if defined (SUPPORT_SOC_TIMER)
+	PVRSRVRGXCurrentTime(NULL, psDeviceNode, RGX_QUERY_SOC_TIMER, &ui64GpuTimeTicks);
+#else
+	PVRSRVRGXCurrentTime(NULL, psDeviceNode, RGX_QUERY_DEVICE_TIMESTAMP, &ui64GpuTimeTicks);
+#endif
+
+	OSSpinLockAcquire(psReturnStats->hSpinlock, uiFlags);
+
+	memcpy(&psReturnStats->aaui32DmActiveTimeTicksCurrent,
+		   &psFwSysData->aaui32DmActiveTimeTicks,
+		   sizeof(psReturnStats->aaui32DmActiveTimeTicksCurrent));
 
 	OSLockRelease(psDevInfo->hGPUUtilLock);
+
+	_RGXProcessBasicUtilStats(psReturnStats,
+							  ui64GpuActiveTimeNS,
+							  ui64FwStatsTimestampNS,
+							  bGpuActive,
+							  psDeviceNode);
+
+	_RGXProcessDetailedUtilStats(psDevInfo, psReturnStats, ui64GpuTimeTicks);
+
+	OSSpinLockRelease(psReturnStats->hSpinlock, uiFlags);
+
+	return eError;
 }
 
 static INLINE PVRSRV_ERROR RGXDoStop(PVRSRV_DEVICE_NODE *psDeviceNode)
@@ -688,9 +569,6 @@ static PVRSRV_ERROR RGXFinalisePowerOff(PVRSRV_DEVICE_NODE *psDeviceNode)
 	/* Update GPU frequency and timer correlation related data */
 	RGXTimeCorrEnd(psDeviceNode, RGXTIMECORR_EVENT_POWER);
 
-	/* Update GPU state counters */
-	_RGXUpdateGPUUtilStats(psDevInfo);
-
 #if defined(SUPPORT_LINUX_DVFS) && !defined(NO_HARDWARE)
 	eError = SuspendDVFS(psDeviceNode);
 	if (eError != PVRSRV_OK)
@@ -702,7 +580,10 @@ static PVRSRV_ERROR RGXFinalisePowerOff(PVRSRV_DEVICE_NODE *psDeviceNode)
 
 #if defined(PVRSRV_ANDROID_TRACE_GPU_FREQ)
 	/* On frequency traces, 0 means "core logic is off" */
-	GpuTraceFrequency(psDeviceNode->sDevId.ui32InternalID, 0);
+	trace_gpu_frequency(0, psDevInfo->psDeviceNode->sDevId.ui32InternalID);
+#if defined(SUPPORT_PDVFS)
+	trace_clock_set_rate("gpu_util", 0, raw_smp_processor_id());
+#endif
 #endif /* defined(PVRSRV_ANDROID_TRACE_GPU_FREQ) */
 
 	eError = RGXDoStop(psDeviceNode);
@@ -811,9 +692,10 @@ static PVRSRV_ERROR _RGXWaitForGuestsToDisconnect(PVRSRV_DEVICE_NODE *psDeviceNo
 {
 	PVRSRV_RGXDEV_INFO *psDevInfo = psDeviceNode->pvDevice;
 	PVRSRV_ERROR eError = PVRSRV_ERROR_TIMEOUT;
-	IMG_UINT32 ui32FwTimeout = (20 * SECONDS_TO_MICROSECONDS);
+	IMG_UINT32 ui32FwTimeoutUs = (20 * SECONDS_TO_MICROSECONDS);
+	IMG_UINT32 ui32FwAutoVzWdgKickMs = MIN(10, PVR_AUTOVZ_WDG_KICK_PERIOD_MS);
 
-	LOOP_UNTIL_TIMEOUT_US(ui32FwTimeout)
+	LOOP_UNTIL_TIMEOUT_US(ui32FwTimeoutUs)
 	{
 		IMG_UINT32 ui32DriverID;
 		IMG_BOOL bGuestOnline = IMG_FALSE;
@@ -838,9 +720,6 @@ static PVRSRV_ERROR _RGXWaitForGuestsToDisconnect(PVRSRV_DEVICE_NODE *psDeviceNo
 
 		if (!bGuestOnline)
 		{
-			/* Allow Guests to finish reading Connection state registers before disconnecting. */
-			OSSleepms(100);
-
 			PVR_DPF((PVR_DBG_WARNING, "%s: All Guest connections are down. "
 									  "Host can power down the GPU.", __func__));
 			eError = PVRSRV_OK;
@@ -851,22 +730,19 @@ static PVRSRV_ERROR _RGXWaitForGuestsToDisconnect(PVRSRV_DEVICE_NODE *psDeviceNo
 			PVR_DPF((PVR_DBG_WARNING, "%s: Waiting for Guests to disconnect "
 									  "before powering down GPU.", __func__));
 
-			if (PVRSRVPwrLockIsLockedByMe(psDeviceNode))
-			{
-				/* Don't wait with the power lock held as this prevents the vz
-				 * watchdog thread from keeping the fw-km connection alive. */
-				PVRSRVPowerUnlock(psDeviceNode);
-			}
+			/* Handle the AutoVz watchdog in this loop, as the kernel vz wdg
+			 * thread will not have read access to the power lock while this
+			 * sequence runs. The fw-km connection must be kept alive until
+			 * the host shuts everything down gracefully.*/
+			RGXUpdateAutoVzWdgToken(psDevInfo);
 		}
 
-		OSSleepms(10);
+		OSSleepms(ui32FwAutoVzWdgKickMs);
 	} END_LOOP_UNTIL_TIMEOUT_US();
 
-	if (!PVRSRVPwrLockIsLockedByMe(psDeviceNode))
-	{
-		/* Take back power lock after waiting for Guests */
-		eError = PVRSRVPowerLock(psDeviceNode);
-	}
+	/* Allow Guests to finish reading Connection state registers before disconnecting. */
+	OSSleepms(ui32FwAutoVzWdgKickMs);
+	RGXUpdateAutoVzWdgToken(psDevInfo);
 
 	return eError;
 }
@@ -1420,9 +1296,6 @@ PVRSRV_ERROR RGXPostPowerState(PVRSRV_DEVICE_NODE		*psDeviceNode,
 	/* Update timer correlation related data */
 	RGXTimeCorrBegin(psDeviceNode, RGXTIMECORR_EVENT_POWER);
 
-	/* Update GPU state counters */
-	_RGXUpdateGPUUtilStats(psDevInfo);
-
 	trace_event_begin("FirmwareStarting");
 	eError = RGXDoStart(psDeviceNode);
 	PVR_LOG_GOTO_IF_ERROR(eError, "RGXDoStart", fail_trace);
@@ -1512,8 +1385,12 @@ PVRSRV_ERROR RGXPostPowerState(PVRSRV_DEVICE_NODE		*psDeviceNode,
 #if defined(PVRSRV_ANDROID_TRACE_GPU_FREQ)
 	{
 		RGX_DATA *psRGXData = (RGX_DATA *)psDeviceNode->psDevConfig->hDevData;
-		GpuTraceFrequency(psDeviceNode->sDevId.ui32InternalID,
-		                  psRGXData->psRGXTimingInfo->ui32CoreClockSpeed);
+		trace_gpu_frequency(psRGXData->psRGXTimingInfo->ui32CoreClockSpeed,
+				    psDevInfo->psDeviceNode->sDevId.ui32InternalID);
+#if defined(SUPPORT_PDVFS)
+		trace_clock_set_rate("gpu_util", psDevInfo->ui32UtilisationSnapshot,
+					raw_smp_processor_id());
+#endif
 	}
 #endif /* defined(PVRSRV_ANDROID_TRACE_GPU_FREQ) */
 
@@ -1610,11 +1487,6 @@ PVRSRV_ERROR RGXPostClockSpeedChange(PVRSRV_DEVICE_NODE		*psDeviceNode,
 			PVR_DPF((PVR_DBG_ERROR, "RGXPostClockSpeedChange: Scheduling KCCB command failed. Error:%u", eError));
 			return eError;
 		}
-
-#if defined(PVRSRV_ANDROID_TRACE_GPU_FREQ)
-		GpuTraceFrequency(psDeviceNode->sDevId.ui32InternalID,
-				psRGXData->psRGXTimingInfo->ui32CoreClockSpeed);
-#endif /* defined(PVRSRV_ANDROID_TRACE_GPU_FREQ) */
 
 		PVR_DPF((PVR_DBG_MESSAGE, "RGXPostClockSpeedChange: RGX clock speed changed to %uHz",
 				psRGXData->psRGXTimingInfo->ui32CoreClockSpeed));
@@ -2025,8 +1897,7 @@ PVRSRV_ERROR RGXForcedIdleRequest(PVRSRV_DEVICE_NODE *psDeviceNode, IMG_BOOL bDe
 	                           INVALIDATE);
 	if (psFwSysData->ePowState != RGXFWIF_POW_FORCED_IDLE)
 	{
-		PVR_DPF((PVR_DBG_WARNING, "FW power state (%u) is not RGXFWIF_POW_FORCED_IDLE (%u)",
-				 psFwSysData->ePowState, RGXFWIF_POW_FORCED_IDLE));
+		psDevInfo->ui32FWNonIdleTimeoutCount++;
 		return PVRSRV_ERROR_DEVICE_IDLE_REQUEST_DENIED;
 	}
 #endif
@@ -2155,20 +2026,25 @@ PVRSRV_ERROR RGXProcessCoreClkChangeRequest(PVRSRV_RGXDEV_INFO *psDevInfo, IMG_U
 
 	PVR_DPF((PVR_DBG_MESSAGE, "Core clock rate = %u", ui32CoreClockRate));
 
-	/* Find the matching OPP (Exact). */
-	for (ui32Index = 0; ui32Index < psDVFSDeviceCfg->ui32OPPTableSize; ui32Index++)
+	if (!psDVFSDeviceCfg->bDTConfig)
 	{
-		if (ui32CoreClockRate == psDVFSDeviceCfg->pasOPPTable[ui32Index].ui32Freq)
-		{
-			psOpp = &psDVFSDeviceCfg->pasOPPTable[ui32Index];
-			break;
-		}
-	}
+		PVR_ASSERT(psDVFSDeviceCfg->pasOPPTable);
 
-	if (! psOpp)
-	{
-		PVR_DPF((PVR_DBG_ERROR, "Frequency not present in OPP table - %u", ui32CoreClockRate));
-		return PVRSRV_ERROR_INVALID_PARAMS;
+		/* Find the matching OPP (Exact). */
+		for (ui32Index = 0; ui32Index < psDVFSDeviceCfg->ui32OPPTableSize; ui32Index++)
+		{
+			if (ui32CoreClockRate == psDVFSDeviceCfg->pasOPPTable[ui32Index].ui32Freq)
+			{
+				psOpp = &psDVFSDeviceCfg->pasOPPTable[ui32Index];
+				break;
+			}
+		}
+
+		if (! psOpp)
+		{
+			PVR_DPF((PVR_DBG_ERROR, "Frequency not present in OPP table - %u", ui32CoreClockRate));
+			return PVRSRV_ERROR_INVALID_PARAMS;
+		}
 	}
 
 	eError = PVRSRVDevicePreClockSpeedChange(psDevInfo->psDeviceNode, psDVFSDeviceCfg->bIdleReq, NULL);
@@ -2178,7 +2054,33 @@ PVRSRV_ERROR RGXProcessCoreClkChangeRequest(PVRSRV_RGXDEV_INFO *psDevInfo, IMG_U
 		return eError;
 	}
 
+#if defined(SUPPORT_PDVFS_DEVFREQ)
+	{
+		IMG_DVFS_DEVICE_CFG	*psDVFSDeviceCfg = &psDevConfig->sDVFS.sDVFSDeviceCfg;
+
+		if (psDVFSDeviceCfg->pfnNotifyCoreClkChange)
+		{
+			/* Update the devfreq module. Call this before updating the
+			 * clock frequency value in RGX_TIMING_INFORMATION to ensure
+			 * the transition table is updated correctly. */
+			eError = psDVFSDeviceCfg->pfnNotifyCoreClkChange(psDevInfo->psDeviceNode, ui32CoreClockRate);
+			if (eError != PVRSRV_OK)
+			{
+				PVR_DPF((PVR_DBG_WARNING, "%s: failed to update devfreq frequency (%s)",
+						 __func__, PVRSRVGetErrorString(eError)));
+			}
+		}
+	}
+#endif
+
 	psRGXTimingInfo->ui32CoreClockSpeed = ui32CoreClockRate;
+	if (psDVFSDeviceCfg->pfnSetFrequency == NULL ||
+	    psDVFSDeviceCfg->pfnSetVoltage == NULL)
+	{
+		PVR_DPF((PVR_DBG_WARNING, "Missing system-layer callbacks to SetVoltage and SetFrequency."
+			" System/GPU frequency will not be changed."));
+		goto _PostClockSpeedChange;
+	}
 
 	/* Increasing frequency, change voltage first */
 	if (ui32CoreClockRate > ui32CoreClockRateCurrent)
@@ -2194,6 +2096,7 @@ PVRSRV_ERROR RGXProcessCoreClkChangeRequest(PVRSRV_RGXDEV_INFO *psDevInfo, IMG_U
 		psDVFSDeviceCfg->pfnSetVoltage(psDevConfig->hSysData, psOpp->ui32Volt);
 	}
 
+_PostClockSpeedChange:
 	PVRSRVDevicePostClockSpeedChange(psDevInfo->psDeviceNode, psDVFSDeviceCfg->bIdleReq, NULL);
 
 	return PVRSRV_OK;
@@ -2232,6 +2135,25 @@ PVRSRV_ERROR RGXProcessCoreClkChangeNotification(PVRSRV_RGXDEV_INFO *psDevInfo, 
 		return eError;
 	}
 
+#if defined(SUPPORT_PDVFS_DEVFREQ)
+	{
+		IMG_DVFS_DEVICE_CFG	*psDVFSDeviceCfg = &psDevConfig->sDVFS.sDVFSDeviceCfg;
+
+		if (psDVFSDeviceCfg->pfnNotifyCoreClkChange)
+		{
+			/* Update the devfreq module. Call this before updating the
+			 * clock frequency value in RGX_TIMING_INFORMATION to ensure
+			 * the transition table is updated correctly. */
+			eError = psDVFSDeviceCfg->pfnNotifyCoreClkChange(psDevInfo->psDeviceNode, ui32CoreClockRate);
+			if (eError != PVRSRV_OK)
+			{
+				PVR_DPF((PVR_DBG_WARNING, "%s: failed to update devfreq frequency (%s)",
+						 __func__, PVRSRVGetErrorString(eError)));
+			}
+		}
+	}
+#endif
+
 	/* Guest drivers do not initialize psRGXFWIfFwSysData */
 	RGXFwSharedMemCacheOpValue(psDevInfo->psRGXFWIfFwSysData->ePowState,
 	                           INVALIDATE);
@@ -2251,13 +2173,27 @@ PVRSRV_ERROR RGXProcessCoreClkChangeNotification(PVRSRV_RGXDEV_INFO *psDevInfo, 
 	PVRSRVPowerUnlock(psDevInfo->psDeviceNode);
 
 #if defined(PVRSRV_ANDROID_TRACE_GPU_FREQ)
-	GpuTraceFrequency(psDevInfo->psDeviceNode->sDevId.ui32InternalID,
-	                  psRGXTimingInfo->ui32CoreClockSpeed);
+	trace_gpu_frequency(psRGXTimingInfo->ui32CoreClockSpeed,
+			    psDevInfo->psDeviceNode->sDevId.ui32InternalID);
 #endif /* defined(PVRSRV_ANDROID_TRACE_GPU_FREQ) */
 
 	return PVRSRV_OK;
 }
 #endif
+
+/*************************************************************************/ /*!
+@Function       PDVFSProcessUtilisationChange
+@Description    Processes a utilisation change notification.
+@Input          psDevInfo            A pointer to PVRSRV_RGXDEV_INFO.
+@Input          ui32Utilisation      New utilisation.
+@Return         PVRSRV_ERROR.
+*/ /**************************************************************************/
+void RGXProcessUtilisationChange(PVRSRV_RGXDEV_INFO *psDevInfo, IMG_UINT32 ui32Utilisation)
+{
+#if defined(SUPPORT_PDVFS) && defined(PVRSRV_ANDROID_TRACE_GPU_FREQ)
+	trace_clock_set_rate("gpu_util", ui32Utilisation, raw_smp_processor_id());
+#endif /* defined(PVRSRV_ANDROID_TRACE_GPU_FREQ) */
+}
 #endif /* SUPPORT_FW_CORE_CLK_RATE_CHANGE_NOTIFY */
 
 

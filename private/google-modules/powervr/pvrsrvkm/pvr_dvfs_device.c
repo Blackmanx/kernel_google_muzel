@@ -65,7 +65,6 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 #include "rgxdevice.h"
 #include "rgxinit.h"
-#include "sofunc_rgx.h"
 
 #include "syscommon.h"
 
@@ -85,6 +84,9 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "pvr_dvfs_events.h"
 #endif
 #endif /* SUPPORT_PVR_DVFS_GOVERNOR */
+#if defined(SUPPORT_LINUX_DVFS)
+#include "rgxtimecorr.h"
+#endif
 
 #include "kernel_compatibility.h"
 
@@ -93,18 +95,6 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #define PVR_UPTHRESHOLD			(90)
 #define PVR_DOWNDIFFERENTIAL	(5)
 
-static int _device_get_devid(struct device *dev)
-{
-	struct drm_device *ddev = dev_get_drvdata(dev);
-	int deviceId;
-
-	if (ddev->render)
-		deviceId = ddev->render->index;
-	else /* when render node is NULL, fallback to primary node */
-		deviceId = ddev->primary->index;
-
-	return deviceId;
-}
 
 static IMG_INT32 devfreq_target(struct device *dev, unsigned long *requested_freq, IMG_UINT32 flags)
 {
@@ -141,6 +131,7 @@ static IMG_INT32 devfreq_target(struct device *dev, unsigned long *requested_fre
 		return 0;
 	}
 
+#if defined(SUPPORT_DVFS_RUNTIME_CONFIG)
 	bool bNegativeHeadroom = (psDVFSDeviceCfg->i32CapacityHeadroom < 0);
 	bool bIsLeastUpperBound = (flags & DEVFREQ_FLAG_LEAST_UPPER_BOUND);
 
@@ -156,6 +147,7 @@ static IMG_INT32 devfreq_target(struct device *dev, unsigned long *requested_fre
 			min(ui64RequestedFreqWithCapacity, (IMG_UINT64)U32_MAX);
 		*requested_freq = ui64RequestedFreqWithCapacity;
 	}
+#endif
 
 	opp = devfreq_recommended_opp(dev, requested_freq, flags);
 	if (IS_ERR(opp)) {
@@ -207,14 +199,13 @@ static IMG_INT32 devfreq_target(struct device *dev, unsigned long *requested_fre
 
 static int devfreq_get_dev_status(struct device *dev, struct devfreq_dev_status *stat)
 {
-	int                      deviceId = GetDevID(dev);
-	PVRSRV_DEVICE_NODE      *psDeviceNode = PVRSRVGetDeviceInstanceByKernelDevID(deviceId);
-	PVRSRV_RGXDEV_INFO      *psDevInfo = NULL;
-	IMG_DVFS_DEVICE         *psDVFSDevice = NULL;
-	RGX_DATA                *psRGXData = NULL;
-	RGX_TIMING_INFORMATION  *psRGXTimingInfo = NULL;
-	RGXFWIF_GPU_UTIL_STATS  *psGpuUtilStats = NULL;
-	PVRSRV_ERROR             eError;
+	int                             deviceId = GetDevID(dev);
+	PVRSRV_DEVICE_NODE             *psDeviceNode = PVRSRVGetDeviceInstanceByKernelDevID(deviceId);
+	PVRSRV_RGXDEV_INFO             *psDevInfo = NULL;
+	__maybe_unused IMG_DVFS_DEVICE *psDVFSDevice = NULL;
+	RGX_DATA                       *psRGXData = NULL;
+	RGX_TIMING_INFORMATION         *psRGXTimingInfo = NULL;
+	PVRSRV_ERROR                    eError;
 #if defined(CONFIG_PM_DEVFREQ_EVENT) && defined(SUPPORT_PVR_DVFS_GOVERNOR)
 	struct pvr_profiling_dev_status *pvr_stat = stat->private_data;
 	int err;
@@ -239,7 +230,7 @@ static int devfreq_get_dev_status(struct device *dev, struct devfreq_dev_status 
 	psRGXTimingInfo = psRGXData->psRGXTimingInfo;
 	stat->current_frequency = psRGXTimingInfo->ui32CoreClockSpeed;
 
-	if (psDevInfo->pfnGetGpuUtilStats == NULL)
+	if (psDevInfo->pfnGetBasicGpuUtilStats == NULL)
 	{
 		/* Not yet ready. So set times to something sensible. */
 		stat->busy_time = 0;
@@ -247,31 +238,19 @@ static int devfreq_get_dev_status(struct device *dev, struct devfreq_dev_status 
 		return 0;
 	}
 
-	psGpuUtilStats = kzalloc(sizeof(*psGpuUtilStats), GFP_KERNEL);
-
-	if (!psGpuUtilStats)
+	eError = psDevInfo->pfnGetBasicGpuUtilStats(psDeviceNode,
+												&psDevInfo->sDVFSGpuUtilStats);
+	if ((eError != PVRSRV_OK) || (!psDevInfo->sDVFSGpuUtilStats.bBasicStatsValid))
 	{
-		return -ENOMEM;
-	}
-
-	eError = psDevInfo->pfnGetGpuUtilStats(psDeviceNode,
-						psDVFSDevice->hGpuUtilUserDVFS,
-						psGpuUtilStats);
-
-	if (eError != PVRSRV_OK)
-	{
-		kfree(psGpuUtilStats);
 		return -EAGAIN;
 	}
 
-	stat->busy_time = psGpuUtilStats->ui64GpuStatActive;
-	stat->total_time = psGpuUtilStats->ui64GpuStatCumulative;
+	stat->busy_time = psDevInfo->sDVFSGpuUtilStats.ui64GpuActivePeriodNS;
+	stat->total_time = psDevInfo->sDVFSGpuUtilStats.ui64MeasurementPeriodNS;
 
 	trace_clock_set_rate("gpu_util",
 			     (stat->busy_time * 100) / stat->total_time,
 			     raw_smp_processor_id());
-
-	kfree(psGpuUtilStats);
 
 #if defined(CONFIG_PM_DEVFREQ_EVENT) && defined(SUPPORT_PVR_DVFS_GOVERNOR)
 	err = pvr_get_dev_status_get_events(psDVFSDevice->psProfilingDevice, pvr_stat);
@@ -1002,11 +981,11 @@ static int RegisterCoolingDevice(struct device *dev,
 
 PVRSRV_ERROR InitDVFS(PPVRSRV_DEVICE_NODE psDeviceNode)
 {
-	IMG_DVFS_DEVICE        *psDVFSDevice = NULL;
-	IMG_DVFS_DEVICE_CFG    *psDVFSDeviceCfg = NULL;
-	struct device          *psDev;
-	PVRSRV_ERROR            eError;
-	int                     err;
+	__maybe_unused IMG_DVFS_DEVICE *psDVFSDevice = NULL;
+	IMG_DVFS_DEVICE_CFG            *psDVFSDeviceCfg = NULL;
+	struct device                  *psDev;
+	PVRSRV_ERROR                    eError;
+	int                             err;
 
 #if !defined(CONFIG_PM_OPP)
 	return PVRSRV_ERROR_NOT_SUPPORTED;
@@ -1033,21 +1012,6 @@ PVRSRV_ERROR InitDVFS(PPVRSRV_DEVICE_NODE psDeviceNode)
 	psDVFSDevice = &psDeviceNode->psDevConfig->sDVFS.sDVFSDevice;
 	psDVFSDeviceCfg = &psDeviceNode->psDevConfig->sDVFS.sDVFSDeviceCfg;
 	psDeviceNode->psDevConfig->sDVFS.sDVFSDevice.eState = PVR_DVFS_STATE_INIT_PENDING;
-
-#if defined(SUPPORT_SOC_TIMER)
-	if (! psDeviceNode->psDevConfig->pfnSoCTimerRead)
-	{
-		PVR_DPF((PVR_DBG_ERROR, "System layer SoC timer callback not implemented"));
-		//return PVRSRV_ERROR_NOT_IMPLEMENTED;
-	}
-#endif
-
-	eError = SORgxGpuUtilStatsRegister(&psDVFSDevice->hGpuUtilUserDVFS);
-	if (eError != PVRSRV_OK)
-	{
-		PVR_DPF((PVR_DBG_ERROR, "Failed to register to the GPU utilisation stats, %d", eError));
-		return eError;
-	}
 
 	if (dev_pm_opp_get_opp_count(psDev) <= 0)
 	{
@@ -1119,27 +1083,27 @@ err_exit:
 	return eError;
 }
 
+#if defined(SUPPORT_DVFS_RUNTIME_CONFIG)
 static ssize_t capacity_headroom_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
 	PVRSRV_DEVICE_NODE	*psDeviceNode = PVRSRVGetDeviceInstanceByKernelDevID(
-		_device_get_devid(dev->parent));
+		GetDevID(dev->parent));
 	IMG_DVFS_DEVICE_CFG	*psDVFSDeviceCfg = &psDeviceNode->psDevConfig->sDVFS.sDVFSDeviceCfg;
 
-	return scnprintf(buf, PAGE_SIZE, "%d\n", psDVFSDeviceCfg->i32CapacityHeadroom);
+	return scnprintf(buf, PAGE_SIZE, "%d\n",
+		psDVFSDeviceCfg->i32CapacityHeadroom);
 }
 
 static ssize_t capacity_headroom_store(struct device *dev, struct device_attribute *attr,
 	const char *buf, size_t count)
 {
 	PVRSRV_DEVICE_NODE	*psDeviceNode = PVRSRVGetDeviceInstanceByKernelDevID(
-		_device_get_devid(dev->parent));
+		GetDevID(dev->parent));
 	IMG_DVFS_DEVICE_CFG    *psDVFSDeviceCfg = &psDeviceNode->psDevConfig->sDVFS.sDVFSDeviceCfg;
 	IMG_INT32		i32CapacityHeadroom;
 
 	if (kstrtoint(buf, 0, &i32CapacityHeadroom))
-	{
 		return -EINVAL;
-	}
 
 	psDVFSDeviceCfg->i32CapacityHeadroom = i32CapacityHeadroom;
 
@@ -1148,20 +1112,21 @@ static ssize_t capacity_headroom_store(struct device *dev, struct device_attribu
 
 static DEVICE_ATTR_RW(capacity_headroom);
 
-void RegisterHeadroomFile(struct devfreq *devfreq)
+static int RegisterHeadroomFile(struct devfreq *devfreq)
 {
 	int ret = sysfs_create_file(&devfreq->dev.kobj, &dev_attr_capacity_headroom.attr);
-
 	if (ret < 0)
 	{
 		dev_warn(&devfreq->dev, "Unable to create capacity headroom file");
 	}
+	return ret;
 }
 
-void UnregisterHeadroomFile(struct devfreq *devfreq)
+static void UnregisterHeadroomFile(struct devfreq *devfreq)
 {
 	sysfs_remove_file(&devfreq->dev.kobj, &dev_attr_capacity_headroom.attr);
 }
+#endif
 
 PVRSRV_ERROR RegisterDVFSDevice(PPVRSRV_DEVICE_NODE psDeviceNode)
 {
@@ -1214,7 +1179,7 @@ PVRSRV_ERROR RegisterDVFSDevice(PPVRSRV_DEVICE_NODE psDeviceNode)
 	psDVFSDeviceCfg->pfnSetVoltage(psDeviceNode->psDevConfig->hSysData, min_volt);
 
 #if !defined(SUPPORT_PVR_DVFS_GOVERNOR)
-	/* Use the 'precise_ondemand' governor */
+	/* Use the Linux 'precise_ondemand' governor */
 	psDVFSDevice->data.upthreshold = psDVFSGovernorCfg->ui32UpThreshold;
 	psDVFSDevice->data.downdifferential = psDVFSGovernorCfg->ui32DownDifferential;
 #endif
@@ -1238,10 +1203,15 @@ PVRSRV_ERROR RegisterDVFSDevice(PPVRSRV_DEVICE_NODE psDeviceNode)
 #endif
 #endif
 
+#if defined(SUPPORT_LINUX_DVFS)
+	/* 50ms chosen as a reasonable period for subtracting off time */
+	psDVFSDevice->off_period_ms = 50;
+#endif
+
 	psDVFSDevice->psDevFreq = devm_devfreq_add_device(psDev,
 													  &img_devfreq_dev_profile,
 #if defined(SUPPORT_PVR_DVFS_GOVERNOR)
-													  "pvr_balanced",
+													  DEVFREQ_GOV_PVR_BALANCED,
 													  &psDVFSDevice->data);
 #else
 													  "precise_ondemand",
@@ -1269,8 +1239,14 @@ PVRSRV_ERROR RegisterDVFSDevice(PPVRSRV_DEVICE_NODE psDeviceNode)
 		goto err_exit;
 	}
 #endif
-
-	RegisterHeadroomFile(psDVFSDevice->psDevFreq);
+#if defined(SUPPORT_DVFS_RUNTIME_CONFIG)
+	err = RegisterHeadroomFile(psDVFSDevice->psDevFreq);
+	if (err)
+	{
+		eError = TO_IMG_ERR(err);
+		goto err_exit_headroom;
+	}
+#endif
 
 	if (psDVFSDeviceCfg->pfnDVFSRegister)
 	{
@@ -1286,7 +1262,7 @@ PVRSRV_ERROR RegisterDVFSDevice(PPVRSRV_DEVICE_NODE psDeviceNode)
 	if (eError != PVRSRV_OK)
 	{
 		PVR_DPF((PVR_DBG_ERROR, "PVRSRVInit: Failed to suspend DVFS"));
-		goto err_exit;
+		goto err_exit_suspend;
 	}
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 5, 0))
@@ -1306,7 +1282,7 @@ PVRSRV_ERROR RegisterDVFSDevice(PPVRSRV_DEVICE_NODE psDeviceNode)
 	{
 		PVR_DPF((PVR_DBG_ERROR, "Failed to register opp notifier, %d", err));
 		eError = TO_IMG_ERR(err);
-		goto err_exit;
+		goto err_exit_opp_notifier;
 	}
 
 #if defined(CONFIG_DEVFREQ_THERMAL)
@@ -1316,7 +1292,7 @@ PVRSRV_ERROR RegisterDVFSDevice(PPVRSRV_DEVICE_NODE psDeviceNode)
 		if (err)
 		{
 			eError = TO_IMG_ERR(err);
-			goto err_exit;
+			goto err_exit_cooling_dev;
 		}
 	}
 #endif
@@ -1328,8 +1304,22 @@ PVRSRV_ERROR RegisterDVFSDevice(PPVRSRV_DEVICE_NODE psDeviceNode)
 
 	return PVRSRV_OK;
 
+#if defined(CONFIG_DEVFREQ_THERMAL)
+err_exit_cooling_dev:
+	(void) devfreq_unregister_opp_notifier(psDev, psDVFSDevice->psDevFreq);
+#endif
+
+err_exit_opp_notifier:
+err_exit_suspend:
+#if defined(SUPPORT_DVFS_RUNTIME_CONFIG)
+	UnregisterHeadroomFile(psDVFSDevice->psDevFreq);
+
+err_exit_headroom:
+#endif
+	devm_devfreq_remove_device(psDev, psDVFSDevice->psDevFreq);
+	psDVFSDevice->psDevFreq = NULL;
+
 err_exit:
-	UnregisterDVFSDevice(psDeviceNode);
 	return eError;
 }
 
@@ -1378,8 +1368,9 @@ void UnregisterDVFSDevice(PPVRSRV_DEVICE_NODE psDeviceNode)
 			PVR_DPF((PVR_DBG_ERROR, "Failed to unregister OPP notifier"));
 		}
 
+#if defined(SUPPORT_DVFS_RUNTIME_CONFIG)
 		UnregisterHeadroomFile(psDVFSDevice->psDevFreq);
-
+#endif
 		devm_devfreq_remove_device(psDev, psDVFSDevice->psDevFreq);
 		psDVFSDevice->psDevFreq = NULL;
 	}
@@ -1421,17 +1412,13 @@ void DeinitDVFS(PPVRSRV_DEVICE_NODE psDeviceNode)
 	 */
 	dev_pm_opp_remove_table(psDev);
 
-	SORgxGpuUtilStatsUnregister(psDVFSDevice->hGpuUtilUserDVFS);
-	psDVFSDevice->hGpuUtilUserDVFS = NULL;
 	psDVFSDevice->eState = PVR_DVFS_STATE_NONE;
 }
 
 PVRSRV_ERROR SuspendDVFS(PPVRSRV_DEVICE_NODE psDeviceNode)
 {
 	IMG_DVFS_DEVICE	*psDVFSDevice = NULL;
-#if defined(SUPPORT_PVR_DVFS_GOVERNOR)
 	int err;
-#endif
 
 	/* Check the device is registered */
 	if (!psDeviceNode)
@@ -1445,8 +1432,17 @@ PVRSRV_ERROR SuspendDVFS(PPVRSRV_DEVICE_NODE psDeviceNode)
 		/* Device is shutting down, nothing to do. */
 		return PVRSRV_OK;
 	}
+
+#if defined(SUPPORT_LINUX_DVFS)
+#if defined(SUPPORT_SOC_TIMER)
+	psDVFSDevice->suspend_timestamp = RGXTimeGetSOCTimerValueNS(psDeviceNode);
+#else
+	psDVFSDevice->suspend_timestamp = RGXTimeCorrGetClockns64(psDeviceNode);
+#endif
+#endif
+
 	psDVFSDevice->eState = PVR_DVFS_STATE_OFF;
-#if defined(SUPPORT_PVR_DVFS_GOVERNOR)
+
 	/* Communicate power suspend to devfreq framework */
 	err = devfreq_suspend_device(psDVFSDevice->psDevFreq);
 	if (err < 0)
@@ -1454,7 +1450,6 @@ PVRSRV_ERROR SuspendDVFS(PPVRSRV_DEVICE_NODE psDeviceNode)
 		PVR_DPF((PVR_DBG_WARNING, "Failed to suspend DVFS (%d)", err));
 		return PVRSRV_ERROR_INVALID_DEVICE;
 	}
-#endif
 
 	return PVRSRV_OK;
 }
@@ -1462,9 +1457,7 @@ PVRSRV_ERROR SuspendDVFS(PPVRSRV_DEVICE_NODE psDeviceNode)
 PVRSRV_ERROR ResumeDVFS(PPVRSRV_DEVICE_NODE psDeviceNode)
 {
 	IMG_DVFS_DEVICE	*psDVFSDevice = NULL;
-#if defined(SUPPORT_PVR_DVFS_GOVERNOR)
 	int err;
-#endif
 
 	/* Check the device is registered */
 	if (!psDeviceNode)
@@ -1474,9 +1467,19 @@ PVRSRV_ERROR ResumeDVFS(PPVRSRV_DEVICE_NODE psDeviceNode)
 
 	psDVFSDevice = &psDeviceNode->psDevConfig->sDVFS.sDVFSDevice;
 
+	/* Use suspend_duration as temporary storage for the current time */
+#if defined(SUPPORT_LINUX_DVFS)
+#if defined(SUPPORT_SOC_TIMER)
+	psDVFSDevice->suspend_duration = RGXTimeGetSOCTimerValueNS(psDeviceNode);
+#else
+	psDVFSDevice->suspend_duration = RGXTimeCorrGetClockns64(psDeviceNode);
+#endif
+	psDVFSDevice->suspend_duration -= psDVFSDevice->suspend_timestamp;
+#endif
+
 	/* Not supported in GuestOS drivers */
 	psDVFSDevice->eState = PVRSRV_VZ_MODE_IS(GUEST, DEVNODE, psDeviceNode) ? PVR_DVFS_STATE_NONE : PVR_DVFS_STATE_READY;
-#if defined(SUPPORT_PVR_DVFS_GOVERNOR)
+
 	if (!PVRSRV_VZ_MODE_IS(GUEST, DEVNODE, psDeviceNode))
 	{
 		/* Communicate power resume to devfreq framework */
@@ -1487,7 +1490,6 @@ PVRSRV_ERROR ResumeDVFS(PPVRSRV_DEVICE_NODE psDeviceNode)
 			return PVRSRV_ERROR_INVALID_DEVICE;
 		}
 	}
-#endif
 
 	return PVRSRV_OK;
 }

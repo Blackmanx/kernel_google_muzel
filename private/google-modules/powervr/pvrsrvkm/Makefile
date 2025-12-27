@@ -142,6 +142,7 @@ pvrsrvkm-y += rgxfwcmnctx.o
 pvrsrvkm-y += rgxfwdbg.o
 pvrsrvkm-y += rgxfwriscv.o
 pvrsrvkm-y += rgxfwtrace_strings.o
+pvrsrvkm-y += rgxfwutils.o
 pvrsrvkm-y += rgxkicksync.o
 pvrsrvkm-y += rgxmem.o
 pvrsrvkm-y += rgxmmuinit.o
@@ -171,9 +172,9 @@ pvrsrvkm-y += vmm_pvz_client.o
 pvrsrvkm-y += vz_vmm_pvz.o
 pvrsrvkm-y += vz_vmm_vm.o
 pvrsrvkm-y += rgxhwperf_common.o
+pvrsrvkm-y += rgxinit_common.o
 
 pvrsrvkm-y += $(PVR_ARCH)/rgxdebug.o
-pvrsrvkm-y += $(PVR_ARCH)/rgxfwutils.o
 pvrsrvkm-y += $(PVR_ARCH)/rgxhwperf.o
 pvrsrvkm-y += $(PVR_ARCH)/rgxinit.o
 pvrsrvkm-y += $(PVR_ARCH)/rgxmulticore.o
@@ -197,6 +198,7 @@ pvrsrvkm-$(CONFIG_DMA_SHARED_BUFFER) += physmem_dmabuf.o
 pvrsrvkm-$(CONFIG_DMA_SHARED_BUFFER) += physmem_dmabuf_fbc_tracker.o
 
 # Platform specific
+pvrsrvkm-$(CONFIG_POWERVR_TC:m=y) += ../tc/fpga.o
 pvrsrvkm-$(CONFIG_POWERVR_TC:m=y) += ../tc/sysconfig.o
 
 pvrsrvkm-$(CONFIG_POWERVR_RK3368) += ../rk3368/rk3368.o
@@ -219,7 +221,9 @@ pvrsrvkm-$(BUILD_POWERVR_PIXEL) += \
 
 # Support per-UID TIS
 ifeq ($(PVRSRV_ANDROID_TRACE_GPU_WORK_PERIOD),1)
+ifeq ($(SUPPORT_LINUX_DVFS),1)
 pvrsrvkm-$(BUILD_POWERVR_PIXEL) += ../pixel/uid_time_in_state.o
+endif
 endif
 
 pvrsrvkm-$(CONFIG_POWERVR_PIXEL_SLC) += \
@@ -241,11 +245,6 @@ pvrsrvkm-$(CONFIG_POWERVR_ROGUE_DEVICEMEM_HISTORY) += devicemem_history_server.o
 ifneq (, $(filter 1,$(PVRSRV_TRACE_ROGUE_EVENTS) $(PVRSRV_ANDROID_TRACE_GPU_WORK_PERIOD)))
 # GPU tracing in systrace
 pvrsrvkm-$(CONFIG_FTRACE) += pvr_gputrace.o
-endif
-
-# GPU freq
-ifeq ($(PVRSRV_ANDROID_TRACE_GPU_FREQ),1)
-pvrsrvkm-$(CONFIG_FTRACE) += pvr_gpufreq.o
 endif
 
 # Event tracing
@@ -303,9 +302,7 @@ ifeq ($(PVRSRV_ENABLE_PVR_ION_STATS),1)
  pvrsrvkm-y += pvr_ion_stats.o
 endif
 
-ifeq ($(SUPPORT_DI_BRG_IMPL),1)
- pvrsrvkm-y += di_impl_brg.o
-endif
+pvrsrvkm-y += di_impl_brg.o
 
 # Generated bridge code
 pvrsrvkm-y += $(PVR_ARCH)/generated/devicememhistory_bridge/client_devicememhistory_direct_bridge.o
@@ -367,9 +364,7 @@ pvrsrvkm-$(PVRSRV_SUPPORT_MMEXTMEM_BRIDGE:1=y) += $(PVR_ARCH)/generated/mmextmem
 pvrsrvkm-$(PVRSRV_SUPPORT_MMEXTMEM_BRIDGE:1=y) += physmem_extmem_linux.o
 pvrsrvkm-$(PVRSRV_SUPPORT_MMEXTMEM_BRIDGE:1=y) += physmem_extmem.o
 
-ifeq ($(SUPPORT_DI_BRG_IMPL),1)
 pvrsrvkm-y += $(PVR_ARCH)/generated/di_bridge/server_di_bridge.o
-endif
 
 # Support htb bridge
 ifeq ($(PVRSRV_ENABLE_HTB),1)

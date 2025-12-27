@@ -115,11 +115,6 @@ PVRSRV_ERROR PVRSRVRGXTDMSetTransferContextPriorityKM(CONNECTION_DATA *psConnect
 												   RGX_SERVER_TQ_TDM_CONTEXT *psTransferContext,
 												   IMG_INT32 i32Priority);
 
-PVRSRV_ERROR PVRSRVRGXTDMSetTransferContextPropertyKM(RGX_SERVER_TQ_TDM_CONTEXT *psTransferContext,
-													 RGX_CONTEXT_PROPERTY eContextProperty,
-													 IMG_UINT64 ui64Input,
-													 IMG_UINT64 *pui64Output);
-
 /* Debug - Dump debug info of TDM transfer contexts on this device */
 void DumpTDMTransferCtxtsInfo(PVRSRV_RGXDEV_INFO *psDevInfo,
                               DUMPDEBUG_PRINTF_FUNC *pfnDumpDebugPrintf,

@@ -83,6 +83,7 @@ static PVRSRV_ERROR _FWDumpSignatureBufferKM(CONNECTION_DATA * psConnection,
 	PVR_LOG_GOTO_IF_ERROR(eError, "PDumpGetValidRegion", ErrReturnError);
 #endif
 
+#if defined(RGX_FEATURE_TDM_PDS_CHECKSUM_BIT_MASK)
 	if (RGX_IS_FEATURE_SUPPORTED(psDevInfo, TDM_PDS_CHECKSUM))
 	{
 		eError = PDumpGetValidRegion(psDeviceNode,
@@ -91,6 +92,7 @@ static PVRSRV_ERROR _FWDumpSignatureBufferKM(CONNECTION_DATA * psConnection,
 		                             &sSigTDMChecksValidRegions);
 		PVR_LOG_GOTO_IF_ERROR(eError, "PDumpGetValidRegion", ErrFreeGcovBufferRegions);
 	}
+#endif
 
 	eError = PDumpGetValidRegion(psDeviceNode,
 	                             psDevInfo->psRGXFWSigTAChecksMemDesc,
@@ -136,6 +138,7 @@ static PVRSRV_ERROR _FWDumpSignatureBufferKM(CONNECTION_DATA * psConnection,
 	                       ui32PDumpFlags);
 #endif
 
+#if defined(RGX_FEATURE_TDM_PDS_CHECKSUM_BIT_MASK)
 	/* TDM signatures */
 	if (RGX_IS_FEATURE_SUPPORTED(psDevInfo, TDM_PDS_CHECKSUM))
 	{
@@ -146,6 +149,7 @@ static PVRSRV_ERROR _FWDumpSignatureBufferKM(CONNECTION_DATA * psConnection,
 		                       "out.tdmsig",
 		                       ui32PDumpFlags);
 	}
+#endif
 
 	/* TA signatures */
 	PDumpCommentWithFlags(psDeviceNode, ui32PDumpFlags, "** Dump TA signatures and checksums Buffer");
@@ -200,7 +204,9 @@ ErrFreeSigTAChecksRegions:
 	DevmemIntPDumpFreeValidRegions(&sSigTAChecksValidRegions);
 ErrFreeSigTDMChecksRegions:
 	DevmemIntPDumpFreeValidRegions(&sSigTDMChecksValidRegions);
+#if defined(RGX_FEATURE_TDM_PDS_CHECKSUM_BIT_MASK)
 ErrFreeGcovBufferRegions:
+#endif
 #if defined(SUPPORT_FIRMWARE_GCOV)
 	DevmemIntPDumpFreeValidRegions(&sFirmwareGcovBufferValidRegions);
 ErrReturnError:
@@ -453,6 +459,17 @@ PVRSRV_ERROR PVRSRVPDumpCRCSignatureCheckKM(CONNECTION_DATA * psConnection,
 	return PVRSRV_OK;
 }
 
+PVRSRV_ERROR PVRSRVPDumpTRPSignatureCheckKM(CONNECTION_DATA * psConnection,
+                                            PVRSRV_DEVICE_NODE * psDeviceNode,
+                                            IMG_UINT32 ui32PDumpFlags)
+{
+	PVR_UNREFERENCED_PARAMETER(psDeviceNode);
+	PVR_UNREFERENCED_PARAMETER(ui32PDumpFlags);
+	PVR_UNREFERENCED_PARAMETER(psConnection);
+
+	return PVRSRV_OK;
+}
+
 
 /*
  * PVRSRVPDumpValCheckPreCommand
@@ -597,9 +614,11 @@ PVRSRV_ERROR RGXPDumpPrepareOutputImageDescriptorHdr(PVRSRV_DEVICE_NODE *psDevic
 
 	if (eFBCompression != IMG_FB_COMPRESSION_NONE)
 	{
-		if ((RGX_GET_FEATURE_VALUE(psDevInfo, FBCDC) == 4) || (RGX_GET_FEATURE_VALUE(psDevInfo, FBCDC) == 5))
+		IMG_UINT32 ui32FBCDCValue = RGX_GET_FEATURE_VALUE(psDevInfo, FBCDC);
+
+		if ((ui32FBCDCValue == 4) || (ui32FBCDCValue == 5))
 		{
-			pui32Word[9] |= IMAGE_HEADER_WORD9_FBCCOMPAT_V4;
+			pui32Word[9] |= ui32FBCDCValue == 4 ? IMAGE_HEADER_WORD9_FBCCOMPAT_V4 : IMAGE_HEADER_WORD9_FBCCOMPAT_V5;
 
 			if (eFBCompression == IMG_FB_COMPRESSION_DIRECT_LOSSY50_8x8  ||
 				eFBCompression == IMG_FB_COMPRESSION_DIRECT_LOSSY50_16x4 ||

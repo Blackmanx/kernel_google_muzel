@@ -210,7 +210,7 @@ PMRCreatePMR(PHYS_HEAP *psPhysHeap,
  * the memory pages that back the whole PMR.
  *
  * Before this call, it is not valid to use any of the information
- * getting APIs: PMR_Flags(), PMR_SysPhysAddr(),
+ * getting APIs: PMR_Flags(), PMR_DevPhysAddr(), PMR_CpuPhysAddr(),
  * [ see note below about lock/unlock semantics ]
  *
  * The caller of this function does not have to care about how the PMR
@@ -1232,7 +1232,9 @@ PMRPDumpCBP(const PMR *psPMR,
 }
 #endif
 
+#if defined(SUPPORT_INSECURE_EXPORT)
 PPVRSRV_DEVICE_NODE PMRGetExportDeviceNode(PMR_EXPORT *psExportPMR);
+#endif /* defined(SUPPORT_INSECURE_EXPORT) */
 
 /*
  * PMRInit()

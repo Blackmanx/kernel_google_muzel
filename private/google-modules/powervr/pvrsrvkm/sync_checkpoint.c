@@ -857,9 +857,6 @@ SyncCheckpointRollbackFenceData(PVRSRV_FENCE hFence, void *pvFinaliseData)
 
 	if (!g_psSyncCheckpointPfnStruct || !g_psSyncCheckpointPfnStruct->pfnFenceDataRollback)
 	{
-		PVR_DPF((PVR_DBG_ERROR,
-				"%s: ERROR (eError=PVRSRV_ERROR_SYNC_NATIVESYNC_NOT_REGISTERED)",
-				__func__));
 		eError = PVRSRV_ERROR_SYNC_NATIVESYNC_NOT_REGISTERED;
 		PVR_LOG_ERROR(eError, "g_psSyncCheckpointPfnStruct->pfnFenceDataRollback is NULL");
 	}
@@ -921,9 +918,6 @@ PVRSRV_ERROR SyncCheckpointFinaliseExportFence(PVRSRV_FENCE hExportFence)
 
 	if (unlikely(!g_psSyncCheckpointPfnStruct || !g_psSyncCheckpointPfnStruct->pfnExportFenceFinalise))
 	{
-		PVR_DPF((PVR_DBG_ERROR,
-		        "%s: ERROR (eError=PVRSRV_ERROR_SYNC_NATIVESYNC_NOT_REGISTERED)",
-		        __func__));
 		eError = PVRSRV_ERROR_SYNC_NATIVESYNC_NOT_REGISTERED;
 		PVR_LOG_ERROR(eError, "pfnExportFenceFinalise is NULL");
 		return eError;
@@ -3128,12 +3122,6 @@ PVRSRV_ERROR PVRSRVSyncCheckpointSignalledPDumpPolKM(PVRSRV_FENCE hFence)
 		psSyncCheckpoint = (SYNC_CHECKPOINT *)apsCheckpoints[0];
 		psContext = (_SYNC_CHECKPOINT_CONTEXT*)psSyncCheckpoint->psSyncCheckpointBlock->psContext;
 		MISRHandler_PdumpDeferredSyncSignalPoster(psContext->psContextCtl->psDeviceNode);
-
-#if defined(SUPPORT_VALIDATION) && defined(SUPPORT_SOC_TIMER) && defined(NO_HARDWARE) && defined(PDUMP)
-		/* Extract the devinfo as we might need it later but no longer ref a checkpoint */
-		psDevInfo = psContext->psContextCtl->psDeviceNode->pvDevice;
-#endif
-
 	}
 
 	for (i=0; i < uiNumCheckpoints; i++)
@@ -3443,7 +3431,12 @@ static IMG_UINT32 _CleanCheckpointPool(_SYNC_CHECKPOINT_CONTEXT *psContext)
 	DECLARE_DLLIST(sCleanupList);
 	DLLIST_NODE *psThis, *psNext;
 	OS_SPINLOCK_FLAGS uiFlags = 0;
-	IMG_UINT32 ui32ItemsFreed = 0, ui32NullScpCount = 0;
+	IMG_UINT32 ui32ItemsFreed = 0;
+#if (ENABLE_SYNC_CHECKPOINT_POOL_DEBUG == 1)
+#if (defined(PVRSRV_NEED_PVR_DPF) && defined(DEBUG)) || defined(DOXYGEN)
+	IMG_UINT32 ui32NullScpCount = 0;
+#endif
+#endif
 
 	/* Acquire sync checkpoint pool lock */
 	OSSpinLockAcquire(psCtxCtl->hSyncCheckpointPoolLock, uiFlags);
@@ -3466,10 +3459,14 @@ static IMG_UINT32 _CleanCheckpointPool(_SYNC_CHECKPOINT_CONTEXT *psContext)
 			 * from the list so it's safe to use sListNode here */
 			dllist_add_to_head(&sCleanupList, &psCheckpoint->sListNode);
 		}
+#if (ENABLE_SYNC_CHECKPOINT_POOL_DEBUG == 1)
+#if (defined(PVRSRV_NEED_PVR_DPF) && defined(DEBUG)) || defined(DOXYGEN)
 		else
 		{
 			ui32NullScpCount++;
 		}
+#endif
+#endif
 	}
 
 	/* Release sync checkpoint pool lock */
@@ -3482,11 +3479,13 @@ static IMG_UINT32 _CleanCheckpointPool(_SYNC_CHECKPOINT_CONTEXT *psContext)
 	        "uiSyncCheckpointPoolCount=%d", __func__, (void *) psContext,
 	        psCtxCtl->ui8PoolStateFlags, psCtxCtl->ui32SyncCheckpointPoolCount));
 
+#if (defined(PVRSRV_NEED_PVR_DPF) && defined(DEBUG)) || defined(DOXYGEN)
 	if (ui32NullScpCount > 0)
 	{
 		PVR_DPF((PVR_DBG_WARNING, "%s pool contained %u NULL entries", __func__,
 		        ui32NullScpCount));
 	}
+#endif
 #endif
 
 	dllist_foreach_node(&sCleanupList, psThis, psNext)

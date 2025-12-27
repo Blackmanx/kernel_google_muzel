@@ -155,6 +155,10 @@ __pvr_access_ok_compat(int type, const void __user * addr, unsigned long size)
 #define MODULE_IMPORT_NS(ns)
 #endif
 
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 7, 0))
+#define U32_MIN (0)
+#endif
+
 /*
  * Before v5.8, the "struct mm" has a semaphore named "mmap_sem" which is
  * renamed to "mmap_lock" in v5.8. Moreover, new APIs are provided to
@@ -233,7 +237,8 @@ struct dma_buf_map {
 #define kthread_complete_and_exit(comp, ret) complete_and_exit(comp, ret);
 #endif /* (LINUX_VERSION_CODE < KERNEL_VERSION(5, 17, 0)) */
 
-#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 18, 0))
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 15, 0)) || \
+	((LINUX_VERSION_CODE < KERNEL_VERSION(5, 18, 0)) && !defined(CHROMIUMOS_KERNEL))
 #define iosys_map dma_buf_map
 #define iosys_map_set_vaddr dma_buf_map_set_vaddr
 #define iosys_map_set_vaddr_iomem dma_buf_map_set_vaddr_iomem

@@ -55,14 +55,17 @@
 	(u32)((v) & ~(u32)(((b) << (s)) & (m)))
 
 enum pdp_version {
+	PDP_VERSION_UNKNOWN = 0,
 	PDP_VERSION_APOLLO,
 	PDP_VERSION_ODIN,
 	PDP_VERSION_PLATO,
+	PDP_VERSION_ORION_SOC,
 };
 
 enum pdp_odin_subversion {
 	PDP_ODIN_NONE = 0,
 	PDP_ODIN_ORION,
+	PDP_ODIN_FENRIR,
 };
 
 enum pdp_output_device {

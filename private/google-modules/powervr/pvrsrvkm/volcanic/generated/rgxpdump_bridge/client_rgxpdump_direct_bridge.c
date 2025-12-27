@@ -93,6 +93,18 @@ IMG_INTERNAL PVRSRV_ERROR BridgePDumpCRCSignatureCheck(IMG_HANDLE hBridge,
 	return eError;
 }
 
+IMG_INTERNAL PVRSRV_ERROR BridgePDumpTRPSignatureCheck(IMG_HANDLE hBridge,
+						       IMG_UINT32 ui32PDumpFlags)
+{
+	PVRSRV_ERROR eError;
+
+	eError =
+	    PVRSRVPDumpTRPSignatureCheckKM(NULL, (PVRSRV_DEVICE_NODE *) ((void *)hBridge),
+					   ui32PDumpFlags);
+
+	return eError;
+}
+
 IMG_INTERNAL PVRSRV_ERROR BridgePDumpValCheckPreCommand(IMG_HANDLE hBridge,
 							IMG_UINT32 ui32PDumpFlags)
 {

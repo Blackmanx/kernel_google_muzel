@@ -279,7 +279,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
                                            RGX_CR_SOFT_RESET_SLC_EN))
 
 #define RGX_MLIST_ENTRY_STRIDE	(4U) /* 4 bytes */
-#define RGX_NUM_PM_ADDR_SPACES	(2U) /* VCE & TE share virtual space and Alist */
+#define RGX_NUM_PM_ADDR_SPACES	(3U) /* VCE, TE and Alist */
 #define RGX_PM_MAX_PB_VIRT_ADDR_SPACE  (IMG_UINT64_C(0x400000000)) /* PM Maximum addressable limit */
 
 
@@ -415,7 +415,6 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #define RGX_BRN71422_WORKAROUND_READ_SIZE           (32U)
 #endif
 
-#define SUPPORT_VOLCANIC_TB
 #define RGX_FEATURE_SECURITY_VOLCANIC
 
 /* Typically the PCI bus returns this value on error */

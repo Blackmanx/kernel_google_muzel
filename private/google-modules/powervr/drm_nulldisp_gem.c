@@ -77,6 +77,8 @@ int nulldisp_gem_object_get_pages(struct drm_gem_object *obj)
 {
 	struct drm_device *dev = obj->dev;
 	struct nulldisp_gem_object *nulldisp_obj = to_nulldisp_obj(obj);
+	int nr_pages = obj->size >> PAGE_SHIFT;
+	int i;
 
 	if (WARN_ON(obj->import_attach))
 		return -EEXIST;
@@ -91,6 +93,16 @@ int nulldisp_gem_object_get_pages(struct drm_gem_object *obj)
 		}
 
 		nulldisp_obj->pages = pages;
+	}
+
+	for (i = 0; i < nr_pages; i++) {
+		dma_addr_t dma_addr = dma_map_page(dev->dev, nulldisp_obj->pages[i], 0, PAGE_SIZE, DMA_FROM_DEVICE);
+		int error = dma_mapping_error(dev->dev, dma_addr);
+
+		if (error)
+			return error;
+
+		dma_unmap_page_attrs(dev->dev, dma_addr, PAGE_SIZE, DMA_FROM_DEVICE, DMA_ATTR_SKIP_CPU_SYNC);
 	}
 
 	return 0;

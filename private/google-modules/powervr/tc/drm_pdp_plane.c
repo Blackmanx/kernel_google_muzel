@@ -149,6 +149,7 @@ static bool pdp_plane_format_mod_supported(struct drm_plane *plane,
 
 	switch (dev_priv->version) {
 	case PDP_VERSION_ODIN:
+	case PDP_VERSION_ORION_SOC:
 		supported_formats = odin_formats;
 		num_supported_formats = ARRAY_SIZE(odin_formats);
 		supported_modifiers = odin_modifiers;
@@ -207,6 +208,7 @@ struct drm_plane *pdp_plane_create(struct drm_device *dev,
 
 	switch (dev_priv->version) {
 	case PDP_VERSION_ODIN:
+	case PDP_VERSION_ORION_SOC:
 		supported_formats = odin_formats;
 		num_supported_formats = ARRAY_SIZE(odin_formats);
 		supported_modifiers = odin_modifiers;
@@ -301,6 +303,7 @@ void pdp_plane_set_surface(struct drm_crtc *crtc, struct drm_plane *plane,
 				       false);
 		break;
 	case PDP_VERSION_ODIN:
+	case PDP_VERSION_ORION_SOC:
 		switch (pdp_drm_fb_format(fb)) {
 		case DRM_FORMAT_ARGB8888:
 		case DRM_FORMAT_XRGB8888:

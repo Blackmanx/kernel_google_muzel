@@ -553,7 +553,7 @@ IMG_INTERNAL PVRSRV_ERROR BridgeDevmemIntRegisterPFNotifyKM(IMG_HANDLE hBridge,
 IMG_INTERNAL PVRSRV_ERROR BridgePhysHeapGetMemInfo(IMG_HANDLE hBridge,
 						   IMG_UINT32 ui32PhysHeapCount,
 						   PVRSRV_PHYS_HEAP * peaPhysHeapID,
-						   PHYS_HEAP_MEM_STATS_V1 * pasapPhysHeapMemStats)
+						   PHYS_HEAP_MEM_STATS * pasapPhysHeapMemStats)
 {
 	PVRSRV_ERROR eError;
 
@@ -704,16 +704,19 @@ IMG_INTERNAL PVRSRV_ERROR BridgeDevmemXIntMapVRangeToBackingPage(IMG_HANDLE hBri
 	return eError;
 }
 
-IMG_INTERNAL PVRSRV_ERROR BridgePhysHeapGetMemInfo2(IMG_HANDLE hBridge,
-						    IMG_UINT32 ui32PhysHeapCount,
-						    PVRSRV_PHYS_HEAP * peaPhysHeapID,
-						    PHYS_HEAP_MEM_STATS_V2 * pasapPhysHeapMemStats)
+IMG_INTERNAL PVRSRV_ERROR BridgeDevmemIntFindCPUAddress(IMG_HANDLE hBridge,
+							IMG_HANDLE hDevmemServerHeap,
+							IMG_UINT64 ui64Size,
+							IMG_UINT64 ui64AddrHint,
+							IMG_UINT64 * pui64Addr)
 {
 	PVRSRV_ERROR eError;
+	DEVMEMINT_HEAP *psDevmemServerHeapInt;
+	PVR_UNREFERENCED_PARAMETER(hBridge);
 
-	eError =
-	    PVRSRVPhysHeapGetMemInfo2KM(NULL, (PVRSRV_DEVICE_NODE *) ((void *)hBridge),
-					ui32PhysHeapCount, peaPhysHeapID, pasapPhysHeapMemStats);
+	psDevmemServerHeapInt = (DEVMEMINT_HEAP *) hDevmemServerHeap;
+
+	eError = DevmemIntFindCPUAddress(psDevmemServerHeapInt, ui64Size, ui64AddrHint, pui64Addr);
 
 	return eError;
 }

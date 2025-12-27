@@ -77,7 +77,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "htb_debug.h"
 #include "dma_km.h"
 #include "pmr.h"
-
+#include "vz_vmm_pvz.h"
 #include "log2.h"
 
 #include "lists.h"
@@ -122,8 +122,6 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "process_stats.h"
 #endif
 
-#include "vz_vmm_pvz.h"
-
 #include "devicemem_history_server.h"
 
 #if defined(SUPPORT_LINUX_DVFS)
@@ -154,9 +152,9 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "virt_validation_defs.h"
 #endif
 
-#if defined(__linux__)
-#include "km_apphint.h"
-#endif /* defined(__linux__) */
+#if defined(SUPPORT_DI_APPHINT_IMPL)
+#include "os_apphintkm.h"
+#endif /* defined(SUPPORT_DI_APPHINT_IMPL) */
 
 #if defined(PVRSRV_SERVER_THREADS_INDEFINITE_SLEEP)
 #define INFINITE_SLEEP_TIMEOUT 0ULL
@@ -1459,7 +1457,6 @@ static void AutoVzWatchdogThread(void *pvData)
 	PVRSRV_DATA *psPVRSRVData = pvData;
 	IMG_HANDLE hOSEvent;
 	PVRSRV_ERROR eError;
-	IMG_UINT32 ui32Timeout = PVR_AUTOVZ_WDG_PERIOD_MS / 3;
 
 	/* Open an event on the devices watchdog event object so we can listen on it
 	   and abort the devices watchdog thread. */
@@ -1475,7 +1472,7 @@ static void AutoVzWatchdogThread(void *pvData)
 	{
 		/* Wait time between polls (done at the start of the loop to allow devices
 		   to initialise) or for the event signal (shutdown or power on). */
-		eError = OSEventObjectWaitKernel(hOSEvent, (IMG_UINT64)ui32Timeout * 1000);
+		eError = OSEventObjectWaitKernel(hOSEvent, (IMG_UINT64)PVR_AUTOVZ_WDG_KICK_PERIOD_MS * 1000);
 
 		List_PVRSRV_DEVICE_NODE_ForEach(psPVRSRVData->psDeviceNodeList,
 		                                AutoVzWatchdogThread_ForEachCb);
@@ -1670,10 +1667,8 @@ PVRSRVCommonDriverInit(void)
 	PVR_GOTO_IF_ERROR(eError, Error);
 #endif /* PVRSRV_ENABLE_PROCESS_STATS */
 
-#if defined(SUPPORT_DI_BRG_IMPL)
 	eError = PVRDIImplBrgRegister();
 	PVR_GOTO_IF_ERROR(eError, Error);
-#endif
 
 	eError = HTB_CreateDIEntry();
 	PVR_GOTO_IF_ERROR(eError, Error);
@@ -1933,6 +1928,9 @@ PVRSRVCommonDriverInit(void)
 #endif
 #endif
 
+	eError = PvzConfigInit();
+	PVR_LOG_GOTO_IF_ERROR(eError, "PvzConfigInit", Error);
+
 	return 0;
 
 Error:
@@ -1952,6 +1950,8 @@ PVRSRVCommonDriverDeInit(void)
 				 __func__));
 		return;
 	}
+
+	PvzConfigDeInit();
 
 	if (gpsPVRSRVData->psClientStreamTable != NULL)
 	{
@@ -2253,6 +2253,32 @@ PVRSRV_ERROR PVRSRVAcquireInternalID(IMG_UINT32 *pui32InternalID)
 	}
 }
 
+void PVRSRVDeviceCreationPvzLock(void)
+{
+	PvzServerLockAcquire();
+}
+
+void PVRSRVDeviceCreationPvzUnlock(void)
+{
+	PvzServerLockRelease();
+}
+
+void PVRSRVDeviceInitPvzLock(PVRSRV_DEVICE_NODE *psDeviceNode)
+{
+	if (!PVRSRV_VZ_MODE_IS(GUEST, DEVNODE, psDeviceNode))
+	{
+		PvzServerLockAcquire();
+	}
+}
+
+void PVRSRVDeviceInitPvzUnlock(PVRSRV_DEVICE_NODE *psDeviceNode)
+{
+	if (!PVRSRV_VZ_MODE_IS(GUEST, DEVNODE, psDeviceNode))
+	{
+		PvzServerLockRelease();
+	}
+}
+
 PVRSRV_ERROR PVRSRVCommonDeviceCreate(void *pvOSDevice,
 											 IMG_INT32 i32KernelDeviceID,
 											 PVRSRV_DEVICE_NODE **ppsDeviceNode)
@@ -2376,6 +2402,9 @@ PVRSRV_ERROR PVRSRVCommonDeviceCreate(void *pvOSDevice,
 	PVR_GOTO_IF_ERROR(eError, ErrorPhysHeapDeInitDeviceHeaps);
 #endif /* defined(SUPPORT_PMR_DEFERRED_FREE) */
 
+	eError = SyncServerInit(psDeviceNode);
+	PVR_LOG_GOTO_IF_ERROR(eError, "SyncServerInit", ErrorPMRDeInitDevice);
+
 #if defined(SUPPORT_RGX)
 	/* Requirements:
 	 *  registered GPU and FW local heaps */
@@ -2385,7 +2414,7 @@ PVRSRV_ERROR PVRSRVCommonDeviceCreate(void *pvOSDevice,
 	{
 		PVR_LOG_ERROR(eError, "RGXRegisterDevice");
 		eError = PVRSRV_ERROR_DEVICE_REGISTER_FAILED;
-		goto ErrorPMRDeInitDevice;
+		goto ErrorServerDeInit;
 	}
 
 #if defined(SUPPORT_PHYSMEM_TEST) && !defined(INTEGRITY_OS) && !defined(__QNXNTO__)
@@ -2425,9 +2454,6 @@ PVRSRV_ERROR PVRSRVCommonDeviceCreate(void *pvOSDevice,
 		eError = psDeviceNode->pfnFwMMUInit(psDeviceNode);
 		PVR_GOTO_IF_ERROR(eError, ErrorDeInitRgx);
 	}
-
-	eError = SyncServerInit(psDeviceNode);
-	PVR_GOTO_IF_ERROR(eError, ErrorDeInitRgx);
 
 	eError = SyncCheckpointInit(psDeviceNode);
 	PVR_LOG_GOTO_IF_ERROR(eError, "SyncCheckpointInit", ErrorSyncCheckpointInit);
@@ -2497,7 +2523,7 @@ PVRSRV_ERROR PVRSRVCommonDeviceCreate(void *pvOSDevice,
 		PVR_LOG_GOTO_IF_ERROR(eError, "DevicememHistoryDeviceCreate", ErrorDebugCommonDeInitDevice);
 	}
 
-#if defined(__linux__)
+#if defined(SUPPORT_DI_APPHINT_IMPL)
 	/* Register the device specific AppHints so individual AppHints can be
 	 * configured before the FW is initialised. This must be called after
 	 * DebugCommonInitDevice() above as it depends on the created gpuXX/apphint
@@ -2507,7 +2533,7 @@ PVRSRV_ERROR PVRSRVCommonDeviceCreate(void *pvOSDevice,
 		int iError = pvr_apphint_device_register(psDeviceNode);
 		PVR_LOG_IF_FALSE(iError == 0, "pvr_apphint_device_register() failed");
 	}
-#endif /* defined(__linux__) */
+#endif /* defined(SUPPORT_DI_APPHINT_IMPL) */
 
 #if defined(SUPPORT_RGX)
 	RGXHWPerfInitAppHintCallbacks(psDeviceNode);
@@ -2520,22 +2546,24 @@ PVRSRV_ERROR PVRSRVCommonDeviceCreate(void *pvOSDevice,
 	psPVRSRVData->ui32RegisteredDevices++;
 	OSWRLockReleaseWrite(psPVRSRVData->hDeviceNodeListLock);
 
-	/* Initialise the paravirtualised connection */
-	if (!PVRSRV_VZ_MODE_IS(NATIVE, DEVCFG, psDevConfig))
-	{
-		PvzConnectionInit(psDevConfig);
-		PVR_GOTO_IF_ERROR(eError, ErrorDevicememHistoryDeviceDestroy);
-	}
+	PvzConnectionInit(PVRSRV_VZ_MODE_FROM_DEVCFG(psDevConfig));
+	PVR_GOTO_IF_ERROR(eError, ErrorDevicememHistoryDeviceDestroy);
 
 	BIT_SET(psDevConfig->psDevNode->ui32VmState, RGXFW_HOST_DRIVER_ID);
 
 #if defined(SUPPORT_LINUX_DVFS) && !defined(NO_HARDWARE)
-	/* Register the DVFS device now the device node is present in the dev-list */
-	eError = RegisterDVFSDevice(psDeviceNode);
-	PVR_LOG_GOTO_IF_ERROR(eError, "RegisterDVFSDevice", ErrorPvzConnectionDeInit);
-#elif defined(SUPPORT_PDVFS) && !defined(NO_HARDWARE)
-	eError = RegisterPDVFSDevice(psDeviceNode);
-	PVR_LOG_GOTO_IF_ERROR(eError, "RegisterPDVFSDevice", ErrorPvzConnectionDeInit);
+	if (!PVRSRV_VZ_MODE_IS(GUEST, DEVCFG, psDevConfig))
+	{
+		/* Register the DVFS device now the device node is present in the dev-list */
+		eError = RegisterDVFSDevice(psDeviceNode);
+		PVR_LOG_GOTO_IF_ERROR(eError, "RegisterDVFSDevice", ErrorDevicememHistoryDeviceDestroy);
+	}
+#elif defined(SUPPORT_PDVFS_DEVFREQ) && !defined(NO_HARDWARE)
+	if (!PVRSRV_VZ_MODE_IS(GUEST, DEVCFG, psDevConfig))
+	{
+		eError = RegisterPDVFSDevice(psDeviceNode);
+		PVR_LOG_GOTO_IF_ERROR(eError, "RegisterPDVFSDevice", ErrorDevicememHistoryDeviceDestroy);
+	}
 #endif
 
 #if defined(PVRSRV_ENABLE_PROCESS_STATS)
@@ -2553,14 +2581,7 @@ PVRSRV_ERROR PVRSRVCommonDeviceCreate(void *pvOSDevice,
 
 	return PVRSRV_OK;
 
-#if (defined(SUPPORT_LINUX_DVFS) || defined(SUPPORT_PDVFS)) && !defined(NO_HARDWARE)
-ErrorPvzConnectionDeInit:
-#endif
-	psDevConfig->psDevNode = NULL;
-	if (!PVRSRV_VZ_MODE_IS(NATIVE, DEVCFG, psDevConfig))
-	{
-		PvzConnectionDeInit(psDevConfig);
-	}
+
 ErrorDevicememHistoryDeviceDestroy:
 	/* Remove the device from the list */
 	OSWRLockAcquireWrite(psPVRSRVData->hDeviceNodeListLock);
@@ -2568,9 +2589,11 @@ ErrorDevicememHistoryDeviceDestroy:
 	psPVRSRVData->ui32RegisteredDevices--;
 	OSWRLockReleaseWrite(psPVRSRVData->hDeviceNodeListLock);
 
-#if defined(__linux__)
+	psDevConfig->psDevNode = NULL;
+
+#if defined(SUPPORT_DI_APPHINT_IMPL)
 	pvr_apphint_device_unregister(psDeviceNode);
-#endif /* defined(__linux__) */
+#endif /* defined(SUPPORT_DI_APPHINT_IMPL) */
 
 	if (psDeviceNode->bEnablePFDebug)
 	{
@@ -2604,13 +2627,13 @@ ErrorRegDbgReqNotify:
 	SyncCheckpointDeinit(psDeviceNode);
 
 ErrorSyncCheckpointInit:
-	SyncServerDeinit(psDeviceNode);
-
 ErrorDeInitRgx:
 #if defined(SUPPORT_RGX)
 	DevDeInitRGX(psDeviceNode);
-ErrorPMRDeInitDevice:
+ErrorServerDeInit:
 #endif
+	SyncServerDeinit(psDeviceNode);
+ErrorPMRDeInitDevice:
 #if defined(SUPPORT_PMR_DEFERRED_FREE)
 	PMRDeInitDevice(psDeviceNode);
 ErrorPhysHeapDeInitDeviceHeaps:
@@ -2629,7 +2652,6 @@ ErrorDeregisterStats:
 ErrorFreeDeviceNode:
 #endif
 	OSFreeMemNoStats(psDeviceNode);
-
 	return eError;
 }
 
@@ -2755,11 +2777,6 @@ PVRSRV_ERROR PVRSRVCommonDeviceInitialise(PVRSRV_DEVICE_NODE *psDeviceNode)
 
 	/* Initial zero-set for number of active threads on this device */
 	OSAtomicWrite(&psDeviceNode->iThreadsActive, 0);
-
-#if defined(ANDROID)
-	/* Initial zero-set for Android FBC surface counter */
-	OSAtomicWrite(&psDeviceNode->iFBCSurfaceCount, 0);
-#endif
 
 	/* Allocate devmem_history backing store for the device if we have
 	 * EnablePageFaultDebug set
@@ -2920,13 +2937,13 @@ void PVRSRVCommonDeviceDestroy(PVRSRV_DEVICE_NODE *psDeviceNode)
 
 #if defined(SUPPORT_LINUX_DVFS) && !defined(NO_HARDWARE)
 	UnregisterDVFSDevice(psDeviceNode);
-#elif defined(SUPPORT_PDVFS) && !defined(NO_HARDWARE)
+#elif defined(SUPPORT_PDVFS_DEVFREQ) && !defined(NO_HARDWARE)
 	UnregisterPDVFSDevice(psDeviceNode);
 #endif
 
-#if defined(__linux__)
+#if defined(SUPPORT_DI_APPHINT_IMPL)
 	pvr_apphint_device_unregister(psDeviceNode);
-#endif /* defined(__linux__) */
+#endif /* defined(SUPPORT_DI_APPHINT_IMPL) */
 
 	DebugCommonDeInitDevice(psDeviceNode);
 
@@ -3010,9 +3027,15 @@ void PVRSRVCommonDeviceDestroy(PVRSRV_DEVICE_NODE *psDeviceNode)
 	}
 
 #if defined(SUPPORT_LINUX_DVFS) && !defined(NO_HARDWARE)
-	DeinitDVFS(psDeviceNode);
+	if (!PVRSRV_VZ_MODE_IS(GUEST, DEVNODE, psDeviceNode))
+	{
+		DeinitDVFS(psDeviceNode);
+	}
 #elif defined(SUPPORT_PDVFS) && !defined(NO_HARDWARE)
-	DeinitPDVFS(psDeviceNode);
+	if (!PVRSRV_VZ_MODE_IS(GUEST, DEVNODE, psDeviceNode))
+	{
+		DeinitPDVFS(psDeviceNode);
+	}
 #endif
 
 	if (psDeviceNode->hDbgReqNotify)
@@ -3022,13 +3045,15 @@ void PVRSRVCommonDeviceDestroy(PVRSRV_DEVICE_NODE *psDeviceNode)
 
 	SyncCheckpointDeinit(psDeviceNode);
 
-	SyncServerDeinit(psDeviceNode);
-
 	MMU_DeInitDevice(psDeviceNode);
 
 #if defined(SUPPORT_RGX)
+	/* Call before SyncServerDeinit() as it uses the list
+	 * of Sync Server Records which SyncServerDeinit() will free */
 	DevDeInitRGX(psDeviceNode);
 #endif
+
+	SyncServerDeinit(psDeviceNode);
 
 #if defined(SUPPORT_PMR_DEFERRED_FREE)
 	/* must be called before PhysHeapDeInitDeviceHeaps() */
@@ -3063,10 +3088,6 @@ void PVRSRVCommonDeviceDestroy(PVRSRV_DEVICE_NODE *psDeviceNode)
 
 	psDeviceNode->psDevConfig->psDevNode = NULL;
 
-	if (!PVRSRV_VZ_MODE_IS(NATIVE, DEVNODE, psDeviceNode))
-	{
-		PvzConnectionDeInit(psDeviceNode->psDevConfig);
-	}
 	SysDevDeInit(psDeviceNode->psDevConfig);
 
 #if defined(PVRSRV_MAX_REAL_TIME_CONTEXTS) && (PVRSRV_MAX_REAL_TIME_CONTEXTS > 1)
@@ -3401,7 +3422,7 @@ PVRSRVWaitForValueKM(volatile IMG_UINT32 __iomem   *pui32LinMemAddr,
 			eErrorWait = OSEventObjectWait(hOSEvent);
 			if (eErrorWait != PVRSRV_OK  && eErrorWait != PVRSRV_ERROR_TIMEOUT && eErrorWait != PVRSRV_ERROR_INTERRUPTED)
 			{
-				PVR_DPF((PVR_DBG_WARNING, "%s: Failed with error %d. Found value 0x%x but was expected "
+				PVR_DPF((PVR_DBG_ERROR, "%s: Failed with error %d. Found value 0x%x but was expected "
 				         "to be 0x%x (Mask 0x%08x). Retrying",
 						 __func__,
 						 eErrorWait,
@@ -3417,6 +3438,79 @@ PVRSRVWaitForValueKM(volatile IMG_UINT32 __iomem   *pui32LinMemAddr,
 	/* One last check in case the object wait ended after the loop timeout... */
 	if (eError != PVRSRV_OK &&
 	    (OSReadDeviceMem32(pui32LinMemAddr) & ui32Mask) == ui32Value)
+	{
+		eError = PVRSRV_OK;
+	}
+
+	/* Provide event timeout information to aid the Device Watchdog Thread... */
+	if (eError == PVRSRV_OK)
+	{
+		psPVRSRVData->ui32GEOConsecutiveTimeouts = 0;
+	}
+	else if (eError == PVRSRV_ERROR_TIMEOUT)
+	{
+		psPVRSRVData->ui32GEOConsecutiveTimeouts++;
+	}
+
+EventObjectOpenError:
+
+	return eError;
+
+#endif /* NO_HARDWARE */
+}
+
+PVRSRV_ERROR
+PVRSRVWaitForConditionKM(PFN_WAIT_CONDITION_CALLBACK pfnCondCallback,
+                         void *pvCallbackData)
+{
+#if defined(NO_HARDWARE)
+	PVR_UNREFERENCED_PARAMETER(pfnCondCallback);
+	PVR_UNREFERENCED_PARAMETER(pvCallbackData);
+	return PVRSRV_OK;
+#else
+
+	PVRSRV_DATA *psPVRSRVData = PVRSRVGetPVRSRVData();
+	IMG_HANDLE hOSEvent;
+	PVRSRV_ERROR eError;
+	PVRSRV_ERROR eErrorWait;
+
+	eError = OSEventObjectOpen(psPVRSRVData->hGlobalEventObject, &hOSEvent);
+	PVR_LOG_GOTO_IF_ERROR(eError, "OSEventObjectOpen", EventObjectOpenError);
+
+	eError = PVRSRV_ERROR_TIMEOUT; /* Initialiser for following loop */
+	LOOP_UNTIL_TIMEOUT_US(MAX_HW_TIME_US)
+	{
+
+		eError = pfnCondCallback(pvCallbackData);
+		if (eError == PVRSRV_OK)
+		{
+			break;
+		}
+		else if (psPVRSRVData->eServicesState != PVRSRV_SERVICES_STATE_OK)
+		{
+			/* Services in bad state, don't wait any more */
+			eError = PVRSRV_ERROR_NOT_READY;
+			break;
+		}
+		else
+		{
+			/* wait for event and retry */
+			eErrorWait = OSEventObjectWait(hOSEvent);
+			if (eErrorWait != PVRSRV_OK  &&  eErrorWait != PVRSRV_ERROR_TIMEOUT)
+			{
+				PVR_DPF((PVR_DBG_ERROR, "%s: Failed with error %d. Retrying",
+						 __func__,
+						 eErrorWait));
+			}
+		}
+	} END_LOOP_UNTIL_TIMEOUT_US();
+
+	OSEventObjectClose(hOSEvent);
+
+	/* One last check in case the object wait ended after the loop timeout... */
+	if (eError != PVRSRV_OK &&
+	    eError != PVRSRV_ERROR_NOT_READY &&
+	    pfnCondCallback(pvCallbackData) == PVRSRV_OK)
 	{
 		eError = PVRSRV_OK;
 	}

@@ -12,6 +12,7 @@
 
 #include "sysconfig.h"
 #include "mba.h"
+#include "sscd.h"
 
 #define DEFINE_RO_DEBUGFS_ATTRIBUTE(NAME)            \
 	static const struct file_operations NAME = { \
@@ -19,6 +20,21 @@
 		.read = on_debugfs_read,             \
 		.open = simple_open,                 \
 	}
+
+#if defined(SUPPORT_LINUX_DVFS)
+static int set_util_off_period_ms(void *data, u64 val)
+{
+	struct pixel_gpu_device *pixel_dev = data;
+	PPVRSRV_DEVICE_NODE psDeviceNode = pixel_dev->dev_config->psDevNode;
+	IMG_DVFS_DEVICE *psDVFSDevice =
+		&psDeviceNode->psDevConfig->sDVFS.sDVFSDevice;
+
+	psDVFSDevice->off_period_ms = val;
+
+	return 0;
+}
+DEFINE_DEBUGFS_ATTRIBUTE_SIGNED(fops_util_off_period_ms, NULL, set_util_off_period_ms, "%llu\n");
+#endif
 
 static int set_mba(void *data, u64 val)
 {
@@ -184,59 +200,6 @@ static int on_read_genpd_stats_summary(struct pixel_gpu_debug_info *debug,
 
 DEFINE_RO_DEBUGFS_ATTRIBUTE(fops_genpd_stats_summary);
 
-// Valid APM latency values are in the range [-1, 2^32). An APM latency of -1
-// means that APM is turned off.
-static int get_apm_latency(void *data, u64 *val)
-{
-	struct pixel_gpu_device *pixel_dev = data;
-	RGX_TIMING_INFORMATION *timing_info =
-		((RGX_DATA *)pixel_dev->dev_config->hDevData)->psRGXTimingInfo;
-
-	if (timing_info->bEnableActivePM) {
-		*val = timing_info->ui32ActivePMLatencyms;
-	} else {
-		*val = -1;
-	}
-
-	return 0;
-}
-
-static int set_apm_latency(void *data, u64 val)
-{
-	struct pixel_gpu_device *pixel_dev = data;
-	RGX_TIMING_INFORMATION *timing_info =
-		((RGX_DATA *)pixel_dev->dev_config->hDevData)->psRGXTimingInfo;
-	int64_t apm_latency_ms = val;
-	PVRSRV_ERROR err;
-
-	if ((apm_latency_ms < 0) || (__UINT32_MAX__ < apm_latency_ms)) {
-		return -EINVAL;
-	}
-
-	if (timing_info->ui32ActivePMLatencyms == apm_latency_ms) {
-		return 0;
-	}
-
-	dev_dbg(pixel_dev->dev, "%s: changing APM latency from %u to %lld",
-		__func__, timing_info->ui32ActivePMLatencyms, apm_latency_ms);
-
-	err = RGXAPMLatencyChange(pixel_dev->dev_config->psDevNode,
-				  apm_latency_ms,
-				  /* bActivePMLatencyPersistant= */ true);
-
-	if (err == PVRSRV_OK) {
-		timing_info->ui32ActivePMLatencyms = apm_latency_ms;
-	} else {
-		dev_err(pixel_dev->dev, "%s: could not change APM latency: %s",
-			__func__, PVRSRVGetErrorString(err));
-	}
-
-	return 0;
-}
-
-DEFINE_DEBUGFS_ATTRIBUTE_SIGNED(fops_apm_latency, get_apm_latency,
-				set_apm_latency, "%lld\n");
-
 static ssize_t trigger_uevent_write(struct file *file,
 		const char __user *ubuf, size_t count, loff_t *ppos)
 {
@@ -267,6 +230,28 @@ static const struct file_operations fops_trigger_uevent = {
 	.llseek = default_llseek,
 };
 
+static ssize_t trigger_core_dump(struct file *file,
+		const char __user *ubuf, size_t count, loff_t *ppos)
+{
+	struct pixel_gpu_device *pixel_dev = (struct pixel_gpu_device *)file->private_data;
+	PVRSRV_ROBUSTNESS_NOTIFY_DATA error = {
+		.eResetReason = RGX_CONTEXT_RESET_REASON_NONE,
+		.pid = current->pid,
+		.uErrData = {0},
+	};
+
+	gpu_sscd_dump(pixel_dev, &error);
+
+	return count;
+}
+
+static const struct file_operations fops_trigger_core_dump = {
+	.owner = THIS_MODULE,
+	.open = simple_open,
+	.write = trigger_core_dump,
+	.llseek = default_llseek,
+};
+
 int pixel_gpu_debug_init(struct pixel_gpu_device *pixel_dev)
 {
 	struct pixel_gpu_debug_info *debug = &pixel_dev->debug;
@@ -284,15 +269,20 @@ int pixel_gpu_debug_init(struct pixel_gpu_device *pixel_dev)
 			    &debug->genpd_stats_node,
 			    &fops_genpd_stats_summary);
 
-	debugfs_create_file("apm_latency_ms", MAY_READ | MAY_WRITE, power,
-			    pixel_dev, &fops_apm_latency);
-
 	debugfs_create_file("fw_dvfs", MAY_WRITE, power, pixel_dev, &fops_fw_dvfs);
 
 	debugfs_create_file("mba", MAY_WRITE, debug->root, pixel_dev, &fops_mba);
 
 	debugfs_create_file("trigger_uevent", MAY_WRITE, debug->root,
 				pixel_dev, &fops_trigger_uevent);
+
+	debugfs_create_file("trigger_core_dump", MAY_WRITE, debug->root,
+				pixel_dev, &fops_trigger_core_dump);
+
+#if defined(SUPPORT_LINUX_DVFS)
+	debugfs_create_file("util_off_period_ms", MAY_WRITE, debug->root,
+				pixel_dev, &fops_util_off_period_ms);
+#endif
 	return 0;
 }
 

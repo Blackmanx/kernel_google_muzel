@@ -102,6 +102,7 @@ struct _PVRSRV_POWER_DEV_TAG_
 	IMG_HANDLE						psDevNode;
 	PVRSRV_DEV_POWER_STATE			eDefaultPowerState;
 	ATOMIC_T						eCurrentPowerState;
+	ATOMIC_T						ePoweronReqPending;
 #if defined(PVRSRV_ENABLE_PROCESS_STATS)
 	PVRSRV_POWER_STATS				sPowerStats;
 #endif
@@ -841,6 +842,10 @@ PVRSRV_ERROR PVRSRVDeviceSystemPrePowerStateKM(PVRSRV_POWER_DEV			*psPowerDevice
 	PVR_ASSERT(eNewPowerState != PVRSRV_DEV_POWER_STATE_DEFAULT);
 
 	eCurrentPowerState = OSAtomicRead(&psPowerDevice->eCurrentPowerState);
+	if (eNewPowerState == PVRSRV_DEV_POWER_STATE_OFF &&
+		OSAtomicRead(&psPowerDevice->ePoweronReqPending)) {
+		return PVRSRV_ERROR_DEVICE_POWER_CHANGE_DENIED;
+	}
 
 	if (psPowerDevice->pfnDevicePrePower != NULL)
 	{
@@ -948,6 +953,9 @@ PVRSRV_ERROR PVRSRVDeviceSystemPostPowerStateKM(PVRSRV_POWER_DEV		*psPowerDevice
 	PVR_ASSERT(eNewPowerState != PVRSRV_DEV_POWER_STATE_DEFAULT);
 
 	eCurrentPowerState = OSAtomicRead(&psPowerDevice->eCurrentPowerState);
+	if (eNewPowerState == PVRSRV_DEV_POWER_STATE_ON) {
+		OSAtomicWrite(&psPowerDevice->ePoweronReqPending, 1);
+	}
 
 	/* Do any required system-layer processing. */
 	if (psPowerDevice->pfnSystemPostPower != NULL)
@@ -997,6 +1005,10 @@ PVRSRV_ERROR PVRSRVDeviceSystemPostPowerStateKM(PVRSRV_POWER_DEV		*psPowerDevice
 							 IMG_FALSE);
 
 	PVRSRVSetDeviceCurrentPowerState(psPowerDevice, eNewPowerState);
+
+	if (eNewPowerState == PVRSRV_DEV_POWER_STATE_ON) {
+		OSAtomicWrite(&psPowerDevice->ePoweronReqPending, 0);
+	}
 
 	return PVRSRV_OK;
 }
@@ -1119,7 +1131,7 @@ PVRSRV_ERROR PVRSRVSetDeviceSystemPowerState(PPVRSRV_DEVICE_NODE psDeviceNode,
 
 	/* If setting devices to default state, force idle all devices whose default state is off */
 	pfnIsDefaultStateOff =
-	  (eNewDevicePowerState == PVRSRV_DEV_POWER_STATE_OFF) ? PVRSRVDeviceIsDefaultStateOFF : NULL;
+	  (eNewDevicePowerState == PVRSRV_DEV_POWER_STATE_OFF) ? NULL : PVRSRVDeviceIsDefaultStateOFF;
 
 	/* No power transition requested, so do nothing */
 	if (eNewSysPowerState == psDeviceNode->eCurrentSysPowerState)
@@ -1326,6 +1338,7 @@ PVRSRV_ERROR PVRSRVRegisterPowerDevice(PPVRSRV_DEVICE_NODE psDeviceNode,
 	PVRSRVSetDeviceCurrentPowerState(psPowerDevice, eCurrentPowerState);
 	psPowerDevice->eDefaultPowerState = eDefaultPowerState;
 	psPowerDevice->iIdleReqInFlight = 0;
+	OSAtomicWrite(&psPowerDevice->ePoweronReqPending, 0);
 
 #if defined(PVRSRV_ENABLE_PROCESS_STATS)
 	OSCachedMemSet(&psPowerDevice->sPowerStats, 0, sizeof(psPowerDevice->sPowerStats));

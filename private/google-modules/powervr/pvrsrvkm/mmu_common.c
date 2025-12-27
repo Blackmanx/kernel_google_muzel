@@ -910,7 +910,7 @@ static PVRSRV_ERROR _MMU_PhysMemAlloc(MMU_PHYSMEM_CONTEXT *psPhysMemCtx,
 
 	eError = RA_Alloc(psPhysMemCtx->psPhysMemRA,
 	                  uiBytes,
-	                  RA_NO_IMPORT_MULTIPLIER,
+	                  MMU_PT_ALLOC_MULTIPLIER,
 	                  0, /* flags */
 	                  uiAlignment,
 	                  "",
@@ -950,7 +950,7 @@ static PVRSRV_ERROR _MMU_PhysMemAlloc(MMU_PHYSMEM_CONTEXT *psPhysMemCtx,
 /*************************************************************************/ /*!
 @Function       _MMU_PhysMemFree
 
-@Description    Allocates physical memory for MMU objects
+@Description    Frees physical memory for MMU objects
 
 @Input          psPhysMemCtx    Physmem context to do the free on
 
@@ -3278,13 +3278,11 @@ MMU_MapPages(MMU_CONTEXT *psMMUContext,
 	IMG_HANDLE hPriv;
 
 	MMU_Levelx_INFO *psLevel = NULL;
-
 	MMU_Levelx_INFO *psPrevLevel = NULL;
 
 	IMG_UINT32 uiPTEIndex = 0;
 	IMG_UINT32 uiPageSize = (1 << uiLog2HeapPageSize);
 	IMG_UINT32 uiLoop = 0;
-	IMG_UINT32 ui32MappedCount = 0;
 	IMG_DEVMEM_OFFSET_T uiPgOffset = 0;
 	IMG_UINT32 uiFlushEnd = 0, uiFlushStart = 0;
 
@@ -3306,6 +3304,7 @@ MMU_MapPages(MMU_CONTEXT *psMMUContext,
 	PVRSRV_DEVICE_NODE *psDevNode;
 
 #if defined(PDUMP)
+	IMG_UINT32 ui32MappedCount = 0;
 	IMG_CHAR aszMemspaceName[PHYSMEM_PDUMP_MEMSPACE_MAX_LENGTH];
 	IMG_CHAR aszSymbolicAddress[PHYSMEM_PDUMP_SYMNAME_MAX_LENGTH];
 	IMG_DEVMEM_OFFSET_T uiSymbolicAddrOffset;
@@ -3583,7 +3582,9 @@ MMU_MapPages(MMU_CONTEXT *psMMUContext,
 						sDevVAddr.uiAddr,
 						uiPgOffset * uiPageSize));
 
+#if defined(PDUMP)
 				ui32MappedCount++;
+#endif /*PDUMP*/
 			}
 		}
 
@@ -4263,7 +4264,7 @@ MMU_MapPMRFast(MMU_CONTEXT *psMMUContext,
 						uiParityBit = _GetParityBit(sDevVAddrRunning.uiAddr ^ asDevPAddr[i].uiAddr);
 						uiParityBit <<= uiParityShift;
 
-						sDevVAddrRunning.uiAddr += (1 << uiLog2HeapPageSize);
+						sDevVAddrRunning.uiAddr += (IMG_UINT64_C(1) << uiLog2HeapPageSize);
 					}
 
 					if (eRemapPolicy == MMU_PTE_REMAP_POLICY_BLOCK &&
@@ -4507,7 +4508,7 @@ MMU_UnmapPMRFastUnlocked(MMU_CONTEXT *psMMUContext,
 		}
 
 #if defined(PVRSRV_MMU_PARITY_ON_PTALLOC_AND_PTEUNMAP)
-		sDevVAddrStartOfTable.uiAddr = sDevVAddr.uiAddr - uiPTEIndex * (1 << uiLog2PageSize);
+		sDevVAddrStartOfTable.uiAddr = sDevVAddr.uiAddr - uiPTEIndex * (IMG_UINT64_C(1) << uiLog2PageSize);
 		uiParityPatternIdx = _GetParityBit(sDevVAddrStartOfTable.uiAddr);
 #endif
 		pvPTStart = psLevel->sMemDesc.pvCpuVAddr;
@@ -4523,7 +4524,7 @@ MMU_UnmapPMRFastUnlocked(MMU_CONTEXT *psMMUContext,
 				if (bSetParity)
 				{
 					uiParityBit = psMMUContext->psDevAttrs->pui64PrecomputedAllocParity[uiParityPatternIdx][i] ^ ui64BadPhysAddrParity;
-					sDevVAddrRunning.uiAddr += (1 << uiLog2PageSize);
+					sDevVAddrRunning.uiAddr += IMG_UINT64_C(1) << uiLog2PageSize;
 				}
 #endif
 				((IMG_UINT64*)pvPTStart)[i] = uiEntry | uiParityBit;

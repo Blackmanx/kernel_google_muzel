@@ -1,8 +1,8 @@
 /*************************************************************************/ /*!
 @File           pvr_dvfs_proactive.c
-@Title          PowerVR devfreq for proactive DVFS
+@Title          PowerVR devfreq device common utilities
 @Copyright      Copyright (c) Imagination Technologies Ltd. All Rights Reserved
-@Description    PDVFS-specific devfreq code
+@Description    Proactive DVFS kernel/OS code
 @License        Dual MIT/GPLv2
 
 The contents of this file are subject to the MIT license as set out below.
@@ -41,43 +41,109 @@ IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 */ /**************************************************************************/
 
-
 #if !defined(NO_HARDWARE)
 
+#include <linux/devfreq.h>
 #include <linux/version.h>
 #include <linux/device.h>
 #include <drm/drm.h>
 #if defined(CONFIG_PM_OPP)
 #include <linux/pm_opp.h>
 #endif
+#include <linux/pm_qos.h>
 
 #include "pvrsrv.h"
 
 /*
- * Common DVFS support code shared between SUPPORT_LINUX_DVFS and
- * SUPPORT_PDVFS, primarily for OPP table support.
- *
- * Note that PDVFS implements the Linux/OS devfreq module in
- * the firmware, so no devfreq API calls should be used here.
+ * Proactive DVFS support code with a devfreq driver wrapper around
+ * the FW governor implementation. The devfreq wrapper is agnostic
+ * to the underlying algorithm but proactive is anticipated to be
+ * the optimal governor.
  */
-#include "pvr_dvfs.h"
-#include "pvr_dvfs_common.h"
-#include "pvr_dvfs_proactive.h"
+#include "power.h"
+#include "pvrsrv.h"
 #include "pvrsrv_device.h"
+
+#include "rgxdevice.h"
+#include "rgxinit.h"
 #include "rgxpdvfs.h"
-#include "sofunc_rgx.h"
+
+#include "pvr_dvfs.h"
+#include "pvr_dvfs_proactive.h"
+#include "pvr_dvfs_common.h"
 
 #include "kernel_compatibility.h"
+
+#if defined(SUPPORT_PDVFS_DEVFREQ)
+#if !defined(CONFIG_PM_DEVFREQ)
+#error "PVR DVFS governor requires kernel support for devfreq (CONFIG_PM_DEVFREQ = 1)"
+#endif
+#include "governor.h"
+
+int pvr_governor_init(void);
+void pvr_governor_exit(void);
+PVRSRV_ERROR PDVFSSendFirmwareCommand(struct device *dev,
+	                             unsigned int event,
+	                             unsigned int *data);
+
+void PDVFSUpdatePollingInterval(unsigned int *data);
+#endif
+
+#define HZ_PER_KHZ		(1000)
+
+/*
+ * Custom governor event to transfer the PDVFS config to firmware
+ * governor.
+ */
+#define DEVFREQ_GOV_FIRMWARE_CAPACITY		(100)
+#define DEVFREQ_GOV_FIRMWARE_MINFREQ		(101)
+#define DEVFREQ_GOV_FIRMWARE_MAXFREQ		(102)
+
 
 /*************************************************************************/ /*!
 @Function       InitPDVFS
 
-@Description    Initialise the device for Proactive DVFS support.
+@Description    Initialise the device for Proactive DVFS support, stage 1.
                 Prepares the OPP table from the devicetree, if enabled.
 
 @Input          psDeviceNode       Device node
-@Return			PVRSRV_ERROR
+@Return         PVRSRV_ERROR
 */ /**************************************************************************/
+#if defined(SUPPORT_PDVFS)
+static int FillOPPTable(struct device *dev, PVRSRV_DEVICE_NODE *psDeviceNode)
+{
+	const IMG_OPP *iopp;
+	int i, err = 0;
+	IMG_DVFS_DEVICE_CFG *psDVFSDeviceCfg = NULL;
+
+	/* Check the device exists */
+	if (!dev || !psDeviceNode)
+	{
+		return -ENODEV;
+	}
+
+	psDVFSDeviceCfg = &psDeviceNode->psDevConfig->sDVFS.sDVFSDeviceCfg;
+	if (!psDVFSDeviceCfg->pasOPPTable)
+	{
+		dev_err(dev, "No DVFS OPP table provided in system layer and no device tree support.");
+		return -ENODATA;
+	}
+
+	for (i = 0, iopp = psDVFSDeviceCfg->pasOPPTable;
+	     i < psDVFSDeviceCfg->ui32OPPTableSize;
+	     i++, iopp++)
+	{
+		dev_err(dev, "Filling opp table");
+		err = dev_pm_opp_add(dev, iopp->ui32Freq, iopp->ui32Volt);
+		if (err) {
+			dev_err(dev, "Could not add OPP entry, %d\n", err);
+			return err;
+		}
+	}
+
+	return 0;
+}
+
 PVRSRV_ERROR InitPDVFS(PPVRSRV_DEVICE_NODE psDeviceNode)
 {
 #if !(defined(CONFIG_PM_OPP) && defined(CONFIG_OF))
@@ -85,11 +151,12 @@ PVRSRV_ERROR InitPDVFS(PPVRSRV_DEVICE_NODE psDeviceNode)
 
 	return PVRSRV_OK;
 #else
-	IMG_DVFS_DEVICE_CFG *psDVFSDeviceCfg = NULL;
-	IMG_PDVFS_DEVICE *psPDVFSDevice;
-	struct device *psDev;
-	PVRSRV_ERROR eError;
-	int err;
+#if defined(SUPPORT_PDVFS_DEVFREQ)
+	IMG_PDVFS_DEVICE       *psPDVFSDevice;
+#endif
+	IMG_DVFS_DEVICE_CFG    *psDVFSDeviceCfg = NULL;
+	struct device          *psDev;
+	int                     err;
 
 	if (!psDeviceNode)
 	{
@@ -99,8 +166,11 @@ PVRSRV_ERROR InitPDVFS(PPVRSRV_DEVICE_NODE psDeviceNode)
 	PVR_ASSERT(psDeviceNode->psDevConfig);
 
 	psDev = psDeviceNode->psDevConfig->pvOSDevice;
-	psDVFSDeviceCfg = &psDeviceNode->psDevConfig->sDVFS.sDVFSDeviceCfg;
+#if defined(SUPPORT_PDVFS_DEVFREQ)
 	psPDVFSDevice = &psDeviceNode->psDevConfig->sDVFS.sPDVFSDevice;
+#endif
+	psDVFSDeviceCfg = &psDeviceNode->psDevConfig->sDVFS.sDVFSDeviceCfg;
+	psDeviceNode->psDevConfig->sDVFS.sPDVFSDevice.eState = PVR_DVFS_STATE_INIT_PENDING;
 
 	/* Setup the OPP table from the device tree for Proactive DVFS. */
 	if (dev_pm_opp_get_opp_count(psDev) <= 0)
@@ -122,28 +192,32 @@ PVRSRV_ERROR InitPDVFS(PPVRSRV_DEVICE_NODE psDeviceNode)
 		 * If there are no device tree or system layer provided operating points
 		 * then return an error
 		 */
-		if (psDVFSDeviceCfg->pasOPPTable)
+		if ((err == -ENOTSUPP || err == -ENODEV) && psDVFSDeviceCfg->pasOPPTable)
 		{
-			psDVFSDeviceCfg->bDTConfig = IMG_FALSE;
+			err = FillOPPTable(psDev, psDeviceNode);
+			if (err != 0 && err != -ENODATA)
+			{
+				PVR_DPF((PVR_DBG_ERROR, "Failed to fill OPP table with data, %d", err));
+				return PVRSRV_ERROR_RESOURCE_UNAVAILABLE;
+			}
 		}
 		else
 		{
-			PVR_DPF((PVR_DBG_ERROR, "No system or device tree opp points found, %d", err));
+			PVR_DPF((PVR_DBG_ERROR, "Failed to init opp table from devicetree, %d", err));
 			return PVRSRV_ERROR_RESOURCE_UNAVAILABLE;
 		}
 	}
 
-	psPDVFSDevice->sParams.i64HeadroomInHz = 0;
-	psPDVFSDevice->sParams.ui32PollingIntervalInus = 20 * 1000;
-	psPDVFSDevice->sParams.ui32UpThresholdInPct = 90;
-	psPDVFSDevice->sParams.ui32DownDifferentialInPct = 5;
-
-	eError = SORgxGpuUtilStatsRegister(&psPDVFSDevice->hGpuUtilUserDVFS);
-	if (eError != PVRSRV_OK)
+#if defined(SUPPORT_PDVFS_DEVFREQ)
+	/* Create the PVR governor which wraps the governor logic in the firmware */
+	err = pvr_governor_init();
+	if (err != 0)
 	{
-		return eError;
+		PVR_DPF((PVR_DBG_ERROR, "Failed to init PVR governor, %d", err));
+		return PVRSRV_ERROR_RESOURCE_UNAVAILABLE;
 	}
-
+	psPDVFSDevice->bGovernorReady = true;
+#endif
 	return PVRSRV_OK;
 #endif
 }
@@ -154,16 +228,18 @@ PVRSRV_ERROR InitPDVFS(PPVRSRV_DEVICE_NODE psDeviceNode)
 @Description    De-Initialise the device for Proactive DVFS support.
 
 @Input          psDeviceNode       Device node
-@Return			PVRSRV_ERROR
+@Return         None
 */ /**************************************************************************/
 void DeinitPDVFS(PPVRSRV_DEVICE_NODE psDeviceNode)
 {
 #if !(defined(CONFIG_PM_OPP) && defined(CONFIG_OF))
 	PVR_UNREFERENCED_PARAMETER(psDeviceNode);
 #else
-	IMG_DVFS_DEVICE_CFG *psDVFSDeviceCfg = NULL;
-	IMG_PDVFS_DEVICE *psPDVFSDevice;
-	struct device *psDev = NULL;
+#if defined(SUPPORT_PDVFS_DEVFREQ)
+	IMG_PDVFS_DEVICE       *psPDVFSDevice;
+#endif
+	IMG_DVFS_DEVICE_CFG    *psDVFSDeviceCfg = NULL;
+	struct device          *psDev = NULL;
 
 	/* Check the device exists */
 	if (!psDeviceNode)
@@ -173,10 +249,15 @@ void DeinitPDVFS(PPVRSRV_DEVICE_NODE psDeviceNode)
 
 	psDev = psDeviceNode->psDevConfig->pvOSDevice;
 	psDVFSDeviceCfg = &psDeviceNode->psDevConfig->sDVFS.sDVFSDeviceCfg;
+
+#if defined(SUPPORT_PDVFS_DEVFREQ)
 	psPDVFSDevice = &psDeviceNode->psDevConfig->sDVFS.sPDVFSDevice;
-
-	SORgxGpuUtilStatsUnregister(psPDVFSDevice->hGpuUtilUserDVFS);
-
+	if (psPDVFSDevice->bGovernorReady)
+	{
+		pvr_governor_exit();
+		psPDVFSDevice->bGovernorReady = false;
+	}
+#endif
 	if (psDVFSDeviceCfg->bDTConfig)
 	{
 		/*
@@ -185,523 +266,731 @@ void DeinitPDVFS(PPVRSRV_DEVICE_NODE psDeviceNode)
 		 */
 		dev_pm_opp_of_remove_table(psDev);
 	}
-
 #endif
 }
 
-/*************************************************************************/ /*!
-@Function       pdvfs_target
+#if defined(SUPPORT_PDVFS_DEVFREQ)
+#if !defined(CONFIG_PM_DEVFREQ)
+#error "PVR Proactive DVFS governor requires kernel support for devfreq (CONFIG_PM_DEVFREQ = 1)"
+#endif
 
-@Description    Ignore all requests to change the GPU frequency.
+/* DEVFREQ governor name */
+#define DEVFREQ_GOV_PVR_CUSTOM		"pvr_firmware"
 
-@Return			0 (no error)
-*/ /**************************************************************************/
-static int pdvfs_target(struct device *dev, unsigned long *requested_freq, u32 flags)
+
+static int pvr_governor_get_target(struct devfreq *devfreq_dev,
+								   unsigned long *freq)
 {
-	PVRSRV_DEVICE_NODE *psDeviceNode = PVRSRVGetDeviceInstanceByKernelDevID(GetDevID(dev));
-	PVRSRV_RGXDEV_INFO *psDevInfo;
+	/* implemented in firmware.. */
 
+	return 0;
+}
+
+static int pvr_governor_event_handler(struct devfreq *devfreq_dev,
+									  unsigned int event, void *data)
+{
+	if (!devfreq_dev)
+	{
+		pr_err("%s: devfreq_dev not ready.\n", __func__);
+		return -ENODEV;
+	}
+
+	/*
+	 * We cannot take the deviceId here, as the DRM device
+	 * may not be initialised. Null pointer in
+	 * struct drm_device *ddev = dev_get_drvdata(dev)
+	 */
+
+	switch (event) {
+	case DEVFREQ_GOV_START:
+		dev_info(&devfreq_dev->dev,"GOV_START event.\n");
+		break;
+
+	case DEVFREQ_GOV_STOP:
+		dev_info(&devfreq_dev->dev,"GOV_STOP event.\n");
+		break;
+
+	case DEVFREQ_GOV_UPDATE_INTERVAL:
+		dev_info(&devfreq_dev->dev,"GOV_INTERVAL event.\n");
+		PDVFSUpdatePollingInterval((unsigned int*) data);
+		PDVFSSendFirmwareCommand(&devfreq_dev->dev, event, data);
+		break;
+
+	case DEVFREQ_GOV_SUSPEND:
+		dev_info(&devfreq_dev->dev,"GOV_SUSPEND event.\n");
+		break;
+
+	case DEVFREQ_GOV_RESUME:
+		dev_info(&devfreq_dev->dev,"GOV_RESUME event.\n");
+		break;
+	/*
+	 * Custom events
+	 */
+	case DEVFREQ_GOV_FIRMWARE_CAPACITY:
+		dev_info(&devfreq_dev->dev,"GOV_FIRMWARE_CAPACITY event.\n");
+		PDVFSSendFirmwareCommand(&devfreq_dev->dev, event, data);
+		break;
+	case DEVFREQ_GOV_FIRMWARE_MINFREQ:
+		dev_info(&devfreq_dev->dev,"GOV_FIRMWARE_MINFREQ event.\n");
+		PDVFSSendFirmwareCommand(&devfreq_dev->dev, event, data);
+		break;
+	case DEVFREQ_GOV_FIRMWARE_MAXFREQ:
+		dev_info(&devfreq_dev->dev,"GOV_FIRMWARE_MAXFREQ event.\n");
+		PDVFSSendFirmwareCommand(&devfreq_dev->dev, event, data);
+		break;
+
+	default:
+		printk("Unknown event.\n");
+		break;
+	}
+
+	return 0;
+}
+
+static struct devfreq_governor pvr_custom_governor = {
+	.name = DEVFREQ_GOV_PVR_CUSTOM,
+	.get_target_freq = pvr_governor_get_target,
+	.event_handler   = pvr_governor_event_handler,
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 7, 0))
+	.attrs = DEVFREQ_GOV_ATTR_POLLING_INTERVAL
+		| DEVFREQ_GOV_ATTR_TIMER,
+#else
+	.immutable = true,
+#endif
+};
+
+int pvr_governor_init(void)
+{
+	int ret;
+
+	ret = devfreq_add_governor(&pvr_custom_governor);
+	if (ret)
+	{
+		pr_err("%s: failed to install governor %d\n", __func__, ret);
+	}
+
+	return ret;
+}
+
+void pvr_governor_exit(void)
+{
+	int ret;
+
+	ret = devfreq_remove_governor(&pvr_custom_governor);
+	if (ret)
+	{
+		pr_err("Failed to remove governor (%u)\n", ret);
+	}
+}
+
+
+
+static IMG_INT32 devfreq_target(struct device *dev, unsigned long *requested_freq, IMG_UINT32 flags)
+{
+	IMG_UINT32		ui32Freq, ui32Volt;
+	struct dev_pm_opp *opp;
+
+	/* Target clock freq is calculated in the FW, here we sync the devfreq view of the GPU clock */
+	dev_info(dev, "Frequency notification from firmware-based governor: %lu\n", *requested_freq);
+
+	opp = devfreq_recommended_opp(dev, requested_freq, flags);
+	if (IS_ERR(opp)) {
+		PVR_DPF((PVR_DBG_ERROR, "Invalid OPP"));
+		return PTR_ERR(opp);
+	}
+
+	ui32Freq = dev_pm_opp_get_freq(opp);
+	ui32Volt = dev_pm_opp_get_voltage(opp);
+	dev_info(dev, "Requested new voltage %u and freq %u\n", ui32Volt, ui32Freq);
+
+	dev_pm_opp_put(opp);
+
+	return 0;
+}
+
+static IMG_INT32 devfreq_cur_freq(struct device *dev, unsigned long *freq)
+{
+	int deviceId = GetDevID(dev);
+	PVRSRV_DEVICE_NODE *psDeviceNode = PVRSRVGetDeviceInstanceByKernelDevID(deviceId);
+	RGX_DATA *psRGXData = NULL;
+
+	/* Check the device is registered */
 	if (!psDeviceNode)
 	{
 		return -ENODEV;
 	}
 
-	psDevInfo = psDeviceNode->pvDevice;
+	psRGXData = (RGX_DATA*) psDeviceNode->psDevConfig->hDevData;
 
-#if defined(RGXFW_META_SUPPORT_2ND_THREAD)
-	RGXPDVFSCheckCoreClkRateChange(psDevInfo);
-#endif
-	*requested_freq = psDevInfo->ui32CoreClkRateSnapshot;
-	return 0;
-}
-
-/*************************************************************************/ /*!
-@Function       pdvfs_get_dev_status
-
-@Description    Get frequency and utilization data from the firmware.
-
-@Input          dev               OS device node
-@Output         stat              Utilization and current frequency
-
-@Return			0 if the data could be fetched, or an error otherwise.
-*/ /**************************************************************************/
-static int pdvfs_get_dev_status(struct device *dev, struct devfreq_dev_status *stat)
-{
-	PVRSRV_DEVICE_NODE *psDeviceNode = PVRSRVGetDeviceInstanceByKernelDevID(GetDevID(dev));
-	PVRSRV_RGXDEV_INFO *psDevInfo;
-	IMG_PDVFS_DEVICE *psPDVFSDevice;
-	RGXFWIF_GPU_UTIL_STATS sGPUUtilStats;
-	PVRSRV_ERROR eError;
-
-	if (!psDeviceNode)
+	/* Check the RGX device is initialised */
+	if (!psRGXData)
 	{
-		return -ENODEV;
+		return -ENODATA;
 	}
 
-	psDevInfo = psDeviceNode->pvDevice;
-	psPDVFSDevice = &psDeviceNode->psDevConfig->sDVFS.sPDVFSDevice;
-
-#if defined(RGXFW_META_SUPPORT_2ND_THREAD)
-	RGXPDVFSCheckCoreClkRateChange(psDevInfo);
-#endif
-	stat->current_frequency = psDevInfo->ui32CoreClkRateSnapshot;
-
-	if (psDevInfo->pfnGetGpuUtilStats == NULL)
-	{
-		/* Not yet ready. So set times to something sensible. */
-		stat->busy_time = 0;
-		stat->total_time = 0;
-		return 0;
-	}
-
-	eError = psDevInfo->pfnGetGpuUtilStats(psDeviceNode, psPDVFSDevice->hGpuUtilUserDVFS, &sGPUUtilStats);
-
-	if (eError != PVRSRV_OK)
-	{
-		return -EAGAIN;
-	}
-
-	stat->busy_time = sGPUUtilStats.ui64GpuStatActive;
-	stat->total_time = sGPUUtilStats.ui64GpuStatCumulative;
+	*freq = psRGXData->psRGXTimingInfo->ui32CoreClockSpeed;
 
 	return 0;
 }
 
-/*************************************************************************/ /*!
-@Function       pdvfs_get_dev_status
-
-@Description    Get frequency from the firmware.
-
-@Input          dev               OS device node
-@Output         freq              The current frequency
-
-@Return			0 if the data could be fetched, or an error otherwise.
-*/ /**************************************************************************/
-static int pdvfs_get_cur_freq(struct device *dev, unsigned long *freq)
+static struct devfreq_dev_profile img_devfreq_proactive =
 {
-	PVRSRV_DEVICE_NODE *psDeviceNode = PVRSRVGetDeviceInstanceByKernelDevID(GetDevID(dev));
-	PVRSRV_RGXDEV_INFO *psDevInfo;
+	.polling_ms         = 10,
+	.target             = devfreq_target,
+	.get_dev_status     = NULL,		/* not used in the UM governor */
+	.get_cur_freq       = devfreq_cur_freq,
+};
 
-	if (!psDeviceNode)
+/*************************************************************************/ /*!
+@Function       NotifyCoreClkChange
+
+@Description    Update the userspace devfreq after the firmware-based
+                governor has recalculated the core frequency.
+
+@Input          psDeviceNode       Device node
+@Input          ui32NewFreq        New GPU clock frequency
+@Return         PVRSRV_ERROR
+*/ /**************************************************************************/
+static PVRSRV_ERROR NotifyCoreClkChange(PPVRSRV_DEVICE_NODE psDeviceNode, IMG_UINT32 ui32NewFreq)
+{
+	int err = 0;
+	struct device *dev = (struct device *)psDeviceNode->psDevConfig->pvOSDevice;
+
+	IMG_PDVFS_DEVICE *psPDVFSDevice = &psDeviceNode->psDevConfig->sDVFS.sPDVFSDevice;
+
+	if (psPDVFSDevice->eState != PVR_DVFS_STATE_READY)
 	{
-		return -ENODEV;
+		return PVRSRV_ERROR_INVALID_DEVICE;
 	}
 
-	psDevInfo = psDeviceNode->pvDevice;
+	/* Update devfreq UM driver */
+	mutex_lock(&psPDVFSDevice->psDevFreq->lock);
 
-	if (!psDevInfo)
+	err = dev_pm_opp_set_rate(dev, ui32NewFreq);
+	if (err)
 	{
-		return -ENOTSUPP;
+		pr_err("%s: failed to notify governor %d\n", __func__, err);
 	}
 
-#if defined(RGXFW_META_SUPPORT_2ND_THREAD)
-	RGXPDVFSCheckCoreClkRateChange(psDevInfo);
-#endif
-	*freq = psDevInfo->ui32CoreClkRateSnapshot;
+	mutex_unlock(&psPDVFSDevice->psDevFreq->lock);
 
-	return 0;
+	if (err)
+	{
+		return TO_IMG_ERR(err);
+	}
+	return PVRSRV_OK;
 }
 
-/* This function is available as a symbol but the prototype lives in
- * drivers/devfreq/governor.h which is not visible to modules.
- */
-void devfreq_get_freq_range(struct devfreq *devfreq,
-			    unsigned long *min_freq,
-			    unsigned long *max_freq);
-
-/*************************************************************************/ /*!
-@Function       pdvfs_notifier
-
-@Description    Notify PDVFS that parameters have changed.
-
-@Input          nb                psPDVFSDevice->psDevFreq
-@Input          action            DEVFREQ_PRECHANGE
-@Input          data              a pointer to struct devfreq_freqs
-
-@Return			0 on success, an error otherwise
-*/ /**************************************************************************/
-static int pdvfs_notifier(struct notifier_block *nb, unsigned long action, void *data)
+#if defined(SUPPORT_DVFS_RUNTIME_CONFIG) && defined(SUPPORT_PDVFS_HEADROOM_EXT)
+static ssize_t capacity_headroom_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
-	IMG_PDVFS_DEVICE *psPDVFSDevice = container_of(nb, IMG_PDVFS_DEVICE, sNotifierBlock);
-	PVRSRV_DVFS *psDVFS = container_of(psPDVFSDevice, PVRSRV_DVFS, sPDVFSDevice);
-	PVRSRV_DEVICE_CONFIG *psDeviceConfig = container_of(psDVFS, struct _PVRSRV_DEVICE_CONFIG_, sDVFS);
-	PVRSRV_RGXDEV_INFO *psDevInfo = psDeviceConfig->psDevNode->pvDevice;
-	PVRSRV_DEVICE_NODE *psDeviceNode = psDeviceConfig->psDevNode;
-	PVRSRV_ERROR eError = PVRSRV_OK;
-	PVRSRV_DEV_POWER_STATE ePowerState;
+	PVRSRV_DEVICE_NODE	*psDeviceNode = PVRSRVGetDeviceInstanceByKernelDevID(
+		GetDevID(dev->parent));
+	IMG_DVFS_DEVICE_CFG	*psDVFSDeviceCfg = &psDeviceNode->psDevConfig->sDVFS.sDVFSDeviceCfg;
 
-	devfreq_get_freq_range(psPDVFSDevice->psDevFreq, &psPDVFSDevice->ulMinFreq, &psPDVFSDevice->ulMaxFreq);
-
-	eError = PVRSRVPowerLock(psDeviceNode);
-	if (eError != PVRSRV_OK)
-	{
-		goto err_nolock;
-	}
-
-	eError = PVRSRVGetDevicePowerState(psDeviceNode, &ePowerState);
-	if (eError != PVRSRV_OK)
-	{
-		goto err_lock;
-	}
-
-	if (ePowerState == PVRSRV_DEV_POWER_STATE_ON)
-	{
-		PDVFSLimitMinFrequency(psDevInfo, psPDVFSDevice->ulMinFreq);
-		PDVFSLimitMaxFrequency(psDevInfo, psPDVFSDevice->ulMaxFreq);
-	}
-
-	PVRSRVPowerUnlock(psDeviceNode);
-	return 0;
-err_lock:
-	PVRSRVPowerUnlock(psDeviceNode);
-err_nolock:
-	return -EAGAIN;
+	return scnprintf(buf, PAGE_SIZE, "%d\n",
+		psDVFSDeviceCfg->i32CapacityHeadroom);
 }
 
-
-/*************************************************************************/ /*!
-@Function       set_pdvfs_params
-
-@Description    Send PDVFS parameters to the device, if it is on
-
-@Input          psDeviceNode      device node
-*/ /**************************************************************************/
-static void set_pdvfs_params(PVRSRV_DEVICE_NODE *psDeviceNode)
-{
-	PVRSRV_RGXDEV_INFO *psDevInfo = psDeviceNode->pvDevice;
-	IMG_PDVFS_DEVICE *psPDVFSDevice =
-		&psDeviceNode->psDevConfig->sDVFS.sPDVFSDevice;
-	PVRSRV_ERROR eLockError, eError;
-	PVRSRV_DEV_POWER_STATE ePowerState;
-
-	eLockError = PVRSRVPowerLock(psDeviceNode);
-	if (eLockError != PVRSRV_OK)
-	{
-		return;
-	}
-
-	eError = PVRSRVGetDevicePowerState(psDeviceNode, &ePowerState);
-	if (eError != PVRSRV_OK)
-	{
-		struct device *psDev = psDeviceNode->psDevConfig->pvOSDevice;
-		dev_warn(psDev, "Device power state unknown in PDVFS startup");
-		goto exit_lock;
-	}
-
-	if (ePowerState != PVRSRV_DEV_POWER_STATE_ON)
-	{
-		/* Settings will be applied next DVFS resume. */
-		goto exit_lock;
-	}
-
-	PDVFSSetParams(psDevInfo, &psPDVFSDevice->sParams);
-
-exit_lock:
-	PVRSRVPowerUnlock(psDeviceNode);
-}
-
-/*************************************************************************/ /*!
-@Function       capacity_headroom_show
-
-@Description    Report the current headroom to userspace
-
-@Input          dev               OS device node (child of devfreq node)
-@Input          attr              the device attributes (unused)
-@Input          buf               the buffer to write into
-
-@Return			the number of bytes printed into buf, or error
-*/ /**************************************************************************/
-static ssize_t capacity_headroom_show(struct device *dev, struct device_attribute *attr,
-	char *buf)
-{
-	PVRSRV_DEVICE_NODE *psDeviceNode =
-		PVRSRVGetDeviceInstanceByKernelDevID(GetDevID(dev->parent));
-	IMG_PDVFS_DEVICE *psPDVFSDevice =
-		&psDeviceNode->psDevConfig->sDVFS.sPDVFSDevice;
-
-	return scnprintf(buf, PAGE_SIZE, "%lld\n",
-		psPDVFSDevice->sParams.i64HeadroomInHz);
-}
-
-/*************************************************************************/ /*!
-@Function       capacity_headroom_show
-
-@Description    Update capacity headroom and notify the firmware if it's on
-
-@Input          dev               OS device node (child of devfreq node)
-@Input          attr              the device attributes (unused)
-@Input          buf               the buffer to read from
-@Input          count             number of valid bytes in buf
-
-@Return			the number of bytes read from buf, or error
-*/ /**************************************************************************/
 static ssize_t capacity_headroom_store(struct device *dev, struct device_attribute *attr,
 	const char *buf, size_t count)
 {
 	PVRSRV_DEVICE_NODE	*psDeviceNode = PVRSRVGetDeviceInstanceByKernelDevID(
 		GetDevID(dev->parent));
-	IMG_PDVFS_DEVICE *psPDVFSDevice =
-		&psDeviceNode->psDevConfig->sDVFS.sPDVFSDevice;
-	IMG_INT64		i64HeadroomInHz;
+	IMG_DVFS_DEVICE_CFG	*psDVFSDeviceCfg = &psDeviceNode->psDevConfig->sDVFS.sDVFSDeviceCfg;
+	struct devfreq *df = psDeviceNode->psDevConfig->sDVFS.sPDVFSDevice.psDevFreq;
 
-	if (kstrtoll(buf, 0, &i64HeadroomInHz))
-	{
+	if (kstrtoint(buf, 0, &psDVFSDeviceCfg->i32CapacityHeadroom))
 		return -EINVAL;
-	}
 
-	psPDVFSDevice->sParams.i64HeadroomInHz = i64HeadroomInHz;
-
-	set_pdvfs_params(psDeviceNode);
-
+	df->governor->event_handler(df, DEVFREQ_GOV_FIRMWARE_CAPACITY, &psDVFSDeviceCfg->i32CapacityHeadroom);
 	return count;
 }
 
 static DEVICE_ATTR_RW(capacity_headroom);
 
-/*************************************************************************/ /*!
-@Function       polling_interval_show
-
-@Description    Report the current reactive polling interval to userspace
-
-@Input          dev               OS device node (child of devfreq node)
-@Input          attr              the device attributes (unused)
-@Input          buf               the buffer to write into
-
-@Return			the number of bytes printed into buf, or error
-*/ /**************************************************************************/
-static ssize_t polling_interval_show(struct device *dev, struct device_attribute *attr,
-	char *buf)
+static int RegisterHeadroomFile(struct devfreq *devfreq)
 {
-	PVRSRV_DEVICE_NODE *psDeviceNode =
-		PVRSRVGetDeviceInstanceByKernelDevID(GetDevID(dev->parent));
-	IMG_PDVFS_DEVICE *psPDVFSDevice =
-		&psDeviceNode->psDevConfig->sDVFS.sPDVFSDevice;
-
-	return scnprintf(buf, PAGE_SIZE, "%u\n",
-		psPDVFSDevice->sParams.ui32PollingIntervalInus);
-}
-
-/*************************************************************************/ /*!
-@Function       polling_interval_store
-
-@Description    Update polling interval and notify the firmware if it's on
-
-@Input          dev               OS device node (child of devfreq node)
-@Input          attr              the device attributes (unused)
-@Input          buf               the buffer to read from
-@Input          count             number of valid bytes in buf
-
-@Return			the number of bytes read from buf, or error
-*/ /**************************************************************************/
-static ssize_t polling_interval_store(struct device *dev, struct device_attribute *attr,
-	const char *buf, size_t count)
-{
-	PVRSRV_DEVICE_NODE	*psDeviceNode = PVRSRVGetDeviceInstanceByKernelDevID(
-		GetDevID(dev->parent));
-	IMG_PDVFS_DEVICE *psPDVFSDevice =
-		&psDeviceNode->psDevConfig->sDVFS.sPDVFSDevice;
-	IMG_UINT32		ui32PollingIntervalInus;
-
-	if (kstrtouint(buf, 0, &ui32PollingIntervalInus))
+	int ret = sysfs_create_file(&devfreq->dev.kobj, &dev_attr_capacity_headroom.attr);
+	if (ret < 0)
 	{
-		return -EINVAL;
+		dev_warn(&devfreq->dev, "Unable to create capacity headroom file");
 	}
-
-	psPDVFSDevice->sParams.ui32PollingIntervalInus = ui32PollingIntervalInus;
-
-	set_pdvfs_params(psDeviceNode);
-
-	return count;
+	return ret;
 }
 
-static DEVICE_ATTR_RW(polling_interval);
-
-static IMG_BOOL validate_simpleondemand_parameters(
-	IMG_UINT32 ui32UpThresholdInPct,
-	IMG_UINT32 ui32DownDifferentialInPct)
-{
-	return (ui32UpThresholdInPct <= 100 &&
-		ui32DownDifferentialInPct <= ui32UpThresholdInPct);
-}
-
-/*************************************************************************/ /*!
-@Function       up_threshold_show
-
-@Description    Report the current reactive up threshold to userspace
-
-@Input          dev               OS device node (child of devfreq node)
-@Input          attr              the device attributes (unused)
-@Input          buf               the buffer to write into
-
-@Return			the number of bytes printed into buf, or error
-*/ /**************************************************************************/
-static ssize_t up_threshold_show(struct device *dev, struct device_attribute *attr,
-	char *buf)
-{
-	PVRSRV_DEVICE_NODE *psDeviceNode =
-		PVRSRVGetDeviceInstanceByKernelDevID(GetDevID(dev->parent));
-	IMG_PDVFS_DEVICE *psPDVFSDevice =
-		&psDeviceNode->psDevConfig->sDVFS.sPDVFSDevice;
-
-	return scnprintf(buf, PAGE_SIZE, "%u\n",
-		psPDVFSDevice->sParams.ui32UpThresholdInPct);
-}
-
-/*************************************************************************/ /*!
-@Function       up_threshold_store
-
-@Description    Update up threshold and notify the firmware if it's on
-
-@Input          dev               OS device node (child of devfreq node)
-@Input          attr              the device attributes (unused)
-@Input          buf               the buffer to read from
-@Input          count             number of valid bytes in buf
-
-@Return			the number of bytes read from buf, or error
-*/ /**************************************************************************/
-static ssize_t up_threshold_store(struct device *dev, struct device_attribute *attr,
-	const char *buf, size_t count)
-{
-	PVRSRV_DEVICE_NODE	*psDeviceNode = PVRSRVGetDeviceInstanceByKernelDevID(
-		GetDevID(dev->parent));
-	IMG_PDVFS_DEVICE *psPDVFSDevice =
-		&psDeviceNode->psDevConfig->sDVFS.sPDVFSDevice;
-	IMG_UINT32		ui32UpThresholdInPct;
-
-	if (kstrtouint(buf, 0, &ui32UpThresholdInPct))
-	{
-		return -EINVAL;
-	}
-
-	if (!validate_simpleondemand_parameters(
-		ui32UpThresholdInPct,
-		psPDVFSDevice->sParams.ui32DownDifferentialInPct))
-	{
-		dev_warn(dev, "Invalid up threshold (%u%%) "
-			"and down differential (%u%%)",
-			ui32UpThresholdInPct,
-			psPDVFSDevice->sParams.ui32DownDifferentialInPct);
-		return -EINVAL;
-	}
-
-	psPDVFSDevice->sParams.ui32UpThresholdInPct = ui32UpThresholdInPct;
-
-	set_pdvfs_params(psDeviceNode);
-
-	return count;
-}
-
-static DEVICE_ATTR_RW(up_threshold);
-
-/*************************************************************************/ /*!
-@Function       down_differential_show
-
-@Description    Report the current reactive down differential to userspace
-
-@Input          dev               OS device node (child of devfreq node)
-@Input          attr              the device attributes (unused)
-@Input          buf               the buffer to write into
-
-@Return			the number of bytes printed into buf, or error
-*/ /**************************************************************************/
-static ssize_t down_differential_show(struct device *dev, struct device_attribute *attr,
-	char *buf)
-{
-	PVRSRV_DEVICE_NODE *psDeviceNode =
-		PVRSRVGetDeviceInstanceByKernelDevID(GetDevID(dev->parent));
-	IMG_PDVFS_DEVICE *psPDVFSDevice =
-		&psDeviceNode->psDevConfig->sDVFS.sPDVFSDevice;
-
-	return scnprintf(buf, PAGE_SIZE, "%u\n",
-		psPDVFSDevice->sParams.ui32DownDifferentialInPct);
-}
-
-/*************************************************************************/ /*!
-@Function       down_differential_store
-
-@Description    Update down differential and notify the firmware if it's on
-
-@Input          dev               OS device node (child of devfreq node)
-@Input          attr              the device attributes (unused)
-@Input          buf               the buffer to read from
-@Input          count             number of valid bytes in buf
-
-@Return			the number of bytes read from buf, or error
-*/ /**************************************************************************/
-static ssize_t down_differential_store(struct device *dev, struct device_attribute *attr,
-	const char *buf, size_t count)
-{
-	PVRSRV_DEVICE_NODE	*psDeviceNode = PVRSRVGetDeviceInstanceByKernelDevID(
-		GetDevID(dev->parent));
-	IMG_PDVFS_DEVICE *psPDVFSDevice =
-		&psDeviceNode->psDevConfig->sDVFS.sPDVFSDevice;
-	IMG_UINT32		ui32DownDifferentialInPct;
-
-	if (kstrtouint(buf, 0, &ui32DownDifferentialInPct))
-	{
-		return -EINVAL;
-	}
-
-	if (!validate_simpleondemand_parameters(
-		psPDVFSDevice->sParams.ui32UpThresholdInPct,
-		ui32DownDifferentialInPct))
-	{
-		dev_warn(dev, "Invalid up threshold (%u%%) "
-			"and down differential (%u%%)",
-			psPDVFSDevice->sParams.ui32UpThresholdInPct,
-			ui32DownDifferentialInPct);
-		return -EINVAL;
-	}
-
-	psPDVFSDevice->sParams.ui32DownDifferentialInPct = ui32DownDifferentialInPct;
-
-	set_pdvfs_params(psDeviceNode);
-
-	return count;
-}
-
-static DEVICE_ATTR_RW(down_differential);
-
-/*************************************************************************/ /*!
-@Function       RegisterParameterFiles
-
-@Description    Add new devices to devfreq for reading/writing PDVFS parameters
-
-@Input          devfreq            OS devfreq node
-*/ /**************************************************************************/
-void RegisterParameterFiles(struct devfreq *devfreq)
-{
-	IMG_BOOL bMadeSysfsNodes =
-		!sysfs_create_file(&devfreq->dev.kobj, &dev_attr_capacity_headroom.attr) &&
-		!sysfs_create_file(&devfreq->dev.kobj, &dev_attr_polling_interval.attr) &&
-		!sysfs_create_file(&devfreq->dev.kobj, &dev_attr_up_threshold.attr) &&
-		!sysfs_create_file(&devfreq->dev.kobj, &dev_attr_down_differential.attr);
-
-	/*
-	 * If these nodes aren't present, userland services will fail to
-	 * initialise, causing erratic behavior that can be hard to diagnose.
-	 *
-	 * Also, failing to create the file indicates something is fatally
-	 * wrong (kernel OOM for example).
-	 */
-	BUG_ON(!bMadeSysfsNodes);
-}
-
-/*************************************************************************/ /*!
-@Function       UnregisterParameterFiles
-
-@Description    Remove the devices added by RegisterParameterFiles from devfreq
-
-@Input          devfreq            OS devfreq node
-*/ /**************************************************************************/
-void UnregisterParameterFiles(struct devfreq *devfreq)
+static void UnregisterHeadroomFile(struct devfreq *devfreq)
 {
 	sysfs_remove_file(&devfreq->dev.kobj, &dev_attr_capacity_headroom.attr);
-	sysfs_remove_file(&devfreq->dev.kobj, &dev_attr_polling_interval.attr);
-	sysfs_remove_file(&devfreq->dev.kobj, &dev_attr_up_threshold.attr);
-	sysfs_remove_file(&devfreq->dev.kobj, &dev_attr_down_differential.attr);
+}
+#endif /* SUPPORT_DVFS_RUNTIME_CONFIG */
+
+struct dvfs_notifier_block
+{
+	struct notifier_block nb;
+	struct device *dev;
+	struct devfreq *devfreq_dev;
+};
+
+/*************************************************************************/ /*!
+@Function       NotifyMinFrequencyChange
+
+@Description    Notifier for PM QOS min/max freq constraint change.
+
+@Input          nb       Notifier block
+@Input          uiFreq   new constraint (kHz)
+@Input          data     null
+@Return         0 on success or error code
+*/ /**************************************************************************/
+static int NotifyMinFrequencyChange(struct notifier_block *nb,
+			unsigned long uiFreq, void *data)
+{
+	struct dvfs_notifier_block *dvfs_nb = container_of(nb, struct dvfs_notifier_block, nb);
+	struct devfreq *df = dvfs_nb->devfreq_dev;
+	struct dev_pm_opp *opp;
+	unsigned int level;
+	int err;
+
+	PVR_UNREFERENCED_PARAMETER(data);
+
+	if (!dvfs_nb->dev) {
+		return -EINVAL;
+	}
+
+	uiFreq *= HZ_PER_KHZ;
+	opp = devfreq_recommended_opp(dvfs_nb->dev, &uiFreq, 0);
+	if (IS_ERR(opp)) {
+		dev_warn(dvfs_nb->dev, "Invalid OPP");
+		return -EINVAL;
+	}
+
+	err = FindOPPFreq(dvfs_nb->dev,
+	                  img_devfreq_proactive.freq_table,
+	                  uiFreq,
+	                  &level);
+	if (err) {
+		dev_warn(dvfs_nb->dev, "Requested frequency %lu not found.", uiFreq);
+		return err;
+	}
+
+	/* decrement ref taken in devfreq_recommended_opp */
+	dev_pm_opp_put(opp);
+
+	/* Notify event_handler to forward request to firmware. The frequency
+	 * request should exactly match one of the OPP levels. */
+	df->governor->event_handler(df, DEVFREQ_GOV_FIRMWARE_MINFREQ, &uiFreq);
+
+	return 0;
 }
 
+static struct dvfs_notifier_block img_pm_qos_minfreq_notifier =
+{
+	.nb =
+	{
+		.notifier_call = NotifyMinFrequencyChange,
+		.next = NULL,
+		.priority = 0,
+	},
+	.dev = NULL,
+};
+
+/*************************************************************************/ /*!
+@Function       NotifyMaxFrequencyChange
+
+@Description    Notifier for PM QOS min/max freq constraint change.
+
+@Input          nb       Notifier block
+@Input          uiFreq   new constraint (kHz)
+@Input          data     null
+@Return         0 on success or error code
+*/ /**************************************************************************/
+static int NotifyMaxFrequencyChange(struct notifier_block *nb,
+			unsigned long uiFreq, void *data)
+{
+	struct dvfs_notifier_block *dvfs_nb = container_of(nb, struct dvfs_notifier_block, nb);
+	struct devfreq *df = dvfs_nb->devfreq_dev;
+	struct dev_pm_opp *opp;
+	unsigned int level;
+	int err;
+
+	PVR_UNREFERENCED_PARAMETER(data);
+
+	if (!dvfs_nb->dev) {
+		return -EINVAL;
+	}
+
+	uiFreq *= HZ_PER_KHZ;
+	opp = devfreq_recommended_opp(dvfs_nb->dev, &uiFreq, 0);
+	if (IS_ERR(opp)) {
+		dev_warn(dvfs_nb->dev, "Invalid OPP");
+		return -EINVAL;
+	}
+
+	err = FindOPPFreq(dvfs_nb->dev,
+	                  img_devfreq_proactive.freq_table,
+	                  uiFreq,
+	                  &level);
+	if (err) {
+		dev_warn(dvfs_nb->dev, "Requested frequency %lu not found.", uiFreq);
+		return err;
+	}
+
+	/* decrement ref taken in devfreq_recommended_opp */
+	dev_pm_opp_put(opp);
+
+	/* Notify event_handler to forward request to firmware. The frequency
+	 * request should exactly match one of the OPP levels. */
+	df->governor->event_handler(df, DEVFREQ_GOV_FIRMWARE_MAXFREQ, &uiFreq);
+
+	return 0;
+}
+
+static struct dvfs_notifier_block img_pm_qos_maxfreq_notifier =
+{
+	.nb =
+	{
+		.notifier_call = NotifyMaxFrequencyChange,
+		.next = NULL,
+		.priority = 0,
+	},
+	.dev = NULL,
+};
+
+/*************************************************************************/ /*!
+@Function       PDVFSSendFirmwareCommand
+
+@Description    Send PDVFS config update to the firmware. The action is dependent
+                on the PDVFS algorithm, which can be simple on-demand or
+                proactive using workload characteristics.
+
+@Input          dev       Linux OS device
+@Input          event     Config event
+@Input          data      Config value
+@Return         PVRSRV_ERROR
+*/ /**************************************************************************/
+PVRSRV_ERROR PDVFSSendFirmwareCommand(struct device *dev,
+	                                  unsigned int event,
+	                                  unsigned int *data)
+{
+	int deviceId;
+	int level;
+	int err;
+	PVRSRV_DEVICE_NODE *psDeviceNode;
+	PVRSRV_RGXDEV_INFO *psDevInfo;
+	PVRSRV_ERROR eError;
+
+	deviceId = GetDevID(dev->parent);
+	psDeviceNode = PVRSRVGetDeviceInstanceByKernelDevID(deviceId);
+	psDevInfo = psDeviceNode->pvDevice;
+
+#if defined(SUPPORT_FW_OPP_TABLE) && defined(CONFIG_OF) && defined(CONFIG_PM_OPP)
+	eError = PVRSRVPowerLock(psDeviceNode);
+	if (unlikely(eError != PVRSRV_OK))
+	{
+		PVR_DPF((PVR_DBG_WARNING, "%s: Power lock unavailable.", __func__));
+		return eError;
+	}
+
+	/* Ensure device is powered up before sending any commands */
+	eError = PVRSRVSetDevicePowerStateKM(psDevInfo->psDeviceNode,
+	                                     PVRSRV_DEV_POWER_STATE_ON,
+	                                     PVRSRV_POWER_FLAGS_NONE);
+	if (unlikely(eError != PVRSRV_OK))
+	{
+		PVR_DPF((PVR_DBG_WARNING, "%s: failed to transition RGX to ON (%s)",
+				__func__, PVRSRVGetErrorString(eError)));
+		goto _unlock;
+	}
+
+	switch (event)
+	{
+		case DEVFREQ_GOV_UPDATE_INTERVAL:
+		{
+#if defined(SUPPORT_PDVFS_POLLINT_EXT)
+			PVR_DPF((PVR_DBG_MESSAGE, "Send polling interval = %u msec", *data));
+			PDVFSSetReactivePollingInterval(psDevInfo, *data);
+#endif
+			break;
+		}
+		case DEVFREQ_GOV_FIRMWARE_CAPACITY:
+		{
+#if defined(SUPPORT_PDVFS_HEADROOM_EXT)
+			PVR_DPF((PVR_DBG_MESSAGE, "Send capacity headroom = %d Hz", *(signed int*) data));
+			PDVFSSetFrequencyHeadroom(psDevInfo, *(signed int*) data);
+#endif
+			break;
+		}
+		case DEVFREQ_GOV_FIRMWARE_MINFREQ:
+		{
+			err = FindOPPFreq(dev->parent,
+							  img_devfreq_proactive.freq_table,
+							  (unsigned long) *data,
+							  &level);
+			if (err)
+			{
+				PVR_DPF((PVR_DBG_WARNING, "%s: No valid OPP level for freq %u (%d)", __func__, *data, err));
+				goto _unlock;
+			}
+			PVR_DPF((PVR_DBG_MESSAGE, "Send QOS constraint: min OPP level %d, freq %u Hz.", level, *data));
+			PDVFSLimitMinFrequency(psDevInfo, level);
+			break;
+		}
+		case DEVFREQ_GOV_FIRMWARE_MAXFREQ:
+		{
+			err = FindOPPFreq(dev->parent,
+							  img_devfreq_proactive.freq_table,
+							  (unsigned long) *data,
+							  &level);
+			if (err)
+			{
+				PVR_DPF((PVR_DBG_WARNING, "%s: No valid OPP level for freq %u (%d)", __func__, *data, err));
+				goto _unlock;
+			}
+			PVR_DPF((PVR_DBG_MESSAGE, "Send QOS constraint: max OPP level %d, freq %u Hz.", level, *data));
+			PDVFSLimitMaxFrequency(psDevInfo, level);
+			break;
+		}
+		default:
+		{
+			PVR_DPF((PVR_DBG_WARNING, "%s: Unexpected firmware event (%u)", __func__, event));
+		}
+	}
+_unlock:
+	PVRSRVPowerUnlock(psDeviceNode);
+
+	return PVRSRV_OK;
+#else
+	PVR_UNREFERENCED_PARAMETER(eError);
+	return PVRSRV_ERROR_NOT_SUPPORTED;
+#endif
+}
+
+/*************************************************************************/ /*!
+@Function       PDVFSUpdatePollingInterval
+
+@Description    Update polling interval in the firmware simple on-demand governor.
+
+@Input          data       New polling interval (msec)
+@Return         none
+*/ /**************************************************************************/
+void PDVFSUpdatePollingInterval(unsigned int *data)
+{
+	img_devfreq_proactive.polling_ms = *data;
+}
+
+/*************************************************************************/ /*!
+@Function       RegisterPDVFSDevice
+
+@Description    Initialise the device for Proactive DVFS support, stage 2.
+                Create the 'devfreq' device with custom PVR firmware governor and
+                set a default configuration.
+
+@Input          psDeviceNode       Device node
+@Return         PVRSRV_ERROR
+*/ /**************************************************************************/
+PVRSRV_ERROR RegisterPDVFSDevice(PPVRSRV_DEVICE_NODE psDeviceNode)
+{
+	IMG_PDVFS_DEVICE       *psPDVFSDevice = NULL;
+	IMG_DVFS_DEVICE_CFG    *psDVFSDeviceCfg = NULL;
+	RGX_TIMING_INFORMATION *psRGXTimingInfo = NULL;
+	struct device          *psDev;
+	struct pvr_opp_freq_table	pvr_freq_table = {0};
+	unsigned long           min_freq = 0, max_freq = 0, min_volt = 0;
+	PVRSRV_ERROR            eError;
+	int                     err = 0;
+
+	if (!psDeviceNode)
+	{
+		return PVRSRV_ERROR_INVALID_PARAMS;
+	}
+
+	if (psDeviceNode->psDevConfig->sDVFS.sPDVFSDevice.eState != PVR_DVFS_STATE_INIT_PENDING)
+	{
+		PVR_DPF((PVR_DBG_ERROR,
+				 "Proactive DVFS initialise not yet pending for device node %p",
+				 psDeviceNode));
+		return PVRSRV_ERROR_INIT_FAILURE;
+	}
+
+	psDev = psDeviceNode->psDevConfig->pvOSDevice;
+	psPDVFSDevice = &psDeviceNode->psDevConfig->sDVFS.sPDVFSDevice;
+	psDVFSDeviceCfg = &psDeviceNode->psDevConfig->sDVFS.sDVFSDeviceCfg;
+	psRGXTimingInfo = ((RGX_DATA *)psDeviceNode->psDevConfig->hDevData)->psRGXTimingInfo;
+	psDeviceNode->psDevConfig->sDVFS.sPDVFSDevice.eState = PVR_DVFS_STATE_READY;
+
+	err = GetOPPValues(psDev, &min_freq, &min_volt, &max_freq, &pvr_freq_table);
+	if (err)
+	{
+		PVR_DPF((PVR_DBG_ERROR, "Failed to read OPP points, %d", err));
+		eError = TO_IMG_ERR(err);
+		goto err_exit;
+	}
+
+	img_devfreq_proactive.freq_table = pvr_freq_table.freq_table;
+	img_devfreq_proactive.max_state = pvr_freq_table.num_levels;
+	img_devfreq_proactive.initial_freq = min_freq;
+
+	/* create the devfreq device */
+	psPDVFSDevice->psDevFreq = devm_devfreq_add_device(psDev,
+													   &img_devfreq_proactive,
+													   DEVFREQ_GOV_PVR_CUSTOM,
+													   NULL);
+
+	if (IS_ERR(psPDVFSDevice->psDevFreq))
+	{
+		PVR_DPF((PVR_DBG_ERROR,
+				 "Failed to add as devfreq device %p, %ld",
+				 psPDVFSDevice->psDevFreq,
+				 PTR_ERR(psPDVFSDevice->psDevFreq)));
+		eError = TO_IMG_ERR(PTR_ERR(psPDVFSDevice->psDevFreq));
+		goto err_exit;
+	}
+
+#if defined(SUPPORT_PDVFS)
+	if (psDVFSDeviceCfg->pfnDVFSRegister)
+	{
+		eError = psDVFSDeviceCfg->pfnDVFSRegister(psPDVFSDevice->psDevFreq);
+		if (eError != PVRSRV_OK)
+		{
+			PVR_DPF((PVR_DBG_ERROR, "Failed to register DVFS callbacks"));
+			goto err_exit;
+		}
+	}
+#endif
+
+	/*
+	 * Register the devfreq userspace governor notification.
+	 * Equivalent to entering 'set_freq_store' from userspace.
+	 */
+	psDVFSDeviceCfg->pfnNotifyCoreClkChange = NotifyCoreClkChange;
+
+#if defined(SUPPORT_DVFS_RUNTIME_CONFIG) && defined(SUPPORT_PDVFS_HEADROOM_EXT)
+	err = RegisterHeadroomFile(psPDVFSDevice->psDevFreq);
+	if (err)
+	{
+		eError = TO_IMG_ERR(err);
+		goto err_exit_headroom;
+	}
+#endif
+
+	err = devfreq_register_opp_notifier(psDev, psPDVFSDevice->psDevFreq);
+	if (err)
+	{
+		PVR_DPF((PVR_DBG_ERROR, "Failed to register opp notifier, %d", err));
+		eError = TO_IMG_ERR(err);
+		goto err_exit_opp_notifier;
+	}
+
+	/* Register the min/max frequency notifiers */
+	img_pm_qos_minfreq_notifier.dev = psDev;
+	img_pm_qos_minfreq_notifier.devfreq_dev = psPDVFSDevice->psDevFreq;
+	img_pm_qos_maxfreq_notifier.dev = psDev;
+	img_pm_qos_maxfreq_notifier.devfreq_dev = psPDVFSDevice->psDevFreq;
+
+	err = dev_pm_qos_add_notifier(psDev, &img_pm_qos_minfreq_notifier.nb, DEV_PM_QOS_MIN_FREQUENCY);
+	if (err == 0)
+	{
+		err = dev_pm_qos_add_notifier(psDev, &img_pm_qos_maxfreq_notifier.nb, DEV_PM_QOS_MAX_FREQUENCY);
+	}
+
+	if (err)
+	{
+		PVR_DPF((PVR_DBG_ERROR, "Failed to register pm_qos notifier, %d", err));
+		eError = TO_IMG_ERR(err);
+		goto err_exit_qos_notifier;
+	}
+
+	dev_info(psDev, "%s: devfreq device registered.", __func__);
+	return PVRSRV_OK;
+
+err_exit_qos_notifier:
+	(void) dev_pm_qos_remove_notifier(psDev, &img_pm_qos_maxfreq_notifier.nb,
+				DEV_PM_QOS_MAX_FREQUENCY);
+	(void) dev_pm_qos_remove_notifier(psDev, &img_pm_qos_minfreq_notifier.nb,
+				DEV_PM_QOS_MIN_FREQUENCY);
+	(void) devfreq_unregister_opp_notifier(psDev, psPDVFSDevice->psDevFreq);
+
+err_exit_opp_notifier:
+#if defined(SUPPORT_DVFS_RUNTIME_CONFIG) && defined(SUPPORT_PDVFS_HEADROOM_EXT)
+	UnregisterHeadroomFile(psPDVFSDevice->psDevFreq);
+
+err_exit_headroom:
+#endif
+	devm_devfreq_remove_device(psDev, psPDVFSDevice->psDevFreq);
+	psPDVFSDevice->psDevFreq = NULL;
+err_exit:
+	return eError;
+}
+
+/*************************************************************************/ /*!
+@Function       UnregisterPDVFSDevice
+
+@Description    De-Initialise the device for Proactive DVFS support, stage 2.
+                Remove the custom 'devfreq' device.
+
+@Input          psDeviceNode       Device node
+@Return         None
+*/ /**************************************************************************/
+void UnregisterPDVFSDevice(PPVRSRV_DEVICE_NODE psDeviceNode)
+{
+	IMG_PDVFS_DEVICE *psPDVFSDevice = NULL;
+	IMG_DVFS_DEVICE_CFG *psDVFSDeviceCfg = NULL;
+	struct device *psDev = NULL;
+	IMG_INT32 iError;
+
+	/* Check the device exists */
+	if (!psDeviceNode)
+	{
+		return;
+	}
+
+	PVRSRV_VZ_RETN_IF_MODE(GUEST, DEVNODE, psDeviceNode);
+
+	psPDVFSDevice = &psDeviceNode->psDevConfig->sDVFS.sPDVFSDevice;
+	psDev = psDeviceNode->psDevConfig->pvOSDevice;
+
+	if (!psPDVFSDevice)
+	{
+		return;
+	}
+
+	psDVFSDeviceCfg = &psDeviceNode->psDevConfig->sDVFS.sDVFSDeviceCfg;
+	if (psDVFSDeviceCfg->pfnDVFSUnregister)
+	{
+		psDVFSDeviceCfg->pfnDVFSUnregister(psPDVFSDevice->psDevFreq);
+	}
+
+	if (psPDVFSDevice->psDevFreq)
+	{
+		iError = dev_pm_qos_remove_notifier(psDev, &img_pm_qos_minfreq_notifier.nb,
+				DEV_PM_QOS_MIN_FREQUENCY);
+		if (iError < 0)
+		{
+			PVR_DPF((PVR_DBG_ERROR, "Failed to unregister pm_qos min_freq notifier"));
+		}
+		iError = dev_pm_qos_remove_notifier(psDev, &img_pm_qos_maxfreq_notifier.nb,
+				DEV_PM_QOS_MAX_FREQUENCY);
+		if (iError < 0)
+		{
+			PVR_DPF((PVR_DBG_ERROR, "Failed to unregister pm_qos max_freq notifier"));
+		}
+		iError = devfreq_unregister_opp_notifier(psDev, psPDVFSDevice->psDevFreq);
+		if (iError < 0)
+		{
+			PVR_DPF((PVR_DBG_ERROR, "Failed to unregister OPP notifier"));
+		}
+
+#if defined(SUPPORT_DVFS_RUNTIME_CONFIG) && defined(SUPPORT_PDVFS_HEADROOM_EXT)
+		UnregisterHeadroomFile(psPDVFSDevice->psDevFreq);
+#endif
+		devm_devfreq_remove_device(psDev, psPDVFSDevice->psDevFreq);
+		psPDVFSDevice->psDevFreq = NULL;
+	}
+
+	psPDVFSDevice->eState = PVR_DVFS_STATE_DEINIT;
+}
+
+#endif /* SUPPORT_PDVFS_DEVFREQ */
 /*************************************************************************/ /*!
 @Function       ResumePDVFS
 
@@ -728,189 +1017,10 @@ PVRSRV_ERROR ResumePDVFS(PPVRSRV_DEVICE_NODE psDeviceNode)
 	{
 		PDVFSLimitMinFrequency(psDevInfo, psPDVFSDevice->ulMinFreq);
 		PDVFSLimitMaxFrequency(psDevInfo, psPDVFSDevice->ulMaxFreq);
-		PDVFSSetParams(psDevInfo, &psPDVFSDevice->sParams);
 	}
 
 	return PVRSRV_OK;
 }
-
-#if defined(CONFIG_DEVFREQ_THERMAL)
-static int RegisterCoolingDevice(struct device *dev,
-					IMG_PDVFS_DEVICE *psPDVFSDevice,
-					struct devfreq_cooling_power *powerOps)
-{
-	struct device_node *of_node;
-	int err = 0;
-
-	if (!psPDVFSDevice)
-	{
-		return -EINVAL;
-	}
-
-	if (!powerOps)
-	{
-		dev_info(dev, "Cooling: power ops not registered, not enabling cooling");
-		return 0;
-	}
-
-	of_node = of_node_get(dev->of_node);
-
-	psPDVFSDevice->psDevfreqCoolingDevice = of_devfreq_cooling_register_power(
-		of_node, psPDVFSDevice->psDevFreq, powerOps);
-
-	if (IS_ERR(psPDVFSDevice->psDevfreqCoolingDevice))
-	{
-		err = PTR_ERR(psPDVFSDevice->psDevfreqCoolingDevice);
-		dev_err(dev, "Failed to register as devfreq cooling device %d", err);
-	}
-
-	of_node_put(of_node);
-
-	return err;
-}
-#endif
-
-/*************************************************************************/ /*!
-@Function       RegisterPDVFSDevice
-
-@Description    Initialise the devfreq entries for Proactive DVFS.
-
-@Input          psDeviceNode       Device node
-@Return			PVRSRV_ERROR
-*/ /**************************************************************************/
-PVRSRV_ERROR RegisterPDVFSDevice(PPVRSRV_DEVICE_NODE psDeviceNode)
-{
-	static struct devfreq_dev_profile dev_profile =
-	{
-		.target = pdvfs_target,
-		.get_dev_status = pdvfs_get_dev_status,
-		.get_cur_freq = pdvfs_get_cur_freq
-	};
-
-	IMG_PDVFS_DEVICE *psPDVFSDevice = NULL;
-#if defined(CONFIG_DEVFREQ_THERMAL)
-	IMG_DVFS_DEVICE_CFG *psDVFSDeviceCfg = NULL;
-#endif
-	struct device *psDev;
-	struct pvr_opp_freq_table pvr_freq_table = {0};
-	unsigned long min_freq = 0, max_freq = 0, min_volt = 0;
-	PVRSRV_ERROR eError;
-	int err;
-
-	if (!psDeviceNode)
-	{
-		return PVRSRV_ERROR_INVALID_PARAMS;
-	}
-
-	psDev = psDeviceNode->psDevConfig->pvOSDevice;
-	psPDVFSDevice = &psDeviceNode->psDevConfig->sDVFS.sPDVFSDevice;
-#if defined(CONFIG_DEVFREQ_THERMAL)
-	psDVFSDeviceCfg = &psDeviceNode->psDevConfig->sDVFS.sDVFSDeviceCfg;
-#endif
-
-	err = GetOPPValues(psDev, &min_freq, &min_volt, &max_freq, &pvr_freq_table);
-	if (err)
-	{
-		PVR_DPF((PVR_DBG_ERROR, "Failed to read OPP points, %d", err));
-		eError = TO_IMG_ERR(err);
-		goto err_exit;
-	}
-
-	dev_profile.freq_table = pvr_freq_table.freq_table;
-	dev_profile.max_state = pvr_freq_table.num_levels;
-	dev_profile.initial_freq = min_freq;
-	dev_profile.polling_ms = 0;
-
-	psPDVFSDevice->psDevFreq = devm_devfreq_add_device(
-		psDev,
-		&dev_profile,
-		"userspace",
-		NULL);
-
-	if (IS_ERR(psPDVFSDevice->psDevFreq))
-	{
-		PVR_DPF((PVR_DBG_ERROR,
-				 "Failed to add as devfreq device %p, %ld",
-				 psPDVFSDevice->psDevFreq,
-				 PTR_ERR(psPDVFSDevice->psDevFreq)));
-		eError = TO_IMG_ERR(PTR_ERR(psPDVFSDevice->psDevFreq));
-		goto err_exit;
-	}
-
-	psPDVFSDevice->sNotifierBlock.notifier_call = pdvfs_notifier;
-	psPDVFSDevice->sNotifierBlock.priority = 0;
-
-	devfreq_get_freq_range(psPDVFSDevice->psDevFreq, &psPDVFSDevice->ulMinFreq, &psPDVFSDevice->ulMaxFreq);
-
-	if (devm_devfreq_register_notifier(psDev, psPDVFSDevice->psDevFreq, &psPDVFSDevice->sNotifierBlock, DEVFREQ_TRANSITION_NOTIFIER)) {
-		PVR_DPF((PVR_DBG_ERROR, "Failed to add devfreq noifier block"));
-		eError = TO_IMG_ERR(PTR_ERR(psPDVFSDevice->psDevFreq));
-		goto err_exit;
-	}
-
-#if defined(CONFIG_DEVFREQ_THERMAL)
-	if (!PVRSRV_VZ_MODE_IS(GUEST, DEVNODE, psDeviceNode))
-	{
-		err = RegisterCoolingDevice(psDev, psPDVFSDevice, psDVFSDeviceCfg->psPowerOps);
-		if (err)
-		{
-			eError = TO_IMG_ERR(err);
-			goto err_exit;
-		}
-	}
-#endif
-
-	RegisterParameterFiles(psPDVFSDevice->psDevFreq);
-
-	return PVRSRV_OK;
-
-err_exit:
-	UnregisterPDVFSDevice(psDeviceNode);
-	return eError;
-}
-
-/*************************************************************************/ /*!
-@Function       UnregisterPDVFSDevice
-
-@Description    Remove the devfreq entries for Proactive DVFS.
-
-@Input          psDeviceNode       Device node
-@Return			PVRSRV_ERROR
-*/ /**************************************************************************/
-PVRSRV_ERROR UnregisterPDVFSDevice(PPVRSRV_DEVICE_NODE psDeviceNode)
-{
-	IMG_PDVFS_DEVICE *psPDVFSDevice = NULL;
-	struct device *psDev;
-
-	if (!psDeviceNode)
-	{
-		return PVRSRV_ERROR_INVALID_PARAMS;
-	}
-
-	psPDVFSDevice = &psDeviceNode->psDevConfig->sDVFS.sPDVFSDevice;
-	psDev = psDeviceNode->psDevConfig->pvOSDevice;
-
-	if (!psPDVFSDevice->psDevFreq)
-	{
-		return PVRSRV_OK;
-	}
-
-#if defined(CONFIG_DEVFREQ_THERMAL)
-	if (!IS_ERR_OR_NULL(psPDVFSDevice->psDevfreqCoolingDevice))
-	{
-		devfreq_cooling_unregister(psPDVFSDevice->psDevfreqCoolingDevice);
-		psPDVFSDevice->psDevfreqCoolingDevice = NULL;
-	}
-#endif
-
-	UnregisterParameterFiles(psPDVFSDevice->psDevFreq);
-
-	devm_devfreq_unregister_notifier(psDev, psPDVFSDevice->psDevFreq, &psPDVFSDevice->sNotifierBlock, DEVFREQ_TRANSITION_NOTIFIER);
-
-	devm_devfreq_remove_device(psDev, psPDVFSDevice->psDevFreq);
-	psPDVFSDevice->psDevFreq = NULL;
-
-	return PVRSRV_OK;
-}
+#endif /* SUPPORT_PDVFS */
 
 #endif /* !NO_HARDWARE */

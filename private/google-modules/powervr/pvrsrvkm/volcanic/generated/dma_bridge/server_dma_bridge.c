@@ -53,9 +53,6 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "pvr_debug.h"
 #include "connection_server.h"
 #include "pvr_bridge.h"
-#if defined(SUPPORT_RGX)
-#include "rgx_bridge.h"
-#endif
 #include "srvcore.h"
 #include "handle.h"
 
@@ -67,7 +64,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 static_assert(MAX_DMA_OPS <= IMG_UINT32_MAX, "MAX_DMA_OPS must not be larger than IMG_UINT32_MAX");
 
-static IMG_INT
+static size_t
 PVRSRVBridgeDmaTransfer(IMG_UINT32 ui32DispatchTableEntry,
 			IMG_UINT8 * psDmaTransferIN_UI8,
 			IMG_UINT8 * psDmaTransferOUT_UI8, CONNECTION_DATA * psConnection)
@@ -279,12 +276,12 @@ DmaTransfer_exit:
 	if (!bHaveEnoughSpace && pArrayArgsBuffer)
 		OSFreeMemNoStats(pArrayArgsBuffer);
 
-	return 0;
+	return offsetof(PVRSRV_BRIDGE_OUT_DMATRANSFER, eError);
 }
 
 static_assert(32 <= IMG_UINT32_MAX, "32 must not be larger than IMG_UINT32_MAX");
 
-static IMG_INT
+static size_t
 PVRSRVBridgeDmaSparseMappingTable(IMG_UINT32 ui32DispatchTableEntry,
 				  IMG_UINT8 * psDmaSparseMappingTableIN_UI8,
 				  IMG_UINT8 * psDmaSparseMappingTableOUT_UI8,
@@ -423,10 +420,10 @@ DmaSparseMappingTable_exit:
 	if (!bHaveEnoughSpace && pArrayArgsBuffer)
 		OSFreeMemNoStats(pArrayArgsBuffer);
 
-	return 0;
+	return offsetof(PVRSRV_BRIDGE_OUT_DMASPARSEMAPPINGTABLE, eError);
 }
 
-static IMG_INT
+static size_t
 PVRSRVBridgeDmaDeviceParams(IMG_UINT32 ui32DispatchTableEntry,
 			    IMG_UINT8 * psDmaDeviceParamsIN_UI8,
 			    IMG_UINT8 * psDmaDeviceParamsOUT_UI8, CONNECTION_DATA * psConnection)
@@ -443,7 +440,7 @@ PVRSRVBridgeDmaDeviceParams(IMG_UINT32 ui32DispatchTableEntry,
 			    &psDmaDeviceParamsOUT->ui32DmaBuffAlign,
 			    &psDmaDeviceParamsOUT->ui32DmaTransferMult);
 
-	return 0;
+	return offsetof(PVRSRV_BRIDGE_OUT_DMADEVICEPARAMS, eError);
 }
 
 /* ***************************************************************************

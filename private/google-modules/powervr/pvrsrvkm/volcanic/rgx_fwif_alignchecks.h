@@ -120,7 +120,9 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 		offsetof(RGXFWIF_HWRTDATA, eState), \
 							\
 \
-		sizeof(RGXFWIF_HWPERF_CTL_COMPAT), /* Compat: sizeof(RGXFWIF_HWPERF_CTL) */ \
+		/* sizeof(RGXFWIF_HWPERF_CTL), This struct has flexible array member so */ \
+		/* static size check doesn't give us value. Next offsetof checks the */ \
+		/* static elements */ \
 		offsetof(RGXFWIF_HWPERF_CTL, sBlkCfg), \
 		sizeof(RGXFWIF_CMDTDM), \
 		offsetof(RGXFWIF_CMDTDM, sTDMRegs)
@@ -158,12 +160,9 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 		                                                    \
 		sizeof(RGXFWIF_FWCOMPUTECONTEXT),                   \
 		offsetof(RGXFWIF_FWCOMPUTECONTEXT, sCDMContext),    \
-		offsetof(RGXFWIF_FWCOMPUTECONTEXT, sStaticComputeContextState),\
-		offsetof(RGXFWIF_FWCOMPUTECONTEXT, ui32WorkEstCCBSubmitted),\
 															\
 		sizeof(RGXFWIF_FWTDMCONTEXT),                       \
 		offsetof(RGXFWIF_FWTDMCONTEXT, sTDMContext),        \
-		offsetof(RGXFWIF_FWTDMCONTEXT, ui32WorkEstCCBSubmitted),\
 															\
 		sizeof(RGXFWIF_FWCOMMONCONTEXT),                    \
 		offsetof(RGXFWIF_FWCOMMONCONTEXT, psFWMemContext),  \
@@ -177,8 +176,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 #if defined(SUPPORT_TRP)
 #define RGXFW_ALIGN_CHECKS_INIT_KM                          \
-		RGXFW_ALIGN_CHECKS_INIT_KM0,                        \
-		offsetof(RGXFWIF_FWTDMCONTEXT, aui64TRPChecksums2D)
+		RGXFW_ALIGN_CHECKS_INIT_KM0,
 #else
 #define RGXFW_ALIGN_CHECKS_INIT_KM RGXFW_ALIGN_CHECKS_INIT_KM0
 #endif

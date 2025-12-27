@@ -88,11 +88,7 @@ typedef enum {
 	PVRSRV_MEM_ALLOC_TYPE_COUNT
 } PVRSRV_MEM_ALLOC_TYPE;
 
-
-#if IS_ENABLED(CONFIG_PIXEL_STAT)
-MODULE_SOFTDEP("pre: pixel_stat_sysfs");
 extern struct kobject *pixel_stat_kobj;
-#endif
 
 /*
  * Functions for managing the processes recorded...

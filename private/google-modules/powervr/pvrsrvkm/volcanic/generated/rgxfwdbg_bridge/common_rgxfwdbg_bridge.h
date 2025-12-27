@@ -145,7 +145,7 @@ typedef struct PVRSRV_BRIDGE_OUT_RGXFWDEBUGPOWERON_TAG
 /* Bridge in structure for RGXFWDebugSetVzConnectionCooldownPeriodInSec */
 typedef struct PVRSRV_BRIDGE_IN_RGXFWDEBUGSETVZCONNECTIONCOOLDOWNPERIODINSEC_TAG
 {
-	IMG_UINT32 ui32VzConne;
+	IMG_UINT32 ui32VzConnectionCooldownPeriodInSec;
 } __packed PVRSRV_BRIDGE_IN_RGXFWDEBUGSETVZCONNECTIONCOOLDOWNPERIODINSEC;
 
 /* Bridge out structure for RGXFWDebugSetVzConnectionCooldownPeriodInSec */

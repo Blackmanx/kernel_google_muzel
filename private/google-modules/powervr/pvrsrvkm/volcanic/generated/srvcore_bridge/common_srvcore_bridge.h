@@ -73,9 +73,11 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #define PVRSRV_BRIDGE_SRVCORE_ACQUIREINFOPAGE			PVRSRV_BRIDGE_SRVCORE_CMD_FIRST+15
 #define PVRSRV_BRIDGE_SRVCORE_RELEASEINFOPAGE			PVRSRV_BRIDGE_SRVCORE_CMD_FIRST+16
 #define PVRSRV_BRIDGE_SRVCORE_GETSLCSIZE			PVRSRV_BRIDGE_SRVCORE_CMD_FIRST+17
-#define PVRSRV_BRIDGE_SRVCORE_ISEMULATOR			PVRSRV_BRIDGE_SRVCORE_CMD_FIRST+18
-#define PVRSRV_BRIDGE_SRVCORE_ISVIRTUALPLATFORM			PVRSRV_BRIDGE_SRVCORE_CMD_FIRST+19
-#define PVRSRV_BRIDGE_SRVCORE_CMD_LAST			(PVRSRV_BRIDGE_SRVCORE_CMD_FIRST+19)
+#define PVRSRV_BRIDGE_SRVCORE_GETSOCFREQ			PVRSRV_BRIDGE_SRVCORE_CMD_FIRST+18
+#define PVRSRV_BRIDGE_SRVCORE_ISEMULATOR			PVRSRV_BRIDGE_SRVCORE_CMD_FIRST+19
+#define PVRSRV_BRIDGE_SRVCORE_ISVIRTUALPLATFORM			PVRSRV_BRIDGE_SRVCORE_CMD_FIRST+20
+#define PVRSRV_BRIDGE_SRVCORE_GETMAXCLOCKSPEED			PVRSRV_BRIDGE_SRVCORE_CMD_FIRST+21
+#define PVRSRV_BRIDGE_SRVCORE_CMD_LAST			(PVRSRV_BRIDGE_SRVCORE_CMD_FIRST+21)
 
 /*******************************************
             Connect
@@ -229,6 +231,23 @@ typedef struct PVRSRV_BRIDGE_OUT_GETDEVCLOCKSPEED_TAG
 	PVRSRV_ERROR eError;
 	IMG_UINT32 ui32ClockSpeed;
 } __packed PVRSRV_BRIDGE_OUT_GETDEVCLOCKSPEED;
+
+/*******************************************
+            GetMaxClockSpeed
+ *******************************************/
+
+/* Bridge in structure for GetMaxClockSpeed */
+typedef struct PVRSRV_BRIDGE_IN_GETMAXCLOCKSPEED_TAG
+{
+	IMG_UINT32 ui32EmptyStructPlaceholder;
+} __packed PVRSRV_BRIDGE_IN_GETMAXCLOCKSPEED;
+
+/* Bridge out structure for GetMaxClockSpeed */
+typedef struct PVRSRV_BRIDGE_OUT_GETMAXCLOCKSPEED_TAG
+{
+	PVRSRV_ERROR eError;
+	IMG_UINT32 ui32ClockSpeed;
+} __packed PVRSRV_BRIDGE_OUT_GETMAXCLOCKSPEED;
 
 /*******************************************
             HWOpTimeout
@@ -385,6 +404,23 @@ typedef struct PVRSRV_BRIDGE_OUT_GETSLCSIZE_TAG
 	PVRSRV_ERROR eError;
 	IMG_UINT32 ui32SLCSizeInBytes;
 } __packed PVRSRV_BRIDGE_OUT_GETSLCSIZE;
+
+/*******************************************
+            GetSocFreq
+ *******************************************/
+
+/* Bridge in structure for GetSocFreq */
+typedef struct PVRSRV_BRIDGE_IN_GETSOCFREQ_TAG
+{
+	IMG_UINT32 ui32EmptyStructPlaceholder;
+} __packed PVRSRV_BRIDGE_IN_GETSOCFREQ;
+
+/* Bridge out structure for GetSocFreq */
+typedef struct PVRSRV_BRIDGE_OUT_GETSOCFREQ_TAG
+{
+	PVRSRV_ERROR eError;
+	IMG_UINT32 ui32SocFreq;
+} __packed PVRSRV_BRIDGE_OUT_GETSOCFREQ;
 
 /*******************************************
             IsEmulator

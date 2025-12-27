@@ -56,9 +56,6 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "pvr_debug.h"
 #include "connection_server.h"
 #include "pvr_bridge.h"
-#if defined(SUPPORT_RGX)
-#include "rgx_bridge.h"
-#endif
 #include "srvcore.h"
 #include "handle.h"
 
@@ -68,7 +65,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  * Server-side bridge entry points
  */
 
-static IMG_INT
+static size_t
 PVRSRVBridgeConnect(IMG_UINT32 ui32DispatchTableEntry,
 		    IMG_UINT8 * psConnectIN_UI8,
 		    IMG_UINT8 * psConnectOUT_UI8, CONNECTION_DATA * psConnection)
@@ -87,10 +84,10 @@ PVRSRVBridgeConnect(IMG_UINT32 ui32DispatchTableEntry,
 			    &psConnectOUT->ui8KernelArch,
 			    &psConnectOUT->ui32CapabilityFlags, &psConnectOUT->ui64PackedBvnc);
 
-	return 0;
+	return offsetof(PVRSRV_BRIDGE_OUT_CONNECT, eError);
 }
 
-static IMG_INT
+static size_t
 PVRSRVBridgeDisconnect(IMG_UINT32 ui32DispatchTableEntry,
 		       IMG_UINT8 * psDisconnectIN_UI8,
 		       IMG_UINT8 * psDisconnectOUT_UI8, CONNECTION_DATA * psConnection)
@@ -105,7 +102,7 @@ PVRSRVBridgeDisconnect(IMG_UINT32 ui32DispatchTableEntry,
 
 	psDisconnectOUT->eError = PVRSRVDisconnectKM();
 
-	return 0;
+	return offsetof(PVRSRV_BRIDGE_OUT_DISCONNECT, eError);
 }
 
 static PVRSRV_ERROR _AcquireGlobalEventObjecthGlobalEventObjectIntRelease(void *pvData)
@@ -115,7 +112,7 @@ static PVRSRV_ERROR _AcquireGlobalEventObjecthGlobalEventObjectIntRelease(void *
 	return eError;
 }
 
-static IMG_INT
+static size_t
 PVRSRVBridgeAcquireGlobalEventObject(IMG_UINT32 ui32DispatchTableEntry,
 				     IMG_UINT8 * psAcquireGlobalEventObjectIN_UI8,
 				     IMG_UINT8 * psAcquireGlobalEventObjectOUT_UI8,
@@ -170,10 +167,10 @@ AcquireGlobalEventObject_exit:
 		}
 	}
 
-	return 0;
+	return offsetof(PVRSRV_BRIDGE_OUT_ACQUIREGLOBALEVENTOBJECT, eError);
 }
 
-static IMG_INT
+static size_t
 PVRSRVBridgeReleaseGlobalEventObject(IMG_UINT32 ui32DispatchTableEntry,
 				     IMG_UINT8 * psReleaseGlobalEventObjectIN_UI8,
 				     IMG_UINT8 * psReleaseGlobalEventObjectOUT_UI8,
@@ -211,7 +208,7 @@ PVRSRVBridgeReleaseGlobalEventObject(IMG_UINT32 ui32DispatchTableEntry,
 
 ReleaseGlobalEventObject_exit:
 
-	return 0;
+	return offsetof(PVRSRV_BRIDGE_OUT_RELEASEGLOBALEVENTOBJECT, eError);
 }
 
 static PVRSRV_ERROR _EventObjectOpenhOSEventIntRelease(void *pvData)
@@ -221,7 +218,7 @@ static PVRSRV_ERROR _EventObjectOpenhOSEventIntRelease(void *pvData)
 	return eError;
 }
 
-static IMG_INT
+static size_t
 PVRSRVBridgeEventObjectOpen(IMG_UINT32 ui32DispatchTableEntry,
 			    IMG_UINT8 * psEventObjectOpenIN_UI8,
 			    IMG_UINT8 * psEventObjectOpenOUT_UI8, CONNECTION_DATA * psConnection)
@@ -300,10 +297,10 @@ EventObjectOpen_exit:
 		}
 	}
 
-	return 0;
+	return offsetof(PVRSRV_BRIDGE_OUT_EVENTOBJECTOPEN, eError);
 }
 
-static IMG_INT
+static size_t
 PVRSRVBridgeEventObjectWait(IMG_UINT32 ui32DispatchTableEntry,
 			    IMG_UINT8 * psEventObjectWaitIN_UI8,
 			    IMG_UINT8 * psEventObjectWaitOUT_UI8, CONNECTION_DATA * psConnection)
@@ -349,10 +346,10 @@ EventObjectWait_exit:
 	/* Release now we have cleaned up look up handles. */
 	UnlockHandle(psConnection->psHandleBase);
 
-	return 0;
+	return offsetof(PVRSRV_BRIDGE_OUT_EVENTOBJECTWAIT, eError);
 }
 
-static IMG_INT
+static size_t
 PVRSRVBridgeEventObjectClose(IMG_UINT32 ui32DispatchTableEntry,
 			     IMG_UINT8 * psEventObjectCloseIN_UI8,
 			     IMG_UINT8 * psEventObjectCloseOUT_UI8, CONNECTION_DATA * psConnection)
@@ -384,10 +381,10 @@ PVRSRVBridgeEventObjectClose(IMG_UINT32 ui32DispatchTableEntry,
 
 EventObjectClose_exit:
 
-	return 0;
+	return offsetof(PVRSRV_BRIDGE_OUT_EVENTOBJECTCLOSE, eError);
 }
 
-static IMG_INT
+static size_t
 PVRSRVBridgeDumpDebugInfo(IMG_UINT32 ui32DispatchTableEntry,
 			  IMG_UINT8 * psDumpDebugInfoIN_UI8,
 			  IMG_UINT8 * psDumpDebugInfoOUT_UI8, CONNECTION_DATA * psConnection)
@@ -401,10 +398,10 @@ PVRSRVBridgeDumpDebugInfo(IMG_UINT32 ui32DispatchTableEntry,
 	    PVRSRVDumpDebugInfoKM(psConnection, OSGetDevNode(psConnection),
 				  psDumpDebugInfoIN->ui32VerbLevel);
 
-	return 0;
+	return offsetof(PVRSRV_BRIDGE_OUT_DUMPDEBUGINFO, eError);
 }
 
-static IMG_INT
+static size_t
 PVRSRVBridgeGetDevClockSpeed(IMG_UINT32 ui32DispatchTableEntry,
 			     IMG_UINT8 * psGetDevClockSpeedIN_UI8,
 			     IMG_UINT8 * psGetDevClockSpeedOUT_UI8, CONNECTION_DATA * psConnection)
@@ -420,10 +417,29 @@ PVRSRVBridgeGetDevClockSpeed(IMG_UINT32 ui32DispatchTableEntry,
 	    PVRSRVGetDevClockSpeedKM(psConnection, OSGetDevNode(psConnection),
 				     &psGetDevClockSpeedOUT->ui32ClockSpeed);
 
+	return offsetof(PVRSRV_BRIDGE_OUT_GETDEVCLOCKSPEED, eError);
+}
+
+static size_t
+PVRSRVBridgeGetMaxClockSpeed(IMG_UINT32 ui32DispatchTableEntry,
+			     IMG_UINT8 * psGetDevClockSpeedIN_UI8,
+			     IMG_UINT8 * psGetDevClockSpeedOUT_UI8, CONNECTION_DATA * psConnection)
+{
+	PVRSRV_BRIDGE_IN_GETMAXCLOCKSPEED *psGetDevClockSpeedIN =
+	    (PVRSRV_BRIDGE_IN_GETMAXCLOCKSPEED *) IMG_OFFSET_ADDR(psGetDevClockSpeedIN_UI8, 0);
+	PVRSRV_BRIDGE_OUT_GETMAXCLOCKSPEED *psGetDevClockSpeedOUT =
+	    (PVRSRV_BRIDGE_OUT_GETMAXCLOCKSPEED *) IMG_OFFSET_ADDR(psGetDevClockSpeedOUT_UI8, 0);
+
+	PVR_UNREFERENCED_PARAMETER(psGetDevClockSpeedIN);
+
+	psGetDevClockSpeedOUT->eError =
+	    PVRSRVGetMaxClockSpeedKM(psConnection, OSGetDevNode(psConnection),
+				     &psGetDevClockSpeedOUT->ui32ClockSpeed);
+
 	return 0;
 }
 
-static IMG_INT
+static size_t
 PVRSRVBridgeHWOpTimeout(IMG_UINT32 ui32DispatchTableEntry,
 			IMG_UINT8 * psHWOpTimeoutIN_UI8,
 			IMG_UINT8 * psHWOpTimeoutOUT_UI8, CONNECTION_DATA * psConnection)
@@ -437,13 +453,13 @@ PVRSRVBridgeHWOpTimeout(IMG_UINT32 ui32DispatchTableEntry,
 
 	psHWOpTimeoutOUT->eError = PVRSRVHWOpTimeoutKM(psConnection, OSGetDevNode(psConnection));
 
-	return 0;
+	return offsetof(PVRSRV_BRIDGE_OUT_HWOPTIMEOUT, eError);
 }
 
 static_assert(RGXFW_ALIGN_CHECKS_UM_MAX <= IMG_UINT32_MAX,
 	      "RGXFW_ALIGN_CHECKS_UM_MAX must not be larger than IMG_UINT32_MAX");
 
-static IMG_INT
+static size_t
 PVRSRVBridgeAlignmentCheck(IMG_UINT32 ui32DispatchTableEntry,
 			   IMG_UINT8 * psAlignmentCheckIN_UI8,
 			   IMG_UINT8 * psAlignmentCheckOUT_UI8, CONNECTION_DATA * psConnection)
@@ -541,10 +557,10 @@ AlignmentCheck_exit:
 	if (!bHaveEnoughSpace && pArrayArgsBuffer)
 		OSFreeMemNoStats(pArrayArgsBuffer);
 
-	return 0;
+	return offsetof(PVRSRV_BRIDGE_OUT_ALIGNMENTCHECK, eError);
 }
 
-static IMG_INT
+static size_t
 PVRSRVBridgeGetDeviceStatus(IMG_UINT32 ui32DispatchTableEntry,
 			    IMG_UINT8 * psGetDeviceStatusIN_UI8,
 			    IMG_UINT8 * psGetDeviceStatusOUT_UI8, CONNECTION_DATA * psConnection)
@@ -560,12 +576,12 @@ PVRSRVBridgeGetDeviceStatus(IMG_UINT32 ui32DispatchTableEntry,
 	    PVRSRVGetDeviceStatusKM(psConnection, OSGetDevNode(psConnection),
 				    &psGetDeviceStatusOUT->ui32DeviceSatus);
 
-	return 0;
+	return offsetof(PVRSRV_BRIDGE_OUT_GETDEVICESTATUS, eError);
 }
 
 static_assert(8 <= IMG_UINT32_MAX, "8 must not be larger than IMG_UINT32_MAX");
 
-static IMG_INT
+static size_t
 PVRSRVBridgeGetMultiCoreInfo(IMG_UINT32 ui32DispatchTableEntry,
 			     IMG_UINT8 * psGetMultiCoreInfoIN_UI8,
 			     IMG_UINT8 * psGetMultiCoreInfoOUT_UI8, CONNECTION_DATA * psConnection)
@@ -670,10 +686,10 @@ GetMultiCoreInfo_exit:
 	if (!bHaveEnoughSpace && pArrayArgsBuffer)
 		OSFreeMemNoStats(pArrayArgsBuffer);
 
-	return 0;
+	return offsetof(PVRSRV_BRIDGE_OUT_GETMULTICOREINFO, eError);
 }
 
-static IMG_INT
+static size_t
 PVRSRVBridgeEventObjectWaitTimeout(IMG_UINT32 ui32DispatchTableEntry,
 				   IMG_UINT8 * psEventObjectWaitTimeoutIN_UI8,
 				   IMG_UINT8 * psEventObjectWaitTimeoutOUT_UI8,
@@ -723,13 +739,13 @@ EventObjectWaitTimeout_exit:
 	/* Release now we have cleaned up look up handles. */
 	UnlockHandle(psConnection->psHandleBase);
 
-	return 0;
+	return offsetof(PVRSRV_BRIDGE_OUT_EVENTOBJECTWAITTIMEOUT, eError);
 }
 
 static_assert(PVRSRV_PROCESS_STAT_TYPE_COUNT <= IMG_UINT32_MAX,
 	      "PVRSRV_PROCESS_STAT_TYPE_COUNT must not be larger than IMG_UINT32_MAX");
 
-static IMG_INT
+static size_t
 PVRSRVBridgeFindProcessMemStats(IMG_UINT32 ui32DispatchTableEntry,
 				IMG_UINT8 * psFindProcessMemStatsIN_UI8,
 				IMG_UINT8 * psFindProcessMemStatsOUT_UI8,
@@ -843,7 +859,7 @@ FindProcessMemStats_exit:
 	if (!bHaveEnoughSpace && pArrayArgsBuffer)
 		OSFreeMemNoStats(pArrayArgsBuffer);
 
-	return 0;
+	return offsetof(PVRSRV_BRIDGE_OUT_FINDPROCESSMEMSTATS, eError);
 }
 
 static PVRSRV_ERROR _AcquireInfoPagepsPMRIntRelease(void *pvData)
@@ -853,7 +869,7 @@ static PVRSRV_ERROR _AcquireInfoPagepsPMRIntRelease(void *pvData)
 	return eError;
 }
 
-static IMG_INT
+static size_t
 PVRSRVBridgeAcquireInfoPage(IMG_UINT32 ui32DispatchTableEntry,
 			    IMG_UINT8 * psAcquireInfoPageIN_UI8,
 			    IMG_UINT8 * psAcquireInfoPageOUT_UI8, CONNECTION_DATA * psConnection)
@@ -902,10 +918,10 @@ AcquireInfoPage_exit:
 		}
 	}
 
-	return 0;
+	return offsetof(PVRSRV_BRIDGE_OUT_ACQUIREINFOPAGE, eError);
 }
 
-static IMG_INT
+static size_t
 PVRSRVBridgeReleaseInfoPage(IMG_UINT32 ui32DispatchTableEntry,
 			    IMG_UINT8 * psReleaseInfoPageIN_UI8,
 			    IMG_UINT8 * psReleaseInfoPageOUT_UI8, CONNECTION_DATA * psConnection)
@@ -937,10 +953,10 @@ PVRSRVBridgeReleaseInfoPage(IMG_UINT32 ui32DispatchTableEntry,
 
 ReleaseInfoPage_exit:
 
-	return 0;
+	return offsetof(PVRSRV_BRIDGE_OUT_RELEASEINFOPAGE, eError);
 }
 
-static IMG_INT
+static size_t
 PVRSRVBridgeGetSLCSize(IMG_UINT32 ui32DispatchTableEntry,
 		       IMG_UINT8 * psGetSLCSizeIN_UI8,
 		       IMG_UINT8 * psGetSLCSizeOUT_UI8, CONNECTION_DATA * psConnection)
@@ -956,10 +972,29 @@ PVRSRVBridgeGetSLCSize(IMG_UINT32 ui32DispatchTableEntry,
 	    PVRSRVGetSLCSizeKM(psConnection, OSGetDevNode(psConnection),
 			       &psGetSLCSizeOUT->ui32SLCSizeInBytes);
 
-	return 0;
+	return offsetof(PVRSRV_BRIDGE_OUT_GETSLCSIZE, eError);
 }
 
-static IMG_INT
+static size_t
+PVRSRVBridgeGetSocFreq(IMG_UINT32 ui32DispatchTableEntry,
+		       IMG_UINT8 * psGetSocFreqIN_UI8,
+		       IMG_UINT8 * psGetSocFreqOUT_UI8, CONNECTION_DATA * psConnection)
+{
+	PVRSRV_BRIDGE_IN_GETSOCFREQ *psGetSocFreqIN =
+	    (PVRSRV_BRIDGE_IN_GETSOCFREQ *) IMG_OFFSET_ADDR(psGetSocFreqIN_UI8, 0);
+	PVRSRV_BRIDGE_OUT_GETSOCFREQ *psGetSocFreqOUT =
+	    (PVRSRV_BRIDGE_OUT_GETSOCFREQ *) IMG_OFFSET_ADDR(psGetSocFreqOUT_UI8, 0);
+
+	PVR_UNREFERENCED_PARAMETER(psGetSocFreqIN);
+
+	psGetSocFreqOUT->eError =
+	    PVRSRVGetSocFreqKM(psConnection, OSGetDevNode(psConnection),
+			       &psGetSocFreqOUT->ui32SocFreq);
+
+	return offsetof(PVRSRV_BRIDGE_OUT_GETSOCFREQ, eError);
+}
+
+static size_t
 PVRSRVBridgeIsEmulator(IMG_UINT32 ui32DispatchTableEntry,
                        IMG_UINT8 * psIsEmulatorIN_UI8,
                        IMG_UINT8 * psIsEmulatorOUT_UI8,
@@ -979,10 +1014,10 @@ PVRSRVBridgeIsEmulator(IMG_UINT32 ui32DispatchTableEntry,
 	else
 		psIsEmulator->bEmulator = IMG_FALSE; // Assume silicon
 
-	return 0;
+	return offsetof(PVRSRV_BRIDGE_OUT_ISEMULATOR, eError);
 }
 
-static IMG_INT
+static size_t
 PVRSRVBridgeIsVirtualPlatform(IMG_UINT32 ui32DispatchTableEntry,
                               IMG_UINT8 * psIsVirtualPlatformIN_UI8,
                               IMG_UINT8 * psIsVirtualPlatformOUT_UI8,
@@ -1003,7 +1038,7 @@ PVRSRVBridgeIsVirtualPlatform(IMG_UINT32 ui32DispatchTableEntry,
 	else
 		psIsVirtualPlatform->bVirtualPlatform = IMG_FALSE; // Assume silicon
 
-	return 0;
+	return offsetof(PVRSRV_BRIDGE_OUT_ISVIRTUALPLATFORM, eError);
 }
 
 /* ***************************************************************************
@@ -1101,6 +1136,10 @@ PVRSRV_ERROR InitSRVCOREBridge(void)
 			      PVRSRVBridgeGetSLCSize, NULL, 0,
 			      sizeof(PVRSRV_BRIDGE_OUT_GETSLCSIZE));
 
+	SetDispatchTableEntry(PVRSRV_BRIDGE_SRVCORE, PVRSRV_BRIDGE_SRVCORE_GETSOCFREQ,
+			      PVRSRVBridgeGetSocFreq, NULL, 0,
+			      sizeof(PVRSRV_BRIDGE_OUT_GETSOCFREQ));
+
 	SetDispatchTableEntry(PVRSRV_BRIDGE_SRVCORE, PVRSRV_BRIDGE_SRVCORE_ISEMULATOR,
 			      PVRSRVBridgeIsEmulator, NULL, 0,
 			      sizeof(PVRSRV_BRIDGE_OUT_ISEMULATOR));
@@ -1108,6 +1147,10 @@ PVRSRV_ERROR InitSRVCOREBridge(void)
 	SetDispatchTableEntry(PVRSRV_BRIDGE_SRVCORE, PVRSRV_BRIDGE_SRVCORE_ISVIRTUALPLATFORM,
 			      PVRSRVBridgeIsVirtualPlatform, NULL, 0,
 			      sizeof(PVRSRV_BRIDGE_OUT_ISVIRTUALPLATFORM));
+
+	SetDispatchTableEntry(PVRSRV_BRIDGE_SRVCORE, PVRSRV_BRIDGE_SRVCORE_GETMAXCLOCKSPEED,
+			      PVRSRVBridgeGetMaxClockSpeed, NULL, 0,
+			      sizeof(PVRSRV_BRIDGE_OUT_GETMAXCLOCKSPEED));
 
 	return PVRSRV_OK;
 }
@@ -1157,8 +1200,12 @@ void DeinitSRVCOREBridge(void)
 
 	UnsetDispatchTableEntry(PVRSRV_BRIDGE_SRVCORE, PVRSRV_BRIDGE_SRVCORE_GETSLCSIZE);
 
+	UnsetDispatchTableEntry(PVRSRV_BRIDGE_SRVCORE, PVRSRV_BRIDGE_SRVCORE_GETSOCFREQ);
+
 	UnsetDispatchTableEntry(PVRSRV_BRIDGE_SRVCORE, PVRSRV_BRIDGE_SRVCORE_ISEMULATOR);
 
 	UnsetDispatchTableEntry(PVRSRV_BRIDGE_SRVCORE, PVRSRV_BRIDGE_SRVCORE_ISVIRTUALPLATFORM);
+
+	UnsetDispatchTableEntry(PVRSRV_BRIDGE_SRVCORE, PVRSRV_BRIDGE_SRVCORE_GETMAXCLOCKSPEED);
 
 }

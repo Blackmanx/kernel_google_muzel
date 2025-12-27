@@ -31,7 +31,7 @@
 
 
 /* IPC timeout */
-#define GPU_SECURE_TIMEOUT_MS 10000
+#define GPU_SECURE_TIMEOUT_MS 30000
 
 /* Whether to do START/STOP via TF-A (1) or Trusty (0) */
 #define GPU_SECURE_TF_A 1
@@ -657,6 +657,7 @@ PVRSRV_ERROR gpu_secure_send_firmware_image(IMG_HANDLE hSysData,
 	memset(&req, 0, sizeof(req));
 	req.base.command = GPU_SECURE_REQ_SEND_FIRMWARE_IMAGE;
 	req.use_tf_a = GPU_SECURE_TF_A;
+	req.host_page_shift = PAGE_SHIFT;
 
 	/* Prepare the firmware image first, at the start of the carveout */
 	err = gpu_secure_prepare_firmware_blob(pixel_dev, psFWParams->pvFirmware,

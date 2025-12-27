@@ -72,7 +72,9 @@ static void set_voltage(IMG_HANDLE hSysData, IMG_UINT32 ui32Volt)
 	PVR_UNREFERENCED_PARAMETER(hSysData);
 	PVR_UNREFERENCED_PARAMETER(ui32Volt);
 }
+#endif
 
+#if defined(SUPPORT_LINUX_DVFS) || defined(SUPPORT_PDVFS)
 static PVRSRV_ERROR register_dvfs(struct devfreq *psDevFreq)
 {
 	PVRSRV_ERROR err = PVRSRV_OK;
@@ -86,6 +88,15 @@ static PVRSRV_ERROR register_dvfs(struct devfreq *psDevFreq)
 static void unregister_dvfs(struct devfreq *psDevFreq)
 {
 	vote_manager_remove_devfreq(psDevFreq);
+}
+#endif
+
+#if defined(SUPPORT_LINUX_DVFS) || defined(SUPPORT_PDVFS)
+static IMG_UINT32 **get_fab_votes(IMG_HANDLE hSysData)
+{
+	struct pixel_gpu_device *pixel_dev = (struct pixel_gpu_device *)hSysData;
+
+	return pixel_dev->fab_votes;
 }
 #endif
 
@@ -105,7 +116,7 @@ static IMG_UINT64 read_soc_timer(IMG_HANDLE hSysData)
 int init_pixel_dvfs(struct pixel_gpu_device *pixel_dev)
 {
 	PVRSRV_ERROR ret          = PVRSRV_OK;
-#if defined(SUPPORT_LINUX_DVFS) || defined(SUPPORT_SOC_TIMER)
+#if defined(SUPPORT_LINUX_DVFS) || defined(SUPPORT_SOC_TIMER) || defined(SUPPORT_PDVFS)
 	PVRSRV_DEVICE_CONFIG *cfg = pixel_dev->dev_config;
 #endif
 
@@ -142,11 +153,14 @@ int init_pixel_dvfs(struct pixel_gpu_device *pixel_dev)
 	cfg->sDVFS.sDVFSGovernorCfg.ui32UpThreshold      = 90;
 	// Range size under which the utilisation can vary without triggering a DVFS transition
 	cfg->sDVFS.sDVFSGovernorCfg.ui32DownDifferential = 10;
-	cfg->sDVFS.sDVFSDeviceCfg.pfnDVFSRegister        = register_dvfs;
 #endif
+
+#if defined(SUPPORT_LINUX_DVFS) || defined(SUPPORT_PDVFS)
+	cfg->sDVFS.sDVFSDeviceCfg.pfnDVFSRegister        = register_dvfs;
 
 #if defined(CONFIG_DEVFREQ_THERMAL)
 	cfg->sDVFS.sDVFSDeviceCfg.psPowerOps             = &pixel_dev->gpu_power_ops;
+#endif
 #endif
 
 #if defined(SUPPORT_SOC_TIMER)
@@ -154,6 +168,8 @@ int init_pixel_dvfs(struct pixel_gpu_device *pixel_dev)
 #endif
 
 #if defined(SUPPORT_LINUX_DVFS) || defined(SUPPORT_PDVFS)
+	cfg->sDVFS.sDVFSDeviceCfg.pfnGetFabVotes         = get_fab_votes;
+
 	if (dvfs_helper_add_opps_to_device(pixel_dev->dev, pixel_dev->dev->of_node)) {
 		dev_err(pixel_dev->dev, "%s: Failed to add opps from helper", __func__);
 		ret = PVRSRV_ERROR_UNABLE_TO_RETRIEVE_INFO;
@@ -168,7 +184,7 @@ init_fail:
 
 void deinit_pixel_dvfs(struct pixel_gpu_device *pixel_dev)
 {
-#if defined(SUPPORT_LINUX_DVFS)
+#if defined(SUPPORT_LINUX_DVFS) || defined(SUPPORT_PDVFS)
 	PVRSRV_DEVICE_CONFIG *cfg = pixel_dev->dev_config;
 
 	cfg->sDVFS.sDVFSDeviceCfg.pfnDVFSUnregister = unregister_dvfs;

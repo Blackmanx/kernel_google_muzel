@@ -69,11 +69,11 @@ typedef struct PVRSRV_BRIDGE_IN_RGXCREATERAYCONTEXT_TAG
 {
 	IMG_UINT64 ui64RobustnessAddress;
 	IMG_HANDLE hPrivData;
-	IMG_BYTE *pui8sStaticRayContextState;
+	IMG_BYTE *pui8RayContextData;
 	IMG_INT32 i32Priority;
 	IMG_UINT32 ui32ContextFlags;
 	IMG_UINT32 ui32MaxDeadlineMS;
-	IMG_UINT32 ui32StaticRayContextStateSize;
+	IMG_UINT32 ui32RayContextDataSize;
 } __packed PVRSRV_BRIDGE_IN_RGXCREATERAYCONTEXT;
 
 /* Bridge out structure for RGXCreateRayContext */

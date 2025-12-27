@@ -225,6 +225,7 @@ typedef struct _PVRSRV_DEVICE_DEBUG_INFO_
 	DI_GROUP *psGroup;
 	DI_ENTRY *psDumpDebugEntry;
 #ifdef SUPPORT_RGX
+	DI_ENTRY *psUtilStatsEntry;
 	DI_ENTRY *psFWTraceEntry;
 #ifdef SUPPORT_FIRMWARE_GCOV
 	DI_ENTRY *psFWGCOVEntry;
@@ -235,7 +236,6 @@ typedef struct _PVRSRV_DEVICE_DEBUG_INFO_
 	IMG_UINT64 ui64RiscvDmi;
 #endif
 	DI_ENTRY *psDevMemEntry;
-	IMG_HANDLE hGpuUtilUserDebugFS;
 #endif /* SUPPORT_RGX */
 #ifdef SUPPORT_POWER_SAMPLING_VIA_DEBUGFS
 	DI_ENTRY *psPowerDataEntry;
@@ -652,9 +652,6 @@ typedef struct _PVRSRV_DEVICE_NODE_
 #if defined(PVRSRV_ANDROID_TRACE_GPU_WORK_PERIOD)
 	IMG_BOOL bGPUWorkPeriodFTraceEnabled;
 #endif
-#if defined(ANDROID)
-	ATOMIC_T                iFBCSurfaceCount;     /*< Android FBC surface counter */
-#endif
 #if defined(PVRSRV_MAX_REAL_TIME_CONTEXTS) && (PVRSRV_MAX_REAL_TIME_CONTEXTS > 1)
 	IMG_UINT32              *pui32RTContextCount;
 #endif
@@ -683,7 +680,6 @@ void PVRSRVDeviceSetState(PVRSRV_DEVICE_NODE *psDeviceNode, PVRSRV_DEVICE_STATE 
 	(((eStatus == PVRSRV_DEVICE_HEALTH_STATUS_DEAD)) ? \
 	 IMG_FALSE : IMG_TRUE)
 
-#if defined(SUPPORT_PMR_DEFERRED_FREE) || defined(SUPPORT_MMU_DEFERRED_FREE)
 /* Determines if a 32-bit `uiCurrent` counter advanced to or beyond
  * `uiRequired` value. The function takes into consideration that the
  * counter could have wrapped around. */
@@ -697,7 +693,6 @@ static INLINE IMG_BOOL PVRSRVHasCounter32Advanced(IMG_UINT32 uiCurrent,
 	    /* There can't be ~4 billion transactions pending, so consider wrapped */
 	    (((uiRequired - uiCurrent) > 0xF0000000UL) ? IMG_TRUE : IMG_FALSE);
 }
-#endif
 
 #endif /* DEVICE_H */
 

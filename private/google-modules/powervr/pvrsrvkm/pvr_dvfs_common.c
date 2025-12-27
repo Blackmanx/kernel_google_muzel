@@ -188,6 +188,43 @@ exit:
 
 	return err;
 }
+
+int FindOPPFreq(struct device *dev,
+                unsigned long *freq_table,
+                unsigned long freq,
+                unsigned int *level)
+{
+	struct dev_pm_opp *opp;
+	unsigned int i;
+	int count, err;
+
+	count = dev_pm_opp_get_opp_count(dev);
+	if (count <= 0)
+	{
+		dev_err(dev, "Couldn't fetch OPP count, %d\n", count);
+		return count;
+	}
+
+	for (i = 0; i < count; i++)
+	{
+		if (freq != freq_table[i])
+			continue;
+
+		opp = dev_pm_opp_find_freq_exact(dev, freq, true);
+		if (IS_ERR(opp))
+		{
+			err = PTR_ERR(opp);
+			dev_err(dev, "Couldn't find %dth frequency, %d\n", i, err);
+			return err;
+		}
+
+		dev_pm_opp_put(opp);
+		*level = i;
+		return 0;
+	}
+
+	return -ENODATA;
+}
 #endif
 
 /*************************************************************************/ /*!
@@ -216,7 +253,8 @@ PVRSRV_ERROR DVFSCopyOPPTable(PPVRSRV_DEVICE_NODE psDeviceNode,
 	struct pvr_opp_freq_table pvr_freq_table = {0};
 	unsigned long           min_freq = 0, max_freq = 0, min_volt = 0;
 	unsigned int            i, err;
-	unsigned long *freq_table;
+	unsigned long          *freq_table;
+	IMG_UINT32            **fab_votes = NULL;
 
 	if (!psDeviceNode || !psOPPInfo)
 	{
@@ -244,9 +282,15 @@ PVRSRV_ERROR DVFSCopyOPPTable(PPVRSRV_DEVICE_NODE psDeviceNode,
 	}
 
 
-	/* Loop over the OPP/frequency levels */
+	/* Loop over the OPP/frequency levels and append fabric votes */
+	if (psDeviceNode->psDevConfig->sDVFS.sDVFSDeviceCfg.pfnGetFabVotes)
+	{
+		fab_votes = psDeviceNode->psDevConfig->sDVFS.sDVFSDeviceCfg.pfnGetFabVotes(
+				psDeviceNode->psDevConfig->hSysData);
+	}
+
 	psOPPValue = &psOPPInfo->asOPPValues[0];
-	for (i=0; i<pvr_freq_table.num_levels; i++)
+	for (i = 0; i < pvr_freq_table.num_levels; i++)
 	{
 		psOPPValue->ui32Freq = freq_table[i];
 		opp = dev_pm_opp_find_freq_exact(psDev, freq_table[i], IMG_TRUE);
@@ -259,6 +303,16 @@ PVRSRV_ERROR DVFSCopyOPPTable(PPVRSRV_DEVICE_NODE psDeviceNode,
 		}
 		psOPPValue->ui32Volt = dev_pm_opp_get_voltage(opp);
 		psOPPValue->ui32Level = dev_pm_opp_get_level(opp);
+
+		if (fab_votes)
+		{
+			psOPPValue->ui32Vote_FABHBW =
+				fab_votes[pvr_freq_table.num_levels - i - 1][FAB_FABHBW_VOTE];
+			psOPPValue->ui32Vote_MEMSS =
+				fab_votes[pvr_freq_table.num_levels - i - 1][FAB_MEMSS_VOTE];
+			psOPPValue->ui32Vote_GMC =
+				fab_votes[pvr_freq_table.num_levels - i - 1][FAB_GMC_VOTE];
+		}
 		dev_pm_opp_put(opp);
 		psOPPValue++;
 	}

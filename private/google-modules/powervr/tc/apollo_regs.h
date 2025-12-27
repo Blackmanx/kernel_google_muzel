@@ -100,7 +100,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 /* RGX reg on base register 1 */
 #define SYS_RGX_REG_PCI_BASENUM		(1)
-#define SYS_RGX_REG_REGION_SIZE		(0x7FFFF)
+#define SYS_RGX_REG_REGION_SIZE		(0x3FFFFF)
 
 /* Device memory (including HP mapping) on base register 2 */
 #define SYS_DEV_MEM_PCI_BASENUM		(2)

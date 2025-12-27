@@ -1,5 +1,5 @@
 /*************************************************************************/ /*!
-@Title          RGX Core BVNC 27.8.254.2
+@Title          RGX Core BVNC 72.3.408.1039
 @Copyright      Copyright (c) Imagination Technologies Ltd. All Rights Reserved
 @License        Dual MIT/GPLv2
 
@@ -39,19 +39,19 @@ IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 */ /**************************************************************************/
 
-#ifndef RGXCORE_KM_27_8_254_2_H
-#define RGXCORE_KM_27_8_254_2_H
+#ifndef RGXCORE_KM_72_3_408_1039_H
+#define RGXCORE_KM_72_3_408_1039_H
 
-/* Automatically generated file (23/03/2022 09:02:26): Do not edit manually */
-/* CS: @5975910 */
+/* Automatically generated file (15/05/2024 09:10:32): Do not edit manually */
+/* CS: @6585528 */
 
 /******************************************************************************
- * BVNC = 27.8.254.2
+ * BVNC = 72.3.408.1039
  *****************************************************************************/
-#define RGX_BVNC_KM_B 27
-#define RGX_BVNC_KM_V 8
-#define RGX_BVNC_KM_N 254
-#define RGX_BVNC_KM_C 2
+#define RGX_BVNC_KM_B 72
+#define RGX_BVNC_KM_V 3
+#define RGX_BVNC_KM_N 408
+#define RGX_BVNC_KM_C 1039
 
 /******************************************************************************
  * Errata
@@ -64,7 +64,8 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  * Enhancements
  *****************************************************************************/
 #define HW_ERN_65104
+#define HW_ERN_69700
 
 
 
-#endif /* RGXCORE_KM_27_8_254_2_H */
+#endif /* RGXCORE_KM_72_3_408_1039_H */

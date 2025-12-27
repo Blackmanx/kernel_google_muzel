@@ -1,6 +1,8 @@
 /*************************************************************************/ /*!
-@Title          RGX Core BVNC 35.3.1632.23
+@File
+@Title          FPGA PCI header
 @Copyright      Copyright (c) Imagination Technologies Ltd. All Rights Reserved
+@Description    Defines FPGA PCI registers
 @License        Dual MIT/GPLv2
 
 The contents of this file are subject to the MIT license as set out below.
@@ -39,35 +41,29 @@ IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 */ /**************************************************************************/
 
-#ifndef RGXCORE_KM_35_3_1632_23_H
-#define RGXCORE_KM_35_3_1632_23_H
+/*
+ * Defines for FPGA System Bus Decode.
+ */
 
-/* Automatically generated file (31/03/2023 09:11:38): Do not edit manually */
-/* CS: @5906056 */
-
-/******************************************************************************
- * BVNC = 35.3.1632.23
- *****************************************************************************/
-#define RGX_BVNC_KM_B 35
-#define RGX_BVNC_KM_V 3
-#define RGX_BVNC_KM_N 1632
-#define RGX_BVNC_KM_C 23
-
-/******************************************************************************
- * Errata
- *****************************************************************************/
-
-#define FIX_HW_BRN_71960
-#define FIX_HW_BRN_72144
+#define FPGA_RGX_TB_REG_PCI_BASENUM    2
+#define FPGA_RGX_TB_REG_SIZE           (16 * 1024)
+#define FPGA_RGX_TB_REG_WRAPPER_OFFSET 0x1000000
+#define FPGA_RGX_TB_REG_WRAPPER_SIZE   0x8000
 
 
+/*
+ * Interface to the Reset function
+ */
+PVRSRV_ERROR FPGA_Reset(struct resource *registers, IMG_BOOL bFullReset);
 
-/******************************************************************************
- * Enhancements
- *****************************************************************************/
-#define HW_ERN_65104
-#define HW_ERN_69700
+#if 1
+#define DevReset(psSysData, flags)  FPGA_Reset((psSysData)->registers, flags)
+#else
+#define DevReset(psSysData, flags)  PVRSRV_OK
+#endif
 
+PVRSRV_ERROR FPGA_SysDebugInfo(struct resource *registers,
+                               DUMPDEBUG_PRINTF_FUNC *pfnDumpDebugPrintf,
+                               void *pvDumpDebugFile);
 
-
-#endif /* RGXCORE_KM_35_3_1632_23_H */
+IMG_UINT64 FPGA_SystemTimerRead(struct resource *registers);

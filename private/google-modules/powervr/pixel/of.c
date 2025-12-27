@@ -105,21 +105,113 @@ int fill_carveout_resource(struct resource *carveout)
 }
 #endif
 
-int init_pixel_of(struct pixel_gpu_device *pixel_dev)
+#if defined(SUPPORT_LINUX_DVFS) || defined(SUPPORT_PDVFS)
+static int init_gpu_pf_state_nodes(struct pixel_gpu_device *pixel_dev)
 {
 	struct device *dev = pixel_dev->dev;
-	struct pixel_of_properties *of_properties = &pixel_dev->of_properties;
 	struct pixel_of_pdevs *of_pdevs = &pixel_dev->of_pdevs;
-	RGX_TIMING_INFORMATION *timing_info =
-		((RGX_DATA *)pixel_dev->dev_config->hDevData)->psRGXTimingInfo;
 	struct device_node *gpu_pf_state_node;
+	u32 *fab_votes_staging = NULL;
+	int i;
 
-	// Setup prerequisite data
 	gpu_pf_state_node = of_parse_phandle(dev->of_node, "clocks", 0);
 	if (!gpu_pf_state_node) {
 		dev_err(dev, "failed to find clocks node");
 		goto exit_error;
 	}
+
+	of_pdevs->gpu_pf_state_pdev = of_find_device_by_node(gpu_pf_state_node);
+	if (!of_pdevs->gpu_pf_state_pdev) {
+		dev_err(dev, "failed to find gpu_pf_state device");
+		goto exit_error;
+	}
+	of_node_put(gpu_pf_state_node);
+	gpu_pf_state_node = NULL;
+
+	/* Read fabric votes from device tree */
+	struct device *pf_state_dev = &of_pdevs->gpu_pf_state_pdev->dev;
+	int count;
+	int opp_count;
+
+	count = of_property_count_elems_of_size(pf_state_dev->of_node,
+		"pf_state_rates", sizeof(u32));
+	if (count < 0) {
+		dev_err(dev, "pf_state_rates not found in device tree\n");
+		goto exit_error;
+	}
+
+	if (count % FAB_TOTAL_VOTES != 0) {
+		dev_err(dev, "Incorrect number of fabric votes in device tree\n");
+		goto exit_error;
+	}
+
+	opp_count = count / FAB_TOTAL_VOTES;
+
+	fab_votes_staging = kcalloc(count, sizeof(u32), GFP_KERNEL);
+	if (!fab_votes_staging)
+		goto exit_error;
+
+	if (of_property_read_u32_array(pf_state_dev->of_node,
+		"pf_state_rates", fab_votes_staging, count)) {
+		dev_err(dev, "failed to read pf_state_rates\n");
+		goto exit_error_free;
+	}
+
+	pixel_dev->fab_votes = kcalloc(opp_count, sizeof(u32 *), GFP_KERNEL);
+	if (!pixel_dev->fab_votes)
+		goto exit_error_free;
+
+	for (i = 0; i < opp_count; i++) {
+		u32 fabhbw_vote = fab_votes_staging[i * FAB_TOTAL_VOTES + FAB_FABHBW_VOTE];
+		u32 memss_vote = fab_votes_staging[i * FAB_TOTAL_VOTES + FAB_MEMSS_VOTE];
+		u32 gmc_vote = fab_votes_staging[i * FAB_TOTAL_VOTES + FAB_GMC_VOTE];
+
+		if (fabhbw_vote > 0xf || memss_vote > 0xf || gmc_vote > 0xf) {
+			dev_err(dev, "Fabric vote exceeds protocol limit (0xf) at OPP %d: FABHBW=%u, MEMSS=%u, GMC=%u\n",
+					i, fabhbw_vote, memss_vote, gmc_vote);
+			goto exit_error_free_2d;
+		}
+
+		pixel_dev->fab_votes[i] = kcalloc(FAB_TOTAL_VOTES, sizeof(u32), GFP_KERNEL);
+		if (!pixel_dev->fab_votes[i])
+			goto exit_error_free_2d;
+
+		pixel_dev->fab_votes[i][FAB_FABHBW_VOTE] = fabhbw_vote;
+		pixel_dev->fab_votes[i][FAB_MEMSS_VOTE] = memss_vote;
+		pixel_dev->fab_votes[i][FAB_GMC_VOTE] = gmc_vote;
+	}
+
+	pixel_dev->fab_votes_opp_count = opp_count;
+
+	kfree(fab_votes_staging);
+	return 0;
+
+exit_error_free_2d:
+	while (--i >= 0)
+		kfree(pixel_dev->fab_votes[i]);
+	kfree(pixel_dev->fab_votes);
+exit_error_free:
+	kfree(fab_votes_staging);
+exit_error:
+	if (gpu_pf_state_node)
+		of_node_put(gpu_pf_state_node);
+	return -1;
+}
+#endif
+
+int init_pixel_of(struct pixel_gpu_device *pixel_dev)
+{
+	struct device *dev = pixel_dev->dev;
+	struct pixel_of_properties *of_properties = &pixel_dev->of_properties;
+	RGX_TIMING_INFORMATION *timing_info =
+		((RGX_DATA *)pixel_dev->dev_config->hDevData)->psRGXTimingInfo;
+
+#if defined(SUPPORT_LINUX_DVFS) || defined(SUPPORT_PDVFS)
+	if (init_gpu_pf_state_nodes(pixel_dev)) {
+		dev_err(dev, "failed to init gpu_pf_state node");
+		goto exit_error;
+	}
+#endif
 
 	of_phandles.gpu_core_logic_pd_node =
 		of_parse_phandle(dev->of_node, "power-domains",
@@ -129,6 +221,8 @@ int init_pixel_of(struct pixel_gpu_device *pixel_dev)
 		goto exit_error;
 	}
 
+
+
 #if defined(SUPPORT_TRUSTED_DEVICE)
 	of_phandles.gpu_memory_region_node = of_parse_phandle(dev->of_node, "memory-region", 0);
 	if (!of_phandles.gpu_memory_region_node) {
@@ -136,14 +230,6 @@ int init_pixel_of(struct pixel_gpu_device *pixel_dev)
 		goto exit_error;
 	}
 #endif
-
-	of_pdevs->gpu_pf_state_pdev = of_find_device_by_node(gpu_pf_state_node);
-	if (!of_pdevs->gpu_pf_state_pdev) {
-		dev_err(dev, "failed to find gpu_pf_state device");
-		goto exit_error;
-	}
-	of_node_put(gpu_pf_state_node);
-	gpu_pf_state_node = NULL;
 
 	// Obtain OF config
 	of_properties->spu_gating =
@@ -221,17 +307,26 @@ int init_pixel_of(struct pixel_gpu_device *pixel_dev)
 	dev_dbg(dev, "Autosuspend Latency: %u", of_properties->autosuspend_latency);
 
 	return 0;
+
 exit_error:
-	if (gpu_pf_state_node)
-		of_node_put(gpu_pf_state_node);
 	deinit_pixel_of(pixel_dev);
 	return -1;
 }
 
 void deinit_pixel_of(struct pixel_gpu_device *pixel_dev)
 {
+#if defined(SUPPORT_LINUX_DVFS) || defined(SUPPORT_PDVFS)
+	int i;
+
+	if (pixel_dev->fab_votes) {
+		for (i = 0; i < pixel_dev->fab_votes_opp_count; i++)
+			kfree(pixel_dev->fab_votes[i]);
+		kfree(pixel_dev->fab_votes);
+	}
+
 	if (pixel_dev->of_pdevs.gpu_pf_state_pdev)
 		put_device(&pixel_dev->of_pdevs.gpu_pf_state_pdev->dev);
+#endif
 #if defined(SUPPORT_TRUSTED_DEVICE)
 	if (of_phandles.gpu_memory_region_node)
 		of_node_put(of_phandles.gpu_memory_region_node);

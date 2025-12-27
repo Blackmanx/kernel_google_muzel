@@ -164,8 +164,17 @@ PVRSRV_ERROR LinuxEventObjectListDestroy(IMG_HANDLE hEventObjectList)
 	{
 		if (!list_empty(&psEvenObjectList->sList))
 		{
-			 PVR_DPF((PVR_DBG_ERROR, "LinuxEventObjectListDestroy: Event List is not empty"));
-			 return PVRSRV_ERROR_UNABLE_TO_DESTROY_EVENT;
+			struct list_head *list;
+
+			PVR_DPF((PVR_DBG_ERROR, "%s: Event List is not empty", __func__));
+			list_for_each(list, &psEvenObjectList->sList)
+			{
+				PVRSRV_LINUX_EVENT_OBJECT *psEvent;
+
+				psEvent = list_entry(list, PVRSRV_LINUX_EVENT_OBJECT, sList);
+				PVR_DPF((PVR_DBG_ERROR, "%s: Event Object @ " IMG_KM_PTR_FMTSPEC , __func__, psEvent));
+			}
+			return PVRSRV_ERROR_UNABLE_TO_DESTROY_EVENT;
 		}
 		OSFreeMem(psEvenObjectList);
 		/*not nulling pointer, copy on stack*/
@@ -329,7 +338,7 @@ void LinuxEventObjectDumpDebugInfo(IMG_HANDLE hOSEventObject)
 	PVRSRV_LINUX_EVENT_OBJECT *psLinuxEventObject = (PVRSRV_LINUX_EVENT_OBJECT *)hOSEventObject;
 
 	OSLockAcquire(psLinuxEventObject->hLock);
-	PVR_LOG(("%s: EvObj(%p) schedule: Avoided(%u) Called(%u) ReturnedImmediately(%u) SleptFully(%u) SleptPartially(%u)",
+	PVR_LOG(("%s: EvObj("IMG_KM_PTR_FMTSPEC ") schedule: Avoided(%u) Called(%u) ReturnedImmediately(%u) SleptFully(%u) SleptPartially(%u)",
 	         __func__, psLinuxEventObject, psLinuxEventObject->ui32ScheduleAvoided,
 			 psLinuxEventObject->ui32ScheduleCalled, psLinuxEventObject->ui32ScheduleReturnedImmediately,
 			 psLinuxEventObject->ui32ScheduleSleptFully, psLinuxEventObject->ui32ScheduleSleptPartially));

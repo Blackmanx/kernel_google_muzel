@@ -160,11 +160,13 @@ PVRSRV_ERROR RGXInitDeviceInfo(PVRSRV_DEVICE_NODE *psDeviceNode)
 	if (RGX_IS_FEATURE_SUPPORTED(psDevInfo, GPU_MULTICORE_SUPPORT))
 	{
 		IMG_UINT32 ui32MulticoreInfo;
+#if !defined(RGX_FEATURE_ERYX_TOP_INFRASTRUCTURE)
 		IMG_UINT32 ui32PrimaryCoreIds;
-		IMG_UINT32 ui32PrimaryId;
-		IMG_UINT32 ui32NumCores;
 		IMG_UINT32 i;
 		IMG_UINT32 ui32CoresFoundInDomain = 0;
+#endif
+		IMG_UINT32 ui32PrimaryId;
+		IMG_UINT32 ui32NumCores;
 
 #if defined(RGX_HOST_SECURE_REGBANK_OFFSET) && defined(XPU_MAX_REGBANKS_ADDR_WIDTH)
 		IMG_UINT32 ui32MulticoreRegBankOffset = (1 << RGX_GET_FEATURE_VALUE(psDevInfo, XPU_MAX_REGBANKS_ADDR_WIDTH));
@@ -223,8 +225,13 @@ PVRSRV_ERROR RGXInitDeviceInfo(PVRSRV_DEVICE_NODE *psDeviceNode)
 		ui32NumCores = RGX_MULTICORE_MAX_NOHW_CORES;
 		ui32MulticoreInfo = 0;  /* primary id 0 with 7 secondaries */
 #endif
+
+#if defined(RGX_FEATURE_ERYX_TOP_INFRASTRUCTURE)
+		ui32PrimaryId = 0;
+#else
 		/* ID for this primary is in this register */
 		ui32PrimaryId = (ui32MulticoreInfo & ~RGX_CR_MULTICORE_ID_CLRMSK) >> RGX_CR_MULTICORE_ID_SHIFT;
+#endif
 
 		/* allocate storage for capabilities */
 		psDevInfo->pui64MultiCoreCapabilities = OSAllocMem(ui32NumCores * sizeof(psDevInfo->pui64MultiCoreCapabilities[0]));
@@ -235,8 +242,10 @@ PVRSRV_ERROR RGXInitDeviceInfo(PVRSRV_DEVICE_NODE *psDeviceNode)
 			return PVRSRV_ERROR_OUT_OF_MEMORY;
 		}
 
+#if !defined(RGX_FEATURE_ERYX_TOP_INFRASTRUCTURE)
 		ui32PrimaryCoreIds = (ui32MulticoreInfo & ~RGX_CR_MULTICORE_PRIMARY_CORE_ID_CLRMSK)
 		                                        >> RGX_CR_MULTICORE_PRIMARY_CORE_ID_SHIFT;
+#endif
 
 		psDevInfo->ui32MultiCorePrimaryId = ui32PrimaryId;
 		psDevInfo->ui32MultiCoreNumCores = ui32NumCores;
@@ -245,6 +254,8 @@ PVRSRV_ERROR RGXInitDeviceInfo(PVRSRV_DEVICE_NODE *psDeviceNode)
 		PDUMPCOMMENT(psDeviceNode,
 		             "RGX Multicore domain has %d cores with primary id %u\n",
 		             ui32NumCores, ui32PrimaryId);
+
+#if !defined(RGX_FEATURE_ERYX_TOP_INFRASTRUCTURE)
 		for (i = 0; i < RGX_MULTICORE_MAX_NOHW_CORES; i++)
 		{
 			if ((ui32PrimaryCoreIds & 0x7) == ui32PrimaryId)
@@ -272,6 +283,7 @@ PVRSRV_ERROR RGXInitDeviceInfo(PVRSRV_DEVICE_NODE *psDeviceNode)
 		}
 
 		PVR_ASSERT(ui32CoresFoundInDomain == ui32NumCores);
+#endif
 
 		/* Register callback to return info about multicore setup to client bridge */
 		psDeviceNode->pfnGetMultiCoreInfo = RGXGetMultiCoreInfo;

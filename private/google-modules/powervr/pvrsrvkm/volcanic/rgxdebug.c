@@ -479,6 +479,7 @@ static void _RGXDumpRGXMMUFaultStatus(DUMPDEBUG_PRINTF_FUNC *pfnDumpDebugPrintf,
 		IMG_CHAR *pszRequester = NULL;
 		const IMG_PCHAR pszMetaOrRiscv = _isMetaOrRiscv(psDevInfo);
 
+#if !defined(RGX_FEATURE_ERYX_TOP_INFRASTRUCTURE)
 		if (RGX_IS_FEATURE_SUPPORTED(psDevInfo, ALBIORIX_TOP_INFRASTRUCTURE))
 		{
 			ui32BIFModule = (aui64MMUStatus[1] & ~RGX_CR_MMU_FAULT_STATUS2__AXT_INFRA__BIF_ID_CLRMSK) >>
@@ -487,6 +488,7 @@ static void _RGXDumpRGXMMUFaultStatus(DUMPDEBUG_PRINTF_FUNC *pfnDumpDebugPrintf,
 			bFBMFault     = (aui64MMUStatus[1] & RGX_CR_MMU_FAULT_STATUS2__AXT_INFRA__FBM_FAULT_EN) != 0;
 		}
 		else
+#endif
 		{
 			ui32BIFModule = (aui64MMUStatus[1] & ~RGX_CR_MMU_FAULT_STATUS2_BIF_ID_CLRMSK) >>
 										RGX_CR_MMU_FAULT_STATUS2_BIF_ID_SHIFT;
@@ -1130,7 +1132,7 @@ static void _RGXDumpFWHWRInfo(DUMPDEBUG_PRINTF_FUNC *pfnDumpDebugPrintf,
 }
 
 
-#if !defined(NO_HARDWARE)
+#if !defined(NO_HARDWARE) && !defined(RGX_FEATURE_ERYX_TOP_INFRASTRUCTURE)
 /*!
 *******************************************************************************
 
@@ -1249,6 +1251,7 @@ void RGXDumpRGXDebugSummary(DUMPDEBUG_PRINTF_FUNC *pfnDumpDebugPrintf,
 			_RGXDumpRGXMMUFaultStatus(pfnDumpDebugPrintf, pvDumpDebugFile, psDevInfo, &aui64RegValMMUStatus[0], pszMetaOrRiscv, DD_SUMMARY_INDENT);
 		}
 
+#if !defined(RGX_FEATURE_ERYX_TOP_INFRASTRUCTURE)
 		if (_CheckForPendingPage(psDevInfo))
 		{
 			IMG_UINT32 ui32CatBase;
@@ -1310,6 +1313,7 @@ void RGXDumpRGXDebugSummary(DUMPDEBUG_PRINTF_FUNC *pfnDumpDebugPrintf,
 				RGXDumpFaultAddressHostView(&sFaultData, pfnDumpDebugPrintf, pvDumpDebugFile, DD_SUMMARY_INDENT);
 			}
 		}
+#endif
 	}
 #endif /* NO_HARDWARE */
 
@@ -1398,6 +1402,7 @@ void RGXDumpRGXDebugSummary(DUMPDEBUG_PRINTF_FUNC *pfnDumpDebugPrintf,
 		                  psDevInfo->ui32ActivePMReqNonIdle,
 		                  psDevInfo->ui32ActivePMReqTotal,
 		                  psRuntimeCfg->ui32ActivePMLatencyms);
+		PVR_DUMPDEBUG_LOG("RGX FW Forced Idle Timeout Count: %d", psDevInfo->ui32FWNonIdleTimeoutCount);
 
 		ui32NumClockSpeedChanges = (IMG_UINT32) OSAtomicRead(&psDevInfo->psDeviceNode->iNumClockSpeedChanges);
 		RGXGetTimeCorrData(psDevInfo->psDeviceNode, asTimeCorrs, ARRAY_SIZE(asTimeCorrs));
@@ -1486,6 +1491,7 @@ void RGXDumpRGXDebugSummary(DUMPDEBUG_PRINTF_FUNC *pfnDumpDebugPrintf,
 		if (bDriverIsolationEnabled)
 		{
 			PVR_DUMPDEBUG_LOG("RGX Hard Context Switch deadline: %u ms", psDevInfo->psRGXFWIfRuntimeCfg->ui32HCSDeadlineMS);
+			PVR_DUMPDEBUG_LOG("Safety isolation group reset: %s", psDevInfo->psRGXFWIfRuntimeCfg->bSafetyIsolationGroupEnabled ? "Enabled" : "Disabled");
 		}
 
 		_RGXDumpFWAssert(pfnDumpDebugPrintf, pvDumpDebugFile, psRGXFWIfTraceBufCtl);
@@ -1543,6 +1549,14 @@ PVRSRV_ERROR RGXDumpRISCVState(DUMPDEBUG_PRINTF_FUNC *pfnDumpDebugPrintf,
 	PVRSRV_ERROR eError;
 
 	/* Limit dump to what is currently being used */
+#if defined(RGX_FEATURE_ERYX_TOP_INFRASTRUCTURE)
+	DDLOGUNCHECKED64(FWCORE_ADDR_REMAP_CONFIG4);
+	DDLOGUNCHECKED64(FWCORE_ADDR_REMAP_CONFIG5);
+	DDLOGUNCHECKED64(FWCORE_ADDR_REMAP_CONFIG6);
+	DDLOGUNCHECKED64(FWCORE_ADDR_REMAP_CONFIG12);
+	DDLOGUNCHECKED64(FWCORE_ADDR_REMAP_CONFIG13);
+	DDLOGUNCHECKED64(FWCORE_ADDR_REMAP_CONFIG14);
+#else
 #if defined(RGX_FEATURE_HOST_SECURITY_VERSION_MAX_VALUE_IDX)
 	if (RGX_GET_FEATURE_VALUE(psDevInfo, HOST_SECURITY_VERSION) >= 4)
 	{
@@ -1563,6 +1577,7 @@ PVRSRV_ERROR RGXDumpRISCVState(DUMPDEBUG_PRINTF_FUNC *pfnDumpDebugPrintf,
 		DDLOG64(FWCORE_ADDR_REMAP_CONFIG13);
 		DDLOG64(FWCORE_ADDR_REMAP_CONFIG14);
 	}
+#endif
 
 	PVR_DUMPDEBUG_LOG("---- [ RISC-V internal state ] ----");
 
@@ -1626,8 +1641,10 @@ void RGXDumpMulticoreRegisters(DUMPDEBUG_PRINTF_FUNC *pfnDumpDebugPrintf,
 	void __iomem *pvRegsBaseKM = psDevInfo->pvRegsBaseKM;
 
 	DDLOG64(MULTICORE);
-	DDLOG32(MULTICORE_SYSTEM);
 	DDLOG32(MULTICORE_DOMAIN);
+
+#if !defined(SUPPORT_UDM)
+	DDLOG32(MULTICORE_SYSTEM);
 
 #if !defined(RGX_CR_MULTICORE_AXI)
 #define RGX_CR_MULTICORE_AXI                              (0x2508U)
@@ -1635,9 +1652,11 @@ void RGXDumpMulticoreRegisters(DUMPDEBUG_PRINTF_FUNC *pfnDumpDebugPrintf,
 #endif
 	DDLOG32(MULTICORE_AXI);
 	DDLOG32(MULTICORE_AXI_ERROR);
+
 	DDLOG32(MULTICORE_TDM_CTRL_COMMON);
 	DDLOG32(MULTICORE_FRAGMENT_CTRL_COMMON);
 	DDLOG32(MULTICORE_COMPUTE_CTRL_COMMON);
+#endif
 }
 
 void RGXDumpClkRegisters(DUMPDEBUG_PRINTF_FUNC *pfnDumpDebugPrintf,
@@ -1658,7 +1677,9 @@ void RGXDumpMMURegisters(DUMPDEBUG_PRINTF_FUNC *pfnDumpDebugPrintf,
 								 void *pvDumpDebugFile,
 								 PVRSRV_RGXDEV_INFO *psDevInfo)
 {
+#if !defined(RGX_FEATURE_ERYX_TOP_INFRASTRUCTURE)
 	RGX_LAYER_PARAMS sParams = {.psDevInfo = psDevInfo};
+#endif
 	void __iomem *pvRegsBaseKM = psDevInfo->pvRegsBaseKM;
 
 	/* BRN72144 prevents reading RGX_CR_MMU_FAULT_STATUS1/2 while the FW is running... */
@@ -1676,7 +1697,9 @@ void RGXDumpMMURegisters(DUMPDEBUG_PRINTF_FUNC *pfnDumpDebugPrintf,
 	DDLOG64(SLC_STATUS1);
 	DDLOG64(SLC_STATUS2);
 	DDLOG64(SLC_STATUS3);
+#if !defined(RGX_FEATURE_ERYX_TOP_INFRASTRUCTURE)
 	DDLOG64(SLC_STATUS_DEBUG);
+#endif
 	DDLOG64(MMU_STATUS);
 	DDLOG32(BIF_PFS);
 	DDLOG32(BIF_TEXAS0_PFS);
@@ -1688,6 +1711,7 @@ void RGXDumpMMURegisters(DUMPDEBUG_PRINTF_FUNC *pfnDumpDebugPrintf,
 	DDLOG32(FBCDC_STATUS);
 	DDLOG32(FBCDC_SIGNATURE_STATUS);
 
+#if !defined(RGX_FEATURE_ERYX_TOP_INFRASTRUCTURE)
 	if (RGX_IS_FEATURE_VALUE_SUPPORTED(psDevInfo, POWER_ISLAND_VERSION) &&
 	    RGX_DEVICE_GET_FEATURE_VALUE(&sParams, POWER_ISLAND_VERSION) < 2)
 	{
@@ -1701,7 +1725,9 @@ void RGXDumpMMURegisters(DUMPDEBUG_PRINTF_FUNC *pfnDumpDebugPrintf,
 		DDLOG64(CONTEXT_MAPPING3);
 		DDLOG64(CONTEXT_MAPPING4);
 	}
+#endif
 
+#if defined(RGX_FEATURE_SAFETY_SELF_TEST_BIT_MASK)
 	if (RGX_IS_FEATURE_SUPPORTED(psDevInfo, SAFETY_SELF_TEST))
 	{
 		DDLOG32(FAULT_FW_STATUS);
@@ -1712,6 +1738,7 @@ void RGXDumpMMURegisters(DUMPDEBUG_PRINTF_FUNC *pfnDumpDebugPrintf,
 		DDLOG64(FAULT_MERCER_REDUCER_DETECT_STATUS);
 		DDLOG64(FAULT_USC_REDUCER_DETECT_STATUS);
 	}
+#endif
 }
 
 void RGXDumpDMRegisters(DUMPDEBUG_PRINTF_FUNC *pfnDumpDebugPrintf,
@@ -1720,6 +1747,7 @@ void RGXDumpDMRegisters(DUMPDEBUG_PRINTF_FUNC *pfnDumpDebugPrintf,
 {
 	void __iomem *pvRegsBaseKM = psDevInfo->pvRegsBaseKM;
 
+#if !defined(RGX_FEATURE_ERYX_TOP_INFRASTRUCTURE)
 	DDLOG32(PERF_PHASE_2D);
 	DDLOG32(PERF_CYCLE_2D_TOTAL);
 	DDLOG32(PERF_PHASE_GEOM);
@@ -1730,11 +1758,14 @@ void RGXDumpDMRegisters(DUMPDEBUG_PRINTF_FUNC *pfnDumpDebugPrintf,
 	DDLOG32(PERF_CYCLE_GEOM_AND_FRAG_TOTAL);
 	DDLOG32(PERF_PHASE_COMP);
 	DDLOG32(PERF_CYCLE_COMP_TOTAL);
-	DDLOG32(PM_PARTIAL_RENDER_ENABLE);
 
 	DDLOG32(ISP_RENDER);
 	DDLOG32(ISP_CTL);
+#endif
 
+	DDLOG32(PM_PARTIAL_RENDER_ENABLE);
+
+#if !defined(SUPPORT_UDM)
 	DDLOG32(CDM_CONTEXT_STORE_STATUS__CDM_CSF_LT5);
 	DDLOG64(CDM_CONTEXT_PDS0);
 	DDLOG64(CDM_CONTEXT_PDS1);
@@ -1742,6 +1773,7 @@ void RGXDumpDMRegisters(DUMPDEBUG_PRINTF_FUNC *pfnDumpDebugPrintf,
 	DDLOG64(CDM_TERMINATE_PDS1);
 	DDLOG64(CDM_CONTEXT_LOAD_PDS0);
 	DDLOG64(CDM_CONTEXT_LOAD_PDS1);
+#endif
 }
 
 void RGXDumpSLCRegisters(DUMPDEBUG_PRINTF_FUNC *pfnDumpDebugPrintf,

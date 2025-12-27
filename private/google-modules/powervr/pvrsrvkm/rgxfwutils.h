@@ -1253,6 +1253,13 @@ PVRSRV_ERROR
 RGXFWSetVzConnectionCooldownPeriod(PVRSRV_RGXDEV_INFO *psDevInfo,
 				   IMG_UINT32 ui32VzConnectionCooldownPeriodInSec);
 
+#if defined(PVR_AUTOVZ_WDG_PERIOD_MS)
+/* The Firmware checks the watchdog tokens every 'PVR_AUTOVZ_WDG_PERIOD_MS'
+ * milliseconds. The driver should handle the watchdog at least 3 times as
+ * often to ensure watchdog is handled despite the occasional drift */
+#define PVR_AUTOVZ_WDG_KICK_PERIOD_MS (PVR_AUTOVZ_WDG_PERIOD_MS / 3)
+#endif
+
 #if defined(SUPPORT_AUTOVZ_HW_REGS) && !defined(SUPPORT_AUTOVZ)
 #error "VZ build configuration error: use of OS scratch registers supported only in AutoVz drivers."
 #endif

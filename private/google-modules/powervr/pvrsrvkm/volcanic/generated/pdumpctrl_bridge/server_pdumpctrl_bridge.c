@@ -53,9 +53,6 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "pvr_debug.h"
 #include "connection_server.h"
 #include "pvr_bridge.h"
-#if defined(SUPPORT_RGX)
-#include "rgx_bridge.h"
-#endif
 #include "srvcore.h"
 #include "handle.h"
 
@@ -67,7 +64,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  * Server-side bridge entry points
  */
 
-static IMG_INT
+static size_t
 PVRSRVBridgePVRSRVPDumpGetState(IMG_UINT32 ui32DispatchTableEntry,
 				IMG_UINT8 * psPVRSRVPDumpGetStateIN_UI8,
 				IMG_UINT8 * psPVRSRVPDumpGetStateOUT_UI8,
@@ -85,10 +82,10 @@ PVRSRVBridgePVRSRVPDumpGetState(IMG_UINT32 ui32DispatchTableEntry,
 
 	psPVRSRVPDumpGetStateOUT->eError = PDumpGetStateKM(&psPVRSRVPDumpGetStateOUT->ui64State);
 
-	return 0;
+	return offsetof(PVRSRV_BRIDGE_OUT_PVRSRVPDUMPGETSTATE, eError);
 }
 
-static IMG_INT
+static size_t
 PVRSRVBridgePVRSRVPDumpGetFrame(IMG_UINT32 ui32DispatchTableEntry,
 				IMG_UINT8 * psPVRSRVPDumpGetFrameIN_UI8,
 				IMG_UINT8 * psPVRSRVPDumpGetFrameOUT_UI8,
@@ -107,10 +104,10 @@ PVRSRVBridgePVRSRVPDumpGetFrame(IMG_UINT32 ui32DispatchTableEntry,
 	    PDumpGetFrameKM(psConnection, OSGetDevNode(psConnection),
 			    &psPVRSRVPDumpGetFrameOUT->ui32Frame);
 
-	return 0;
+	return offsetof(PVRSRV_BRIDGE_OUT_PVRSRVPDUMPGETFRAME, eError);
 }
 
-static IMG_INT
+static size_t
 PVRSRVBridgePVRSRVPDumpSetDefaultCaptureParams(IMG_UINT32 ui32DispatchTableEntry,
 					       IMG_UINT8 *
 					       psPVRSRVPDumpSetDefaultCaptureParamsIN_UI8,
@@ -138,10 +135,10 @@ PVRSRVBridgePVRSRVPDumpSetDefaultCaptureParams(IMG_UINT32 ui32DispatchTableEntry
 					   psPVRSRVPDumpSetDefaultCaptureParamsIN->
 					   ui32AutoTermTimeout);
 
-	return 0;
+	return offsetof(PVRSRV_BRIDGE_OUT_PVRSRVPDUMPSETDEFAULTCAPTUREPARAMS, eError);
 }
 
-static IMG_INT
+static size_t
 PVRSRVBridgePVRSRVPDumpIsLastCaptureFrame(IMG_UINT32 ui32DispatchTableEntry,
 					  IMG_UINT8 * psPVRSRVPDumpIsLastCaptureFrameIN_UI8,
 					  IMG_UINT8 * psPVRSRVPDumpIsLastCaptureFrameOUT_UI8,
@@ -160,10 +157,10 @@ PVRSRVBridgePVRSRVPDumpIsLastCaptureFrame(IMG_UINT32 ui32DispatchTableEntry,
 	psPVRSRVPDumpIsLastCaptureFrameOUT->eError =
 	    PDumpIsLastCaptureFrameKM(&psPVRSRVPDumpIsLastCaptureFrameOUT->bpbIsLastCaptureFrame);
 
-	return 0;
+	return offsetof(PVRSRV_BRIDGE_OUT_PVRSRVPDUMPISLASTCAPTUREFRAME, eError);
 }
 
-static IMG_INT
+static size_t
 PVRSRVBridgePVRSRVPDumpForceCaptureStop(IMG_UINT32 ui32DispatchTableEntry,
 					IMG_UINT8 * psPVRSRVPDumpForceCaptureStopIN_UI8,
 					IMG_UINT8 * psPVRSRVPDumpForceCaptureStopOUT_UI8,
@@ -181,7 +178,7 @@ PVRSRVBridgePVRSRVPDumpForceCaptureStop(IMG_UINT32 ui32DispatchTableEntry,
 	psPVRSRVPDumpForceCaptureStopOUT->eError =
 	    PDumpForceCaptureStopKM(psConnection, OSGetDevNode(psConnection));
 
-	return 0;
+	return offsetof(PVRSRV_BRIDGE_OUT_PVRSRVPDUMPFORCECAPTURESTOP, eError);
 }
 
 /* ***************************************************************************

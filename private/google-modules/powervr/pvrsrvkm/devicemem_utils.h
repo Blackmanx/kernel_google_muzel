@@ -69,7 +69,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #define DEVMEM_REFCOUNT_PRINT(fmt, ...)
 #endif
 
-/* If we need a "hMapping" but we don't have a server-side mapping, we poison
+/* If we need a reservation but we don't have a server-side reservation, we poison
  * the entry with this value so that it's easily recognised in the debugger.
  * Note that this is potentially a valid handle, but then so is NULL, which is
  * no better, indeed worse, as it's not obvious in the debugger. The value
@@ -77,7 +77,6 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  * it isn't this) but it's nice to have a value in the source code that we can
  * grep for if things go wrong.
  */
-#define LACK_OF_MAPPING_POISON ((IMG_HANDLE)0x6116dead)
 #define LACK_OF_RESERVATION_POISON ((IMG_HANDLE)0x7117dead)
 
 #define DEVICEMEM_HISTORY_ALLOC_INDEX_NONE 0xFFFFFFFF
@@ -142,6 +141,25 @@ struct DEVMEM_HEAP_TAG
 	 */
 	IMG_DEV_VIRTADDR sBaseAddress;
 	DEVMEM_SIZE_T uiSize;
+
+	/* The process' malloc heap may have a higher minimum address than our base.
+	 * In this case we will allocate RA resources to pad the SVM heap's base address
+	 * until it is possible to map.
+	 *
+	 * These values are used to keep track of the RA allocations made, in order
+	 * to free them before the SVM RA is destroyed.
+	 */
+	IMG_UINT32 ui32SVMBasePaddingCount; /* The number of allocations made for padding. */
+	DEVMEM_SIZE_T uiSVMBasePaddingSize; /* The size of the allocations made for padding. */
+
+	/* Identifies if the SVM fallback mode is in use. */
+	IMG_BOOL bSVMFallbackEnabled;
+
+	/* To speed up finding of free CPU virtual address space in the User Managed
+	 * SVM heap algorithm. This cached last mapped address will be used as a
+	 * hint to decrease the area of the CPU memory map to be searched.
+	 */
+	IMG_UINT64 ui64LastMappedSVMAddress;
 
 	DEVMEM_SIZE_T uiReservedRegionSize; /* uiReservedRegionLength in DEVMEM_HEAP_BLUEPRINT */
 
@@ -220,7 +238,6 @@ typedef struct DEVMEM_DEVICE_IMPORT_TAG
 	IMG_DEV_VIRTADDR sDevVAddr;     /*!< Device virtual address of the import */
 	IMG_UINT32 ui32RefCount;        /*!< Refcount of the device virtual address */
 	IMG_HANDLE hReservation;        /*!< Device memory reservation handle */
-	IMG_HANDLE hMapping;            /*!< Device mapping handle */
 	IMG_BOOL bMapped;               /*!< This is import mapped? */
 	POS_LOCK hLock;                 /*!< Lock to protect the device import */
 } DEVMEM_DEVICE_IMPORT;

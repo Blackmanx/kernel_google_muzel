@@ -2564,8 +2564,11 @@ static PVRSRV_ERROR DeleteRACCEntry(RI_SUBLIST_ENTRY *psRISubEntry)
 		}
 		else
 		{
-			eError = RIDeletePMREntryUnlocked(psRIEntry);
-			PVR_LOG_IF_ERROR(eError, "RIDeletePMREntryUnlocked");
+			if (IS_RACC(psRIEntry))
+			{
+				eError = RIDeletePMREntryUnlocked(psRIEntry);
+				PVR_LOG_IF_ERROR(eError, "RIDeletePMREntryUnlocked");
+			}
 		}
 	}
 

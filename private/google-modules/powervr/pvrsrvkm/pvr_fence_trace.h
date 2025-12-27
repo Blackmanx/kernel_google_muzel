@@ -67,7 +67,7 @@ DECLARE_EVENT_CLASS(pvr_fence_context,
 	),
 
 	TP_fast_assign(
-		pvr_assign_str(name, fctx->name)
+		pvr_assign_str(name, fctx->name);
 		pvr_context_value_str(fctx, __entry->val,
 			sizeof(__entry->val));
 	),
@@ -113,9 +113,9 @@ DECLARE_EVENT_CLASS(pvr_fence,
 
 	TP_fast_assign(
 		pvr_assign_str(driver,
-			fence->base.ops->get_driver_name(&fence->base))
+			fence->base.ops->get_driver_name(&fence->base));
 		pvr_assign_str(timeline,
-			fence->base.ops->get_timeline_name(&fence->base))
+			fence->base.ops->get_timeline_name(&fence->base));
 		fence->base.ops->fence_value_str(&fence->base,
 			__entry->val, sizeof(__entry->val));
 		__entry->context = fence->base.context;
@@ -172,16 +172,16 @@ DECLARE_EVENT_CLASS(pvr_fence_foreign,
 
 	TP_fast_assign(
 		pvr_assign_str(driver,
-			fence->base.ops->get_driver_name(&fence->base))
+			fence->base.ops->get_driver_name(&fence->base));
 		pvr_assign_str(timeline,
-			fence->base.ops->get_timeline_name(&fence->base))
+			fence->base.ops->get_timeline_name(&fence->base));
 		fence->base.ops->fence_value_str(&fence->base, __entry->val,
 			sizeof(__entry->val));
 		__entry->context = fence->base.context;
 		pvr_assign_str(foreign_driver,
 			fence->fence->ops->get_driver_name ?
 			fence->fence->ops->get_driver_name(fence->fence) :
-			"unknown")
+			"unknown");
 		pvr_assign_str(foreign_timeline,
 			fence->fence->ops->get_timeline_name ?
 			fence->fence->ops->get_timeline_name(fence->fence) :

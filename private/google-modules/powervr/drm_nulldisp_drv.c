@@ -116,7 +116,9 @@ MODULE_IMPORT_NS(DMA_BUF);
 
 #define DRIVER_NAME "nulldisp"
 #define DRIVER_DESC "Imagination Technologies Null DRM Display Driver"
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 11, 0))
 #define DRIVER_DATE "20150612"
+#endif
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0))
 #define	NULLDISP_DRIVER_PRIME 0
@@ -190,6 +192,9 @@ struct nulldisp_display_device {
 #endif
 
 	struct netlink_pipe display_pipe;
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0))
+	atomic_t open_count;
+#endif
 };
 
 struct nulldisp_module_params {
@@ -1195,7 +1200,6 @@ nulldisp_fb_create(struct drm_device *dev, struct drm_file *file,
 
 static const struct drm_mode_config_funcs nulldisp_mode_config_funcs = {
 	.fb_create = nulldisp_fb_create,
-	.output_poll_changed = NULL,
 	.atomic_check = drm_atomic_helper_check,
 	.atomic_commit = drm_atomic_helper_commit,
 };
@@ -1255,6 +1259,10 @@ static int nulldisp_early_load(struct drm_device *dev, unsigned int instance)
 	dev->dev_private = nulldisp_dev;
 	nulldisp_dev->dev = dev;
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0))
+	atomic_set(&nulldisp_dev->open_count, 0);
+#endif
+
 	drm_mode_config_init(dev);
 
 	dev->mode_config.funcs = (void *)&nulldisp_mode_config_funcs;
@@ -1264,7 +1272,7 @@ static int nulldisp_early_load(struct drm_device *dev, unsigned int instance)
 	dev->mode_config.max_height = NULLDISP_FB_HEIGHT_MAX;
 	dev->mode_config.async_page_flip = true;
 
-#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 17, 0))
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 1, 0))
 	dev->mode_config.allow_fb_modifiers = true;
 #endif
 
@@ -1389,8 +1397,6 @@ static void nulldisp_late_unload(struct drm_device *dev)
 
 	kfree(nulldisp_dev);
 }
-
-
 
 static void nulldisp_lastclose(struct drm_device *dev)
 {
@@ -1534,6 +1540,37 @@ static const struct drm_ioctl_desc nulldisp_ioctls[] = {
 			  DRM_AUTH),
 };
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0))
+static int nulldisp_drm_open(struct inode *inode, struct file *filp)
+{
+	int ret = drm_open(inode, filp);
+
+	if (!ret) {
+		struct drm_file *file_priv = filp->private_data;
+		struct drm_device *dev = file_priv->minor->dev;
+		struct nulldisp_display_device *nulldisp_dev = dev->dev_private;
+
+		atomic_fetch_inc(&nulldisp_dev->open_count);
+	}
+	return ret;
+}
+
+static int nulldisp_drm_release(struct inode *inode, struct file *filp)
+{
+	int ret = drm_release(inode, filp);
+
+	if (!ret) {
+		struct drm_file *file_priv = filp->private_data;
+		struct drm_device *dev = file_priv->minor->dev;
+		struct nulldisp_display_device *nulldisp_dev = dev->dev_private;
+
+		if (atomic_dec_and_test(&nulldisp_dev->open_count))
+			nulldisp_lastclose(dev);
+	}
+	return ret;
+}
+#endif
+
 static int nulldisp_gem_mmap(struct file *file, struct vm_area_struct *vma)
 {
 	int err = netlink_gem_mmap(file, vma);
@@ -1561,8 +1598,13 @@ static int nulldisp_gem_mmap(struct file *file, struct vm_area_struct *vma)
 
 static const struct file_operations nulldisp_driver_fops = {
 	.owner		= THIS_MODULE,
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0))
+	.open		= nulldisp_drm_open,
+	.release	= nulldisp_drm_release,
+#else
 	.open		= drm_open,
 	.release	= drm_release,
+#endif
 	.unlocked_ioctl	= drm_ioctl,
 	.mmap		= nulldisp_gem_mmap,
 	.poll		= drm_poll,
@@ -1571,13 +1613,18 @@ static const struct file_operations nulldisp_driver_fops = {
 #ifdef CONFIG_COMPAT
 	.compat_ioctl	= drm_compat_ioctl,
 #endif
+
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0))
+	.fop_flags	= FOP_UNSIGNED_OFFSET,
+#endif
 };
 
 static struct drm_driver nulldisp_drm_driver = {
 	.load				= NULL,
 	.unload				= NULL,
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 12, 0))
 	.lastclose			= nulldisp_lastclose,
-
+#endif
 
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 7, 0))
 	.enable_vblank			= nulldisp_enable_vblank,
@@ -1630,7 +1677,9 @@ static struct drm_driver nulldisp_drm_driver = {
 #endif /* LINUX_VERSION_CODE < KERNEL_VERSION(5, 9, 0) */
 	.name				= DRIVER_NAME,
 	.desc				= DRIVER_DESC,
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 11, 0))
 	.date				= DRIVER_DATE,
+#endif
 	.major				= PVRVERSION_MAJ,
 	.minor				= PVRVERSION_MIN,
 	.patchlevel			= PVRVERSION_BUILD,
@@ -1697,7 +1746,11 @@ err_drm_dev_put:
 	return	ret;
 }
 
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 11, 0))
 static int nulldisp_remove(struct platform_device *pdev)
+#else
+static void nulldisp_remove(struct platform_device *pdev)
+#endif
 {
 	struct drm_device *ddev = platform_get_drvdata(pdev);
 
@@ -1715,11 +1768,14 @@ static int nulldisp_remove(struct platform_device *pdev)
 
 	drm_dev_put(ddev);
 
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 11, 0))
 	return 0;
+#endif
 }
 
 static void nulldisp_shutdown(struct platform_device *pdev)
 {
+	drm_atomic_helper_shutdown(platform_get_drvdata(pdev));
 }
 
 static struct platform_device_id nulldisp_platform_device_id_table[] = {
@@ -1827,7 +1883,7 @@ static void __exit nulldisp_exit(void)
 module_init(nulldisp_init);
 module_exit(nulldisp_exit);
 
-#if defined(LMA) && !defined(SUPPORT_EXTERNAL_PHYSHEAP_INTERFACE)
+#if defined(LMA) && !defined(SUPPORT_EXTERNAL_PHYSHEAP_INTERFACE) && !defined(EMULATOR)
 /*
  * For Test Chip, this module relies on a memory heap created in another
  * module. There is no explicit dependency on the other module, as the heap

@@ -53,9 +53,6 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "pvr_debug.h"
 #include "connection_server.h"
 #include "pvr_bridge.h"
-#if defined(SUPPORT_RGX)
-#include "rgx_bridge.h"
-#endif
 #include "srvcore.h"
 #include "handle.h"
 
@@ -68,7 +65,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 static_assert(CACHE_BATCH_MAX <= IMG_UINT32_MAX,
 	      "CACHE_BATCH_MAX must not be larger than IMG_UINT32_MAX");
 
-static IMG_INT
+static size_t
 PVRSRVBridgeCacheOpQueue(IMG_UINT32 ui32DispatchTableEntry,
 			 IMG_UINT8 * psCacheOpQueueIN_UI8,
 			 IMG_UINT8 * psCacheOpQueueOUT_UI8, CONNECTION_DATA * psConnection)
@@ -300,10 +297,10 @@ CacheOpQueue_exit:
 	if (!bHaveEnoughSpace && pArrayArgsBuffer)
 		OSFreeMemNoStats(pArrayArgsBuffer);
 
-	return 0;
+	return offsetof(PVRSRV_BRIDGE_OUT_CACHEOPQUEUE, eError);
 }
 
-static IMG_INT
+static size_t
 PVRSRVBridgeCacheOpExec(IMG_UINT32 ui32DispatchTableEntry,
 			IMG_UINT8 * psCacheOpExecIN_UI8,
 			IMG_UINT8 * psCacheOpExecOUT_UI8, CONNECTION_DATA * psConnection)
@@ -352,10 +349,10 @@ CacheOpExec_exit:
 	/* Release now we have cleaned up look up handles. */
 	UnlockHandle(psConnection->psHandleBase);
 
-	return 0;
+	return offsetof(PVRSRV_BRIDGE_OUT_CACHEOPEXEC, eError);
 }
 
-static IMG_INT
+static size_t
 PVRSRVBridgeCacheOpLog(IMG_UINT32 ui32DispatchTableEntry,
 		       IMG_UINT8 * psCacheOpLogIN_UI8,
 		       IMG_UINT8 * psCacheOpLogOUT_UI8, CONNECTION_DATA * psConnection)
@@ -406,7 +403,7 @@ CacheOpLog_exit:
 	/* Release now we have cleaned up look up handles. */
 	UnlockHandle(psConnection->psHandleBase);
 
-	return 0;
+	return offsetof(PVRSRV_BRIDGE_OUT_CACHEOPLOG, eError);
 }
 
 /* ***************************************************************************

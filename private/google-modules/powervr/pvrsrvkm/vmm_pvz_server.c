@@ -52,24 +52,6 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "vz_vmm_pvz.h"
 #include "vmm_pvz_server.h"
 
-static inline void
-PvzServerLockAcquire(void)
-{
-#if !defined(FPGA)
-	PVRSRV_DATA *psPVRSRVData = PVRSRVGetPVRSRVData();
-	OSLockAcquire(psPVRSRVData->hPvzConnectionLock);
-#endif
-}
-
-static inline void
-PvzServerLockRelease(void)
-{
-#if !defined(FPGA)
-	PVRSRV_DATA *psPVRSRVData = PVRSRVGetPVRSRVData();
-	OSLockRelease(psPVRSRVData->hPvzConnectionLock);
-#endif
-}
-
 #define VALIDATE_DRVID_DEVID(ui32DriverID, ui32DevID) do {							\
 	if ((ui32DriverID >= RGX_NUM_DRIVERS_SUPPORTED) ||								\
 		(ui32DriverID < RGXFW_GUEST_DRIVER_ID_START))								\

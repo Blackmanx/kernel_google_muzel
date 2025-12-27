@@ -971,6 +971,11 @@ DevmemCreateHeap(DEVMEM_CONTEXT *psCtx,
 	psHeap->bPremapped = IMG_FALSE;
 	OSAtomicWrite(&psHeap->hImportCount, 0);
 
+	psHeap->ui32SVMBasePaddingCount = 0;
+	psHeap->uiSVMBasePaddingSize = 0;
+	psHeap->ui64LastMappedSVMAddress = 0;
+	psHeap->bSVMFallbackEnabled = IMG_FALSE;
+
 	OSSNPrintf(aszBuf, sizeof(aszBuf),
 			"NDM heap '%s' (suballocs) ctx:%p",
 			pszName, psCtx);
@@ -1203,6 +1208,7 @@ DevmemDestroyHeap(DEVMEM_HEAP *psHeap)
 {
 	PVRSRV_ERROR eError;
 	IMG_INT uiImportCount;
+	IMG_UINT32 i;
 #if defined(PVRSRV_FORCE_UNLOAD_IF_BAD_STATE)
 	IMG_BOOL bDoCheck = IMG_TRUE;
 #if defined(__KERNEL__)
@@ -1214,6 +1220,12 @@ DevmemDestroyHeap(DEVMEM_HEAP *psHeap)
 #endif
 
 	PVR_RETURN_IF_INVALID_PARAM(psHeap);
+
+	for (i = 0; i < psHeap->ui32SVMBasePaddingCount; i++)
+	{
+		RA_BASE_T uiAddr = psHeap->sBaseAddress.uiAddr + (psHeap->uiSVMBasePaddingSize * i);
+		RA_Free(psHeap->psQuantizedVMRA, uiAddr);
+	}
 
 	uiImportCount = OSAtomicRead(&psHeap->hImportCount);
 	if (uiImportCount > 0)

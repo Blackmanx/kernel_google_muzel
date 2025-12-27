@@ -53,14 +53,6 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "connection_server.h"
 #include "pmr.h"
 
-typedef struct _DEVMEMINT_CTX_ DEVMEMINT_CTX;
-typedef struct _DEVMEMINT_CTX_EXPORT_ DEVMEMINT_CTX_EXPORT;
-typedef struct _DEVMEMINT_HEAP_ DEVMEMINT_HEAP;
-
-typedef struct _DEVMEMINT_RESERVATION_ DEVMEMINT_RESERVATION;
-typedef struct _DEVMEMXINT_RESERVATION_ DEVMEMXINT_RESERVATION;
-typedef struct _DEVMEMINT_PF_NOTIFY_ DEVMEMINT_PF_NOTIFY;
-
 /*
  * DevmemServerGetImportHandle()
  *
@@ -797,5 +789,10 @@ PVRSRV_ERROR
 DevmemIntAcquireRemoteCtx(PMR *psPMR,
                           DEVMEMINT_CTX **ppsContext,
                           IMG_HANDLE *phPrivData);
+
+PVRSRV_ERROR DevmemIntFindCPUAddress(DEVMEMINT_HEAP *psDevmemHeap,
+                                     IMG_UINT64 ui64Size,
+                                     IMG_UINT64 ui64AddrHint,
+                                     IMG_UINT64 *pui64Addr);
 
 #endif /* DEVICEMEM_SERVER_H */

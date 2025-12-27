@@ -6,6 +6,7 @@
 #include <linux/math64.h>
 #include <linux/workqueue.h>
 #include <linux/hrtimer.h>
+#include <linux/mutex.h>
 #include <governor.h>
 
 #include "dvfs_governor.h"
@@ -16,6 +17,8 @@
 #define MSEC_TO_KTIME(x) (ns_to_ktime(((u64)(x)) * 1000000U))
 
 /*
+ * DOC: Timer state machine
+ *
  * Possible state transitions
  * ON        -> ON | OFF | STOPPED
  * STOPPED   -> ON | OFF
@@ -41,11 +44,22 @@
  */
 enum dvfs_timer_state { TIMER_OFF, TIMER_STOPPED, TIMER_ON };
 
+/**
+ * struct governor_data - Precise on-demand governor state.
+ */
 struct governor_data {
+	/** @timer: htimer for periodic dvfs evaluation */
 	struct hrtimer timer;
+	/** @timer_state: See timer state machine doc */
 	atomic_t timer_state;
+	/** @work: dvfs work item queued from @timer */
 	struct work_struct work;
+	/** @devfreq: handle to devfreq instance using the governor */
 	struct devfreq *devfreq;
+	/** @lock: lock used to synchronize state transitions with a polling interval change */
+	struct mutex lock;
+	/** @last_interval: timestamp of the most recent work_func  */
+	ktime_t last_interval;
 };
 
 static enum hrtimer_restart timer_callback(struct hrtimer *timer)
@@ -77,8 +91,10 @@ static void work_func(struct work_struct *work)
 {
 	struct governor_data *data = container_of(work, struct governor_data, work);
 	struct devfreq *df = data->devfreq;
+	const ktime_t now = ktime_get();
 
 	mutex_lock(&df->lock);
+	data->last_interval = ktime_to_ms(now);
 	update_devfreq(df);
 	mutex_unlock(&df->lock);
 }
@@ -93,6 +109,7 @@ static int governor_data_init(struct devfreq *df)
 	atomic_set(&data->timer_state, TIMER_OFF);
 	INIT_WORK(&data->work, work_func);
 	hrtimer_init(&data->timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
+	mutex_init(&data->lock);
 	data->timer.function = timer_callback;
 	data->devfreq = df;
 
@@ -183,15 +200,27 @@ static int precise_ondemand_resume(struct devfreq *df)
 {
 	struct governor_data *data = df->governor_data;
 
-	lockdep_assert_held(&df->lock);
+	mutex_lock(&data->lock);
 
 	/* Transition to ON, from a stopped state (transition c) */
 	if (atomic_xchg(&data->timer_state, TIMER_ON) == TIMER_OFF) {
+		/* Find out when the next interval should be */
+		s64 expiry = 0;
+		const s64 now = ktime_to_ms(ktime_get());
+		const s64 delta = now - data->last_interval;
+
+		if (delta < data->devfreq->profile->polling_ms)
+			expiry = data->devfreq->profile->polling_ms - delta;
+
 		/* Start the timer only if it's been fully stopped (transition d), and
-		 * schedule an immediate update (0).
+		 * schedule an update (expiry).
 		 */
-		hrtimer_start(&data->timer, 0, HRTIMER_MODE_REL);
+		hrtimer_start(&data->timer,
+			      ms_to_ktime(expiry),
+			      HRTIMER_MODE_REL);
 	}
+
+	mutex_unlock(&data->lock);
 
 	return 0;
 }
@@ -200,18 +229,27 @@ static int precise_ondemand_suspend(struct devfreq *df)
 {
 	struct governor_data *data = df->governor_data;
 
-	lockdep_assert_held(&df->lock);
+	mutex_lock(&data->lock);
 
 	/* Timer is Stopped if its currently on (transition a) */
-	atomic_cmpxchg(&data->timer_state, TIMER_ON, TIMER_STOPPED);
+	if (atomic_cmpxchg(&data->timer_state, TIMER_ON, TIMER_STOPPED) == TIMER_ON) {
+		/* Try canceling the active timer and run transition b to OFF.
+		 *
+		 * If the timer callback is concurrently executing, expect the callback to
+		 * run transition b.
+		 */
+		if (hrtimer_try_to_cancel(&data->timer) >= 0)
+			atomic_set(&data->timer_state, TIMER_OFF);
+	}
+
+	mutex_unlock(&data->lock);
+
 	return 0;
 }
 
 static int precise_ondemand_start(struct devfreq *df)
 {
 	int err = 0;
-
-	lockdep_assert_held(&df->lock);
 
 	err = governor_data_init(df);
 	if (err)
@@ -231,8 +269,6 @@ exit_init:
 
 static int precise_ondemand_stop(struct devfreq *df)
 {
-	lockdep_assert_held(&df->lock);
-
 	precise_ondemand_suspend(df);
 	governor_data_term(df);
 	return 0;
@@ -243,7 +279,13 @@ static int precise_ondemand_update_interval(struct devfreq *df, unsigned int del
 	struct governor_data *data = df->governor_data;
 	ktime_t delta, expiry;
 
-	lockdep_assert_held(&df->lock);
+	mutex_lock(&data->lock);
+
+	if (atomic_read(&data->timer_state) != TIMER_ON) {
+		/* The timer is not running, just update the polling interval. */
+		smp_store_release(&df->profile->polling_ms, delay);
+		goto out_unlock;
+	}
 
 	/* The order here matters, first calculate the new expiry based on the
 	 * current expiry time. We haven't yet updated the polling_ms var, meaning
@@ -268,25 +310,21 @@ static int precise_ondemand_update_interval(struct devfreq *df, unsigned int del
 	smp_store_release(&df->profile->polling_ms, delay);
 
 	/* Cancel or block until the timer is inactive. From this point it cannot be
-	 * restarted as we hold df->lock.
+	 * restarted as we hold data->lock.
 	 * This is a no op if the timer is already inactive.
 	 */
 	hrtimer_cancel(&data->timer);
 
-	/* Don't restart the timer unless it was previously on. It's valid to change
-	 * the dvfs interval while the governor is inactive, and that should not
-	 * result in an implicit start.
-	 */
-	if (atomic_read(&data->timer_state) == TIMER_ON)
-		hrtimer_start(&data->timer, expiry, HRTIMER_MODE_ABS);
+	hrtimer_start(&data->timer, expiry, HRTIMER_MODE_ABS);
+
+out_unlock:
+	mutex_unlock(&data->lock);
 
 	return 0;
 }
 
-static int precise_ondemand_handler_locked(struct devfreq *df, unsigned int event, void *data)
+static int precise_ondemand_handler(struct devfreq *df, unsigned int event, void *data)
 {
-	lockdep_assert_held(&df->lock);
-
 	switch (event) {
 	case DEVFREQ_GOV_START:
 		return precise_ondemand_start(df);
@@ -301,17 +339,6 @@ static int precise_ondemand_handler_locked(struct devfreq *df, unsigned int even
 	default:
 		return 0;
 	}
-}
-
-static int precise_ondemand_handler(struct devfreq *df, unsigned int event, void *data)
-{
-	int ret;
-
-	mutex_lock(&df->lock);
-	ret = precise_ondemand_handler_locked(df, event, data);
-	mutex_unlock(&df->lock);
-
-	return ret;
 }
 
 static struct devfreq_governor precise_ondemand = {

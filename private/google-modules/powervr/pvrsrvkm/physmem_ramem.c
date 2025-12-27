@@ -2449,162 +2449,160 @@ PMRChangeSparseMemLocalMem(PMR_IMPL_PRIVDATA pPriv,
 	    PVRSRV_ERROR_INVALID_PARAMS
 	);
 
+	/* Validate the free page indices */
+	if (ui32FreePageCount)
 	{
-		/* Validate the free page indices */
-		if (ui32FreePageCount)
+		if (pai32FreeIndices != NULL)
 		{
-			if (pai32FreeIndices != NULL)
+			for (ui32Loop = 0; ui32Loop < ui32FreePageCount; ui32Loop++)
 			{
-				for (ui32Loop = 0; ui32Loop < ui32FreePageCount; ui32Loop++)
+				uiFreepgidx = pai32FreeIndices[ui32Loop];
+
+				if (uiFreepgidx >= psPMRPageArrayData->uiTotalNumChunks)
 				{
-					uiFreepgidx = pai32FreeIndices[ui32Loop];
+					PVR_GOTO_WITH_ERROR(eError, PVRSRV_ERROR_DEVICEMEM_OUT_OF_RANGE, e0);
+				}
 
-					if (uiFreepgidx >= psPMRPageArrayData->uiTotalNumChunks)
-					{
-						PVR_GOTO_WITH_ERROR(eError, PVRSRV_ERROR_DEVICEMEM_OUT_OF_RANGE, e0);
-					}
-
-					if (RA_BASE_IS_INVALID(paBaseArray[uiFreepgidx]))
-					{
-						PVR_LOG_GOTO_WITH_ERROR("paBaseArray[uiFreepgidx]", eError, PVRSRV_ERROR_INVALID_PARAMS, e0);
-					}
+				if (RA_BASE_IS_INVALID(paBaseArray[uiFreepgidx]))
+				{
+					PVR_LOG_GOTO_WITH_ERROR("paBaseArray[uiFreepgidx]", eError, PVRSRV_ERROR_INVALID_PARAMS, e0);
 				}
 			}
-			else
-			{
-				PVR_DPF((PVR_DBG_ERROR,
-				         "%s: Given non-zero free count but missing indices array",
-				         __func__));
-				return PVRSRV_ERROR_INVALID_PARAMS;
-			}
 		}
-
-		/* The following block of code verifies any issues with common alloc chunk indices */
-		for (ui32Loop = ui32AdtnlAllocPages; ui32Loop < ui32AllocPageCount; ui32Loop++)
+		else
 		{
-			uiAllocpgidx = pai32AllocIndices[ui32Loop];
-			if (uiAllocpgidx >= psPMRPageArrayData->uiTotalNumChunks)
-			{
-				PVR_GOTO_WITH_ERROR(eError, PVRSRV_ERROR_DEVICEMEM_OUT_OF_RANGE, e0);
-			}
-
-			if ((!RA_BASE_IS_INVALID(paBaseArray[uiAllocpgidx])) ||
-					(psPMRMapTable->aui32Translation[uiAllocpgidx] != TRANSLATION_INVALID))
-			{
-				PVR_LOG_GOTO_WITH_ERROR("Trying to allocate already allocated page again", eError, PVRSRV_ERROR_INVALID_PARAMS, e0);
-			}
+			PVR_DPF((PVR_DBG_ERROR,
+			         "%s: Given non-zero free count but missing indices array",
+			         __func__));
+			return PVRSRV_ERROR_INVALID_PARAMS;
 		}
+	}
 
-		ui32Loop = 0;
-
-		/* Allocate new chunks */
-		if (0 != ui32AdtnlAllocPages)
+	/* The following block of code verifies any issues with common alloc chunk indices */
+	for (ui32Loop = ui32AdtnlAllocPages; ui32Loop < ui32AllocPageCount; ui32Loop++)
+	{
+		uiAllocpgidx = pai32AllocIndices[ui32Loop];
+		if (uiAllocpgidx >= psPMRPageArrayData->uiTotalNumChunks)
 		{
-			/* Say how many chunks to allocate */
-			psPMRPageArrayData->uiChunksToAlloc = ui32AdtnlAllocPages;
-
-			eError = _AllocLMPages(psPMRPageArrayData, pai32AllocIndices);
-			PVR_LOG_GOTO_IF_ERROR(eError, "_AllocLMPages", e0);
-
-			/* Mark the corresponding chunks of translation table as valid */
-			for (ui32Loop = 0; ui32Loop < ui32AdtnlAllocPages; ui32Loop++)
-			{
-				psPMRMapTable->aui32Translation[pai32AllocIndices[ui32Loop]] = pai32AllocIndices[ui32Loop];
-			}
-
-			psPMRMapTable->ui32NumPhysChunks += ui32AdtnlAllocPages;
+			PVR_GOTO_WITH_ERROR(eError, PVRSRV_ERROR_DEVICEMEM_OUT_OF_RANGE, e0);
 		}
 
+		if ((!RA_BASE_IS_INVALID(paBaseArray[uiAllocpgidx])) ||
+		    (psPMRMapTable->aui32Translation[uiAllocpgidx] != TRANSLATION_INVALID))
+		{
+			PVR_LOG_GOTO_WITH_ERROR("Trying to allocate already allocated page again", eError, PVRSRV_ERROR_INVALID_PARAMS, e0);
+		}
+	}
+
+	ui32Loop = 0;
+
+	/* Allocate new chunks */
+	if (0 != ui32AdtnlAllocPages)
+	{
+		/* Say how many chunks to allocate */
+		psPMRPageArrayData->uiChunksToAlloc = ui32AdtnlAllocPages;
+
+		eError = _AllocLMPages(psPMRPageArrayData, pai32AllocIndices);
+		PVR_LOG_GOTO_IF_ERROR(eError, "_AllocLMPages", e0);
+
+		/* Mark the corresponding chunks of translation table as valid */
+		for (ui32Loop = 0; ui32Loop < ui32AdtnlAllocPages; ui32Loop++)
+		{
+			psPMRMapTable->aui32Translation[pai32AllocIndices[ui32Loop]] = pai32AllocIndices[ui32Loop];
+		}
+
+		psPMRMapTable->ui32NumPhysChunks += ui32AdtnlAllocPages;
+	}
+
+	ui32Index = ui32Loop;
+	ui32Loop = 0;
+
+	/* Move the corresponding free chunks to alloc request */
+	eError = RA_SwapSparseMem(psPMRPageArrayData->psArena,
+	                          paBaseArray,
+	                          psPMRPageArrayData->uiTotalNumChunks,
+	                          psPMRPageArrayData->uiLog2ChunkSize,
+	                          &pai32AllocIndices[ui32Index],
+	                          &pai32FreeIndices[ui32Loop],
+	                          ui32CommonRequstCount);
+	PVR_LOG_GOTO_IF_ERROR(eError, "RA_SwapSparseMem", unwind_alloc);
+
+	for (ui32Loop = 0; ui32Loop < ui32CommonRequstCount; ui32Loop++, ui32Index++)
+	{
+		uiAllocpgidx = pai32AllocIndices[ui32Index];
+		uiFreepgidx  = pai32FreeIndices[ui32Loop];
+
+		psPMRMapTable->aui32Translation[uiFreepgidx] = TRANSLATION_INVALID;
+		psPMRMapTable->aui32Translation[uiAllocpgidx] = uiAllocpgidx;
+
+		/* Be sure to honour the attributes associated with the allocation
+		 * such as zeroing, poisoning etc. */
+		if (BIT_ISSET(psPMRPageArrayData->ui32Flags, FLAG_POISON_ON_ALLOC))
+		{
+			eError = _PhysPgMemSet(psPMRPageArrayData,
+			                       &psPMRPageArrayData->aBaseArray[uiAllocpgidx],
+			                       ui64ChunkSize,
+			                       PVRSRV_POISON_ON_ALLOC_VALUE);
+
+			/* Consider this as a soft failure and go ahead but log error to kernel log */
+			if (eError != PVRSRV_OK)
+			{
+#if defined(DEBUG)
+				bPoisonFail = IMG_TRUE;
+#endif
+			}
+		}
+
+		if (BIT_ISSET(psPMRPageArrayData->ui32Flags, FLAG_ZERO_ON_ALLOC))
+		{
+			eError = _PhysPgMemSet(psPMRPageArrayData,
+			                       &psPMRPageArrayData->aBaseArray[uiAllocpgidx],
+			                       ui64ChunkSize,
+			                       ZERO_PAGE_VALUE);
+			/* Consider this as a soft failure and go ahead but log error to kernel log */
+			if (eError != PVRSRV_OK)
+			{
+#if defined(DEBUG)
+				/* Don't think we need to zero any chunks further */
+				bZeroFail = IMG_TRUE;
+#endif
+			}
+		}
+	}
+
+	/* Free or zombie the additional free chunks */
+	if (0 != ui32AdtnlFreePages)
+	{
+#if defined(SUPPORT_PMR_PAGES_DEFERRED_FREE)
+		PMR_LMALLOCARRAY_DATA *psExtractedPagesPageArray = NULL;
+
+		eError = _ExtractPages(psPMRPageArrayData, &pai32FreeIndices[ui32Loop], ui32AdtnlFreePages, &psExtractedPagesPageArray);
+		PVR_LOG_GOTO_IF_ERROR(eError, "_ExtractPages", e0);
+
+		if (psPMRPageArrayData->iNumChunksAllocated == 0)
+		{
+			PMR_SetZombieIsPMREmptyFlag(psPMR);
+		}
+
+		/* Zombify pages to get proper stats */
+		eError = PMRZombifyLocalMem(psExtractedPagesPageArray, NULL);
+		PVR_LOG_IF_ERROR(eError, "PMRZombifyLocalMem");
+
+		*ppvZombiePages = psExtractedPagesPageArray;
+#else
+		eError = _FreeLMPages(psPMRPageArrayData, &pai32FreeIndices[ui32Loop], ui32AdtnlFreePages);
+		PVR_LOG_GOTO_IF_ERROR(eError, "_FreeLMPages", e0);
+#endif /* SUPPORT_PMR_PAGES_DEFERRED_FREE */
 		ui32Index = ui32Loop;
 		ui32Loop = 0;
 
-		/* Move the corresponding free chunks to alloc request */
-		eError = RA_SwapSparseMem(psPMRPageArrayData->psArena,
-		                           paBaseArray,
-		                           psPMRPageArrayData->uiTotalNumChunks,
-		                           psPMRPageArrayData->uiLog2ChunkSize,
-		                           &pai32AllocIndices[ui32Index],
-		                           &pai32FreeIndices[ui32Loop],
-		                           ui32CommonRequstCount);
-		PVR_LOG_GOTO_IF_ERROR(eError, "RA_SwapSparseMem", unwind_alloc);
-
-		for (ui32Loop = 0; ui32Loop < ui32CommonRequstCount; ui32Loop++, ui32Index++)
+		while (ui32Loop++ < ui32AdtnlFreePages)
 		{
-			uiAllocpgidx = pai32AllocIndices[ui32Index];
-			uiFreepgidx  = pai32FreeIndices[ui32Loop];
-
-			psPMRMapTable->aui32Translation[uiFreepgidx] = TRANSLATION_INVALID;
-			psPMRMapTable->aui32Translation[uiAllocpgidx] = uiAllocpgidx;
-
-			/* Be sure to honour the attributes associated with the allocation
-			 * such as zeroing, poisoning etc. */
-			if (BIT_ISSET(psPMRPageArrayData->ui32Flags, FLAG_POISON_ON_ALLOC))
-			{
-				eError = _PhysPgMemSet(psPMRPageArrayData,
-				                       &psPMRPageArrayData->aBaseArray[uiAllocpgidx],
-				                       ui64ChunkSize,
-				                       PVRSRV_POISON_ON_ALLOC_VALUE);
-
-				/* Consider this as a soft failure and go ahead but log error to kernel log */
-				if (eError != PVRSRV_OK)
-				{
-#if defined(DEBUG)
-					bPoisonFail = IMG_TRUE;
-#endif
-				}
-			}
-
-			if (BIT_ISSET(psPMRPageArrayData->ui32Flags, FLAG_ZERO_ON_ALLOC))
-			{
-				eError = _PhysPgMemSet(psPMRPageArrayData,
-									   &psPMRPageArrayData->aBaseArray[uiAllocpgidx],
-									   ui64ChunkSize,
-									   ZERO_PAGE_VALUE);
-				/* Consider this as a soft failure and go ahead but log error to kernel log */
-				if (eError != PVRSRV_OK)
-				{
-#if defined(DEBUG)
-					/* Don't think we need to zero any chunks further */
-					bZeroFail = IMG_TRUE;
-#endif
-				}
-			}
+			/* Set the corresponding mapping table entry to invalid address */
+			psPMRMapTable->aui32Translation[pai32FreeIndices[ui32Index++]] = TRANSLATION_INVALID;
 		}
 
-		/* Free or zombie the additional free chunks */
-		if (0 != ui32AdtnlFreePages)
-		{
-#if defined(SUPPORT_PMR_PAGES_DEFERRED_FREE)
-			PMR_LMALLOCARRAY_DATA *psExtractedPagesPageArray = NULL;
-
-			eError = _ExtractPages(psPMRPageArrayData, &pai32FreeIndices[ui32Loop], ui32AdtnlFreePages, &psExtractedPagesPageArray);
-			PVR_LOG_GOTO_IF_ERROR(eError, "_ExtractPages", e0);
-
-			if (psPMRPageArrayData->iNumChunksAllocated == 0)
-			{
-				PMR_SetZombieIsPMREmptyFlag(psPMR);
-			}
-
-			/* Zombify pages to get proper stats */
-			eError = PMRZombifyLocalMem(psExtractedPagesPageArray, NULL);
-			PVR_LOG_IF_ERROR(eError, "PMRZombifyLocalMem");
-
-			*ppvZombiePages = psExtractedPagesPageArray;
-#else
-			eError = _FreeLMPages(psPMRPageArrayData, &pai32FreeIndices[ui32Loop], ui32AdtnlFreePages);
-			PVR_LOG_GOTO_IF_ERROR(eError, "_FreeLMPages", e0);
-#endif /* SUPPORT_PMR_PAGES_DEFERRED_FREE */
-			ui32Index = ui32Loop;
-			ui32Loop = 0;
-
-			while (ui32Loop++ < ui32AdtnlFreePages)
-			{
-				/* Set the corresponding mapping table entry to invalid address */
-				psPMRMapTable->aui32Translation[pai32FreeIndices[ui32Index++]] = TRANSLATION_INVALID;
-			}
-
-			psPMRMapTable->ui32NumPhysChunks -= ui32AdtnlFreePages;
-		}
+		psPMRMapTable->ui32NumPhysChunks -= ui32AdtnlFreePages;
 	}
 
 #if defined(DEBUG)

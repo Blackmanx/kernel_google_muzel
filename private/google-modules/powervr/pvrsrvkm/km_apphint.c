@@ -69,7 +69,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "pvr_notifier.h"
 
 #include "km_apphint_defs.h"
-#include "km_apphint.h"
+#include "os_apphintkm.h"
 
 #if defined(PDUMP)
 #if defined(__linux__)
@@ -305,6 +305,8 @@ static struct apphint_state
 	DI_ENTRY *debuginfo_device_entry[PVRSRV_MAX_DEVICES][APPHINT_DEBUGINFO_DEVICE_ID_MAX];
 	DI_GROUP *debuginfo_rootdir;
 	DI_ENTRY *debuginfo_entry[APPHINT_DEBUGINFO_ID_MAX];
+	DI_GROUP *modparam_rootdir;
+	DI_ENTRY *modparam_entry[APPHINT_MODPARAM_ID_MAX];
 	DI_GROUP *buildvar_rootdir;
 	DI_ENTRY *buildvar_entry[APPHINT_BUILDVAR_ID_MAX];
 
@@ -755,7 +757,7 @@ static int apphint_write(char *buffer, const size_t size,
 	switch (hint->data_type) {
 	case APPHINT_DATA_TYPE_UINT64:
 		result += snprintf(buffer + result, size - result,
-				"0x%016llx",
+				"0x%016" IMG_UINT64_FMTSPECx,
 				value.UINT64);
 		break;
 	case APPHINT_DATA_TYPE_UINT32:
@@ -1023,12 +1025,13 @@ static int apphint_debuginfo_init(const char *sub_dir,
 		const struct apphint_init_data *init_data,
 		DI_GROUP *parentdir,
 		DI_GROUP **rootdir,
-		DI_ENTRY *entry[])
+		DI_ENTRY *entry[],
+		bool bReadOnly)
 {
 	PVRSRV_ERROR result;
 	unsigned int i;
 	unsigned int device_value_offset = device_num * APPHINT_DEBUGINFO_DEVICE_ID_MAX;
-	const DI_ITERATOR_CB iterator = {
+	DI_ITERATOR_CB iterator = {
 		.pfnStart = apphint_di_start, .pfnStop = apphint_di_stop,
 		.pfnNext  = apphint_di_next,  .pfnShow = apphint_di_show,
 		.pfnWrite = apphint_set,      .ui32WriteLenMax = APPHINT_BUFFER_SIZE
@@ -1036,6 +1039,10 @@ static int apphint_debuginfo_init(const char *sub_dir,
 
 	/* Determine if we're booted as a GUEST VZ OS */
 	IMG_BOOL bIsGUEST = PVRSRV_VZ_MODE_IS(GUEST, DEVID, device_num);
+
+	if (bReadOnly) {
+		iterator.pfnWrite = NULL;
+	}
 
 	if (*rootdir) {
 		PVR_DPF((PVR_DBG_WARNING,
@@ -1272,17 +1279,29 @@ int pvr_apphint_init(void)
 		goto err_out;
 	}
 
+	/* Device & Driver AppHints */
 	result = apphint_debuginfo_init("apphint", 0,
 		ARRAY_SIZE(init_data_debuginfo), init_data_debuginfo,
 		NULL,
-		&apphint.debuginfo_rootdir, apphint.debuginfo_entry);
+		&apphint.debuginfo_rootdir, apphint.debuginfo_entry, false);
 	if (0 != result)
 		goto err_out;
 
+	/* Build AppHints */
 	result = apphint_debuginfo_init("buildvar", 0,
 		ARRAY_SIZE(init_data_buildvar), init_data_buildvar,
 		NULL,
-		&apphint.buildvar_rootdir, apphint.buildvar_entry);
+		&apphint.buildvar_rootdir, apphint.buildvar_entry, true);
+	if (0 != result)
+		goto err_out;
+
+	/* Module parameter Configuration AppHints */
+	result = apphint_debuginfo_init("param", 0,
+		ARRAY_SIZE(init_data_modparam), init_data_modparam,
+		NULL,
+		&apphint.modparam_rootdir, apphint.modparam_entry, true);
+	if (0 != result)
+		goto err_out;
 
 	apphint.initialized = 1;
 
@@ -1334,7 +1353,7 @@ int pvr_apphint_device_register(PVRSRV_DEVICE_NODE *device)
 	                              init_data_debuginfo_device,
 	                              device->sDebugInfo.psGroup,
 	                              &apphint.debuginfo_device_rootdir[device->sDevId.ui32InternalID],
-	                              apphint.debuginfo_device_entry[device->sDevId.ui32InternalID]);
+	                              apphint.debuginfo_device_entry[device->sDevId.ui32InternalID], false);
 	if (0 != result)
 		goto err_out;
 
@@ -1410,6 +1429,8 @@ void pvr_apphint_deinit(void)
 			&apphint.debuginfo_rootdir, apphint.debuginfo_entry);
 	apphint_debuginfo_deinit(APPHINT_BUILDVAR_ID_MAX,
 			&apphint.buildvar_rootdir, apphint.buildvar_entry);
+	apphint_debuginfo_deinit(APPHINT_MODPARAM_ID_MAX,
+			&apphint.modparam_rootdir, apphint.modparam_entry);
 
 	destroy_workqueue(apphint.workqueue);
 

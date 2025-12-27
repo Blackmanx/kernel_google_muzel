@@ -115,7 +115,7 @@ typedef struct
 
 /*!
  * @InGroup RenderTarget
- * @Brief Track pending and completed workloads of HWRTDATA and ZSBUFFER
+ * @Brief Track pending and executed workloads of HWRTDATA and ZSBUFFER
  */
 typedef struct
 {
@@ -284,6 +284,9 @@ typedef struct
 typedef struct
 {
 	IMG_UINT64	u3DReg_IPP_CONTEXT_ADDR;
+#if defined(SUPPORT_TRUSTED_DEVICE)
+	IMG_UINT64	uSecure3DReg_IPP_CONTEXT_ADDR;
+#endif
 } RGXFWIF_3DREGISTERS_CSWITCH;
 
 typedef struct
@@ -298,17 +301,12 @@ typedef struct
 	IMG_UINT64	uCDMReg_CDM_CONTEXT_PDS0_B;
 	IMG_UINT64	uCDMReg_CDM_RESUME_PDS0_B;
 
-#if defined(SUPPORT_SECURE_CONTEXT_SWITCH)
+#if defined(SUPPORT_TRUSTED_DEVICE)
 	IMG_UINT64	uCDMReg_CDM_CONTEXT_SECURE_PDS0;
 	IMG_UINT64	uCDMReg_CDM_CONTEXT_SECURE_PDS0_B;
 
 	IMG_UINT64	uCDMReg_CDM_RESUME_SECURE_PDS0;
 	IMG_UINT64	uCDMReg_CDM_RESUME_SECURE_PDS0_B;
-
-	IMG_DEV_VIRTADDR	uCDMReg_CDM_CONTEXT_sSRBuffer;
-	IMG_DEV_VIRTADDR	uCDMReg_CDM_CONTEXT_sSRBuffer_B;
-
-	IMG_UINT64	uCDMReg_CDM_CONTEXT_STATE_BASE_ADDR;
 #endif
 } RGXFWIF_CDM_REGISTERS_CSWITCH;
 
@@ -316,25 +314,6 @@ static_assert((sizeof(RGXFWIF_CDM_REGISTERS_CSWITCH) % 8U) == 0U,
 			"the size of the structure must be multiple of 8");
 
 #define RGXFWIF_CDM_REGISTERS_CSWITCH_SIZE sizeof(RGXFWIF_CDM_REGISTERS_CSWITCH)
-
-/*!
- * @InGroup ContextSwitching
- * @Brief Render context static register controls for context switch
- */
-typedef struct
-{
-	RGXFWIF_TAREGISTERS_CSWITCH	RGXFW_ALIGN asCtxSwitch_GeomRegs[RGX_NUM_GEOM_CORES];
-	RGXFWIF_3DREGISTERS_CSWITCH RGXFW_ALIGN sCtxSwitch_3DRegs;  /*!< 3D registers for ctx switch */
-} RGXFWIF_STATIC_RENDERCONTEXT_STATE;
-
-#define RGXFWIF_STATIC_RENDERCONTEXT_SIZE sizeof(RGXFWIF_STATIC_RENDERCONTEXT_STATE)
-
-typedef struct
-{
-	RGXFWIF_CDM_REGISTERS_CSWITCH	RGXFW_ALIGN sCtxSwitch_Regs;	/*!< CDM registers for ctx switch */
-} RGXFWIF_STATIC_COMPUTECONTEXT_STATE;
-
-#define RGXFWIF_STATIC_COMPUTECONTEXT_SIZE sizeof(RGXFWIF_STATIC_COMPUTECONTEXT_STATE)
 
 typedef struct
 {
@@ -345,13 +324,6 @@ static_assert((sizeof(RGXFWIF_RDM_REGISTERS_CSWITCH) % 8U) == 0U,
 			"the size of the structure must be multiple of 8");
 
 #define RGXFWIF_RDM_REGISTERS_CSWITCH_SIZE sizeof(RGXFWIF_RDM_REGISTERS_CSWITCH)
-
-typedef struct
-{
-	RGXFWIF_RDM_REGISTERS_CSWITCH	RGXFW_ALIGN sCtxSwitch_Regs;	/*!< RDM registers for ctx switch */
-} RGXFWIF_STATIC_RAYCONTEXT_STATE;
-
-#define RGXFWIF_STATIC_RAYCONTEXT_SIZE sizeof(RGXFWIF_STATIC_RAYCONTEXT_STATE)
 
 /*!
 	@Brief Context reset reason. Last reset reason for a reset context.
@@ -402,12 +374,16 @@ typedef struct
 #define RGX_HEAP_KM_USC_RESERVED_REGION_OFFSET      RGX_HEAP_UM_USC_RESERVED_SIZE
 
 #if defined(RGX_FEATURE_JIT_UVB_ALLOCATION)
-#define RGX_HEAP_UM_GENERAL_RESERVED_SIZE           RGX_HEAP_SIZE_16MiB
+#define RGX_HEAP_UM_GENERAL_RESERVED_SIZE           0x0008000000
 #else
 #define RGX_HEAP_UM_GENERAL_RESERVED_SIZE           DEVMEM_HEAP_RESERVED_SIZE_GRANULARITY
 #endif
 #define RGX_HEAP_UM_GENERAL_RESERVED_REGION_OFFSET  0
 #define RGX_HEAP_KM_GENERAL_RESERVED_REGION_OFFSET  RGX_HEAP_UM_GENERAL_RESERVED_SIZE
+
+#define RGX_HEAP_UM_TEX_STATE_RESERVED_SIZE               DEVMEM_HEAP_RESERVED_SIZE_GRANULARITY
+#define RGX_HEAP_UM_TEX_STATE_RESERVED_REGION_OFFSET      0
+#define RGX_HEAP_KM_TEX_STATE_RESERVED_REGION_OFFSET      RGX_HEAP_UM_TEX_STATE_RESERVED_SIZE
 
 /*
  * 4 dwords reserved for shared register management.
@@ -644,6 +620,9 @@ typedef enum
 #define RGXFWIF_PHR_MODE_OFF			(0UL)
 #define RGXFWIF_PHR_MODE_RD_RESET		(1UL)
 
+/* Firmware SysData Flags */
+#define RGXFWIF_SYSDATA_FLAG_BLOCKED_GPU_WORK	(IMG_UINT32_C(0x1) << 0U)	/*!< GPU has pending workloads that are blocked */
+
 typedef IMG_UINT32 RGXFWIF_HWR_STATEFLAGS;
 
 typedef IMG_UINT32 RGXFWIF_HWR_RECOVERYFLAGS;
@@ -685,6 +664,10 @@ typedef struct
 	RGXFWIF_HWR_RECOVERYFLAGS  aui32HWRRecoveryFlags[RGXFWIF_DM_MAX]; /*!< Each DM's HWR state */
 	IMG_UINT32                 ui32FwSysDataFlags;                      /*!< Compatibility and other flags */
 	IMG_UINT32                 ui32MemFaultCheck;                       /*!< Device mem fault check on PCI systems */
+	IMG_UINT32 RGXFW_ALIGN     aaui32DmActiveTimeTicks[RGXFWIF_GPU_UTIL_DM_MAX][RGXFW_MAX_NUM_OSIDS]; /*!< Shared copy of the accumulated timer ticks DMs spent in active state on behalf of each DriverID */
+	IMG_UINT64                 ui64GpuActiveTimeNS;                     /*!< Shared copy of the accumulated time in nanoseconds the GPU spent in Active state */
+	IMG_UINT64                 ui64FwStatsTimestampNS;                  /*!< Timestamp in estimated host time when the Firmware saved the utilisation data */
+	IMG_BOOL                   bGpuActive;                              /*!< Indicator specifying if the GPU was active during the Firmware's last utilisation check */
 } UNCACHED_ALIGN RGXFWIF_SYSDATA;
 
 #if defined(PVRSRV_STALLED_CCB_ACTION)
@@ -701,6 +684,8 @@ typedef struct
 #endif
 
 #define RGXFWIF_OFFLINE_DATA_BUFFER_SIZE_IN_WORDS (128U)
+
+#define RGXFWIF_FWOSDATA_FLAG_64BIT_FREELIST_ID (IMG_UINT32_C(0x1) << 0U)	/*!< The FW supports 64-bit freelist id */
 
 /*!
  * @InGroup ContextSwitching
@@ -866,8 +851,6 @@ typedef RGXFWIF_DEV_VIRTADDR  PRGXFWIF_CCCB;
 typedef RGXFWIF_DEV_VIRTADDR  PRGXFWIF_CCCB_CTL;
 typedef RGXFWIF_DEV_VIRTADDR  PRGXFWIF_FWMEMCONTEXT;
 
-/*! @} End of HWRInfo */
-
 /*!
  * @InGroup RenderTarget
  * @Brief Firmware Freelist holding usage state of the Parameter Buffers
@@ -909,6 +892,116 @@ typedef struct {RGXFWIF_DEV_VIRTADDR sNext;
 
 #define RGXFWIF_MAX_NUM_CANCEL_REQUESTS		(8U)		/* Maximum number of workload cancellation requests */
 
+typedef struct
+{
+	/* Index for the KM Workload estimation return data array */
+	IMG_UINT16 RGXFW_ALIGN         ui16ReturnDataIndex;
+	/* Predicted time taken to do the work in cycles */
+	IMG_UINT32 RGXFW_ALIGN         ui32CyclesPrediction;
+	/* Deadline for the workload (in usecs) */
+	IMG_UINT64 RGXFW_ALIGN         ui64Deadline;
+} RGXFWIF_WORKEST_KICK_DATA;
+
+typedef struct
+{
+	bool       bSaved;
+	IMG_UINT64 ui64CheckSum[4];
+}RGXFWIF_TRP_CHECKSUM_GEOM_ENTRY;
+
+typedef IMG_UINT32 RGXFWIF_CCB_CMD_TYPE;
+
+typedef IMG_UINT64 RGXFWIF_TRP_CHECKSUM_2D[RGX_TRP_MAX_NUM_CORES][2];
+typedef IMG_UINT64 RGXFWIF_TRP_CHECKSUM_3D[RGX_TRP_MAX_NUM_CORES][4];
+typedef RGXFWIF_TRP_CHECKSUM_GEOM_ENTRY RGXFWIF_TRP_CHECKSUM_GEOM[RGX_TRP_MAX_NUM_CORES];
+
+typedef struct
+{
+	IMG_UINT32	ui32ExtJobRefToDisableZSStore;
+	IMG_BOOL	bDisableZStore;
+	IMG_BOOL	bDisableSStore;
+} RGXFWIF_DISABLE_ZSSTORE;
+
+#define MAX_ZSSTORE_DISABLE 8
+
+/*! @Brief Command header of a command in the client CCB buffer.
+ *
+ *  Followed by this header is the command-data specific to the
+ *  command-type as specified in the header.
+ */
+typedef struct
+{
+	RGXFWIF_CCB_CMD_TYPE					eCmdType;      /*!< Command data type following this command header */
+	IMG_UINT32								ui32CmdSize;   /*!< Size of the command following this header */
+	IMG_UINT32								ui32ExtJobRef; /*!< external job reference - provided by client and used in debug for tracking submitted work */
+	IMG_UINT32								ui32IntJobRef; /*!< internal job reference - generated by services and used in debug for tracking submitted work */
+#if defined(SUPPORT_WORKLOAD_ESTIMATION)
+	RGXFWIF_WORKEST_KICK_DATA RGXFW_ALIGN	sWorkEstKickData; /*!< Workload Estimation - Workload Estimation Data */
+#endif
+} RGXFWIF_CCB_CMD_HEADER;
+
+typedef struct RGX_CONTEXT_DATA_GEOM_
+{
+	IMG_INT32				i32StatsNumOutOfMemory;		/*!< Number of OOMs on this context since last update */
+	IMG_BOOL				bGeomOOMDisabled;		/*!< True when Geom DM OOM is not allowed */
+	RGXFWIF_TAREGISTERS_CSWITCH	RGXFW_ALIGN asCtxSwitch_GeomRegs[RGX_NUM_GEOM_CORES];	/*!< Geom registers for ctx switch */
+
+#if defined(SUPPORT_TRP)
+	RGXFWIF_TRP_CHECKSUM_GEOM	aui64TRPChecksumsGeom;	/*!< Used by Firmware to store checksums during TA WRR */
+	RGXFWIF_DM			eTRPGeomCoreAffinity; /* !< Represent the DM affinity for pending 2nd TRP pass of GEOM otherwise points RGXFWIF_DM_MAX. */
+#endif
+} RGX_CONTEXT_DATA_GEOM;
+
+#define RGXFWIF_CONTEXT_DATA_GEOM_SIZE	sizeof(RGX_CONTEXT_DATA_GEOM)
+
+typedef struct RGX_CONTEXT_DATA_FRAG_
+{
+	IMG_INT32				i32StatsNumPartialRenders;	/*!< Number of PRs on this context since last update */
+	IMG_BOOL				bIPPContextNeedsReset;			/*!< Following HWR during 3D, IPP context needs resetting */
+	IMG_BOOL				bIPPSecureContextNeedsReset;	/*!< Following HWR during secure 3D, IPP context needs resetting */
+	RGXFWIF_3DREGISTERS_CSWITCH RGXFW_ALIGN sCtxSwitch_3DRegs;  /*!< 3D registers for ctx switch */
+	RGXFWIF_CCB_CMD_HEADER  sCrossDM3DFencePRCmdHeader;
+	RGXFWIF_UFO				sCrossDM3DFencePRUFOPtr;
+
+	RGXFWIF_DISABLE_ZSSTORE sDisableZSStoreQueue[MAX_ZSSTORE_DISABLE];
+	IMG_UINT32			ui32ZSStoreQueueCount;
+	IMG_UINT32			ui32WriteOffsetOfDisableZSStore;
+
+#if defined(SUPPORT_TRP)
+	RGXFWIF_TRP_CHECKSUM_3D		aui64TRPChecksums3D;	/*!< Used by Firmware to store checksums during 3D WRR */
+#endif
+
+} RGX_CONTEXT_DATA_FRAG;
+
+#define RGXFWIF_CONTEXT_DATA_FRAG_SIZE	sizeof(RGX_CONTEXT_DATA_FRAG)
+
+typedef struct RGX_CONTEXT_DATA_COMP_
+{
+	RGXFWIF_CDM_REGISTERS_CSWITCH	RGXFW_ALIGN sCtxSwitch_Regs;	/*!< CDM registers for ctx switch */
+	IMG_UINT32		aui32WGPChecksum[RGX_WGP_MAX_NUM_CORES];
+
+} RGX_CONTEXT_DATA_COMP;
+
+#define RGXFWIF_CONTEXT_DATA_COMP_SIZE	sizeof(RGX_CONTEXT_DATA_COMP)
+
+typedef struct RGX_CONTEXT_DATA_RAY_
+{
+	RGXFWIF_RDM_REGISTERS_CSWITCH	RGXFW_ALIGN sCtxSwitch_Regs;	/*!< RDM registers for ctx switch */
+} RGX_CONTEXT_DATA_RAY;
+
+#define RGXFWIF_CONTEXT_DATA_RAY_SIZE sizeof(RGX_CONTEXT_DATA_RAY)
+
+typedef struct RGX_CONTEXT_DATA_TRANSFER_
+{
+#if defined(SUPPORT_TRP)
+	RGXFWIF_TRP_CHECKSUM_2D	RGXFW_ALIGN	aui64TRPChecksums2D; /*!< Used by Firmware to store checksums during TDM WRR */
+#else
+	/* Avoid empty struct warning */
+	IMG_UINT32	ui32Unused;
+#endif
+} RGX_CONTEXT_DATA_TRANSFER;
+
+#define RGXFWIF_CONTEXT_DATA_TRANSFER_SIZE sizeof(RGX_CONTEXT_DATA_TRANSFER)
+
 /*!
  * @InGroup WorkloadContexts
  * @Brief Firmware Common Context (or FWCC)
@@ -936,16 +1029,12 @@ typedef struct RGXFWIF_FWCOMMONCONTEXT_
 
 	/* Statistic updates waiting to be passed back to the host... */
 	IMG_INT32				i32StatsNumStores;		/*!< Number of stores on this context since last update */
-	IMG_INT32				i32StatsNumOutOfMemory;		/*!< Number of OOMs on this context since last update */
-	IMG_INT32				i32StatsNumPartialRenders;	/*!< Number of PRs on this context since last update */
-	RGXFWIF_DM				eDM;				/*!< Data Master type */
 	RGXFW_DLLIST_NODE		RGXFW_ALIGN  sBufStalledNode;			/*!< List entry for the buffer stalled list */
 	IMG_UINT64				RGXFW_ALIGN  ui64CBufQueueCtrlAddr;	/*!< Address of the circular buffer queue pointers */
 
 	IMG_UINT64				RGXFW_ALIGN  ui64RobustnessAddress;
 	IMG_UINT32				ui32MaxDeadlineMS;			/*!< Max HWR deadline limit in ms */
 	bool					bReadOffsetNeedsReset;			/*!< Following HWR circular buffer read-offset needs resetting */
-	IMG_BOOL				bIPPContextNeedsReset;			/*!< Following HWR during 3D, IPP context needs resetting */
 
 	RGXFW_DLLIST_NODE		RGXFW_ALIGN sWaitingNode;		/*!< List entry for the waiting list */
 	RGXFW_DLLIST_NODE		RGXFW_ALIGN sRunNode;			/*!< List entry for the run list */
@@ -957,24 +1046,34 @@ typedef struct RGXFWIF_FWCOMMONCONTEXT_
 	IMG_UINT32				ui32ServerCommonContextID;	/*!< the Server Common Context */
 	IMG_UINT32				ui32PID;			/*!< associated process ID */
 
-	IMG_BOOL				bGeomOOMDisabled;		/*!< True when Geom DM OOM is not allowed */
-
 	IMG_UINT32				ui32PipelinedKicks;		/*!< Number of kick from this CCB currently submitted to the DM pipeline */
 	IMG_CHAR				szProcName[RGXFW_PROCESS_NAME_LEN];	/*!< User process name */
-
 	IMG_UINT32				ui32DeferCount;		/*!< Number of context defers before forced scheduling of context */
 	IMG_UINT32				aui32FirstIntJobRefToCancel[RGXFWIF_MAX_NUM_CANCEL_REQUESTS];	/*!< Saved values of the beginning of range of IntJobRefs at and above which workloads will be discarded */
 	IMG_UINT32				aui32FirstValidIntJobRef[RGXFWIF_MAX_NUM_CANCEL_REQUESTS];	/*!< Saved values of the end of range of IntJobRef below which workloads will be discarded */
 	IMG_BOOL				bCancelRangesActive;	/*!< True if any active ranges in aui32FirstIntJobRefToCancel and aui32FirstValidIntJobRef arrays */
 	IMG_BOOL				bLastKickedCmdWasSafetyOnly;
 	IMG_UINT32				ui32UID;			/*!< associated process UID used in FW managed gpu work period hwperf events */
-	RGXFWIF_DM				eUnPauseDM;				/*!< current DM needs to unpause another DM. */
 	IMG_UINT32				ui32CrossDMUpdateCmdOffset;
 	IMG_UINT32				ui32CrossDMTaskCmdOffset;
+	IMG_UINT32				ui32WorkEstCCBSubmitted; /*!< Number of commands submitted to the WorkEst FW CCB */
+
+	struct
+	{
+		RGXFWIF_DM				eDM;				/*!< Data Master type */
+		RGXFWIF_DM				eUnPauseDM;			/*!< current DM needs to unpause another DM. */
+	} sRangeCheckBeforeUse;
+
+	union
+	{
+		RGX_CONTEXT_DATA_GEOM	sGeom;
+		RGX_CONTEXT_DATA_FRAG	sFrag;
+		RGX_CONTEXT_DATA_COMP	sComp;
+		RGX_CONTEXT_DATA_RAY	sRay;
+		RGX_CONTEXT_DATA_TRANSFER	sTransfer;
+	} uDMSpecific;
 } UNCACHED_ALIGN RGXFWIF_FWCOMMONCONTEXT;
 
-static_assert(sizeof(RGXFWIF_FWCOMMONCONTEXT) <= 264U,
-              "Size of structure RGXFWIF_FWCOMMONCONTEXT exceeds maximum expected size.");
 
 /*!
  ******************************************************************************
@@ -1000,6 +1099,8 @@ typedef RGXFWIF_DEV_VIRTADDR  PRGXFWIF_FREELIST;
 #define HWRTDATA_TRP_SAFETY_IN_PROGRESS   (IMG_UINT32_C(1) << 9)
 #define HWRTDATA_TRP_MISSION_IN_PROGRESS  (IMG_UINT32_C(1) << 10)
 #endif
+#define HWRTDATA_DISCARD_DUE_TO_HWR       (IMG_UINT32_C(1) << 11)
+#define HWRTDATA_STATE_UNUSED             (IMG_UINT32_C(1) << 12)
 
 typedef enum
 {
@@ -1067,7 +1168,6 @@ typedef struct
 	IMG_DEV_VIRTADDR		RGXFW_ALIGN sPMMListDevVAddr;			/*!< Mlist table base */
 #else
 	IMG_DEV_VIRTADDR		RGXFW_ALIGN sPMRenderStateDevVAddr;		/*!< Series8 PM State buffers */
-	IMG_DEV_VIRTADDR		RGXFW_ALIGN sPMSecureRenderStateDevVAddr;
 #endif
 
 	PRGXFWIF_FREELIST		RGXFW_ALIGN apsFreeLists[RGXFW_MAX_FREELISTS]; /*!< Freelist to use */
@@ -1089,9 +1189,6 @@ typedef struct
 #if defined(PM_INTERACTIVE_MODE)
 	IMG_UINT64			RGXFW_ALIGN ui64PMAListStackPointer;		/*!< Freelist page table entry for current Mlist page */
 	IMG_UINT32			ui32PMMListStackPointer;			/*!< Current Mlist page */
-#endif
-#if defined(SUPPORT_TRP)
-	IMG_UINT32			ui32KickFlagsCopy;
 #endif
 
 	RGXFWIF_CLEANUP_CTL		RGXFW_ALIGN_DCACHEL sCleanupState;					/*!< Render target clean up state */
@@ -1136,7 +1233,8 @@ typedef enum
 #define RGX_HEAP_KM_USC_RESERVED_SIZE                              RGXFWIF_KM_USC_TQ_SHADER_CODE_MAX_SIZE_BYTES
 #define RGX_HEAP_USC_RESERVED_TOTAL_SIZE                           RGX_HEAP_UM_USC_RESERVED_SIZE + RGX_HEAP_KM_USC_RESERVED_SIZE
 
-#define RGXFW_SCRATCH_BUF_SIZE             (1048576U)
+#define RGX_HEAP_KM_TEX_STATE_RESERVED_SIZE                        0
+#define RGX_HEAP_TEX_STATE_RESERVED_TOTAL_SIZE                     RGX_HEAP_UM_TEX_STATE_RESERVED_SIZE + RGX_HEAP_KM_TEX_STATE_RESERVED_SIZE
 
 #define RGX_MAX_SECURE_ALLOC_NUM_CORES     (8U)
 
@@ -1148,23 +1246,8 @@ typedef enum
 #define RGXFWIF_KM_GENERAL_HEAP_CDM_SECURE_QUEUE_OFFSET_BYTES      (RGXFWIF_KM_GENERAL_HEAP_TDM_SECURE_QUEUE_OFFSET_BYTES + RGXFWIF_KM_GENERAL_HEAP_TDM_SECURE_QUEUE_MAX_SIZE_BYTES)
 #define RGXFWIF_KM_GENERAL_HEAP_CDM_SECURE_QUEUE_MAX_SIZE_BYTES    2048U
 
-#define RGXFWIF_KM_GENERAL_HEAP_3D_SECURE_IPP_BUF_OFFSET_BYTES     (RGXFWIF_KM_GENERAL_HEAP_CDM_SECURE_QUEUE_OFFSET_BYTES + RGXFWIF_KM_GENERAL_HEAP_CDM_SECURE_QUEUE_MAX_SIZE_BYTES)
-#define RGXFWIF_KM_GENERAL_HEAP_3D_SECURE_IPP_BUF_MAX_SIZE_BYTES   8192U
-
-#define RGXFWIF_KM_GENERAL_HEAP_CDM_SECURE_SR_BUF_OFFSET_BYTES     (RGXFWIF_KM_GENERAL_HEAP_3D_SECURE_IPP_BUF_OFFSET_BYTES + RGXFWIF_KM_GENERAL_HEAP_3D_SECURE_IPP_BUF_MAX_SIZE_BYTES)
-#define RGXFWIF_KM_GENERAL_HEAP_CDM_SECURE_SR_BUF_MAX_SIZE_BYTES   (0x00004000U * RGX_MAX_SECURE_ALLOC_NUM_CORES *  RGX_MAX_SECURE_ALLOC_NUM_CLUSTERS + 48U + 1023U)
-
-#define RGXFWIF_KM_GENERAL_HEAP_CDM_SECURE_SR_B_BUF_OFFSET_BYTES   (RGXFWIF_KM_GENERAL_HEAP_CDM_SECURE_SR_BUF_OFFSET_BYTES + RGXFWIF_KM_GENERAL_HEAP_CDM_SECURE_SR_BUF_MAX_SIZE_BYTES)
-#define RGXFWIF_KM_GENERAL_HEAP_CDM_SECURE_SR_B_BUF_MAX_SIZE_BYTES RGXFWIF_KM_GENERAL_HEAP_CDM_SECURE_SR_BUF_MAX_SIZE_BYTES
-
-#define RGXFWIF_KM_GENERAL_HEAP_CDM_SECURE_CONTEXT_OFFSET_BYTES    (RGXFWIF_KM_GENERAL_HEAP_CDM_SECURE_SR_B_BUF_OFFSET_BYTES + RGXFWIF_KM_GENERAL_HEAP_CDM_SECURE_SR_B_BUF_MAX_SIZE_BYTES)
-#define RGXFWIF_KM_GENERAL_HEAP_CDM_SECURE_CONTEXT_MAX_SIZE_BYTES  (((0x00000080U + 127U) * RGX_MAX_SECURE_ALLOC_NUM_CORES) + 127U)
-
-#define RGXFWIF_KM_GENERAL_HEAP_TDM_SECURE_CONTEXT_OFFSET_BYTES    (RGXFWIF_KM_GENERAL_HEAP_CDM_SECURE_CONTEXT_OFFSET_BYTES + RGXFWIF_KM_GENERAL_HEAP_CDM_SECURE_CONTEXT_MAX_SIZE_BYTES)
-#define RGXFWIF_KM_GENERAL_HEAP_TDM_SECURE_CONTEXT_MAX_SIZE_BYTES  (((0x00000180U + 127U) * RGX_MAX_SECURE_ALLOC_NUM_CORES) + 127U)
-
 #if defined(SUPPORT_TRUSTED_DEVICE)
-#define RGXFWIF_KM_GENERAL_HEAP_RESERVED_SIZE                      PVR_ALIGN((RGXFWIF_KM_GENERAL_HEAP_TDM_SECURE_QUEUE_MAX_SIZE_BYTES + RGXFWIF_KM_GENERAL_HEAP_CDM_SECURE_QUEUE_MAX_SIZE_BYTES + RGXFWIF_KM_GENERAL_HEAP_3D_SECURE_IPP_BUF_MAX_SIZE_BYTES + RGXFWIF_KM_GENERAL_HEAP_CDM_SECURE_SR_BUF_MAX_SIZE_BYTES + RGXFWIF_KM_GENERAL_HEAP_CDM_SECURE_SR_B_BUF_MAX_SIZE_BYTES + RGXFWIF_KM_GENERAL_HEAP_CDM_SECURE_CONTEXT_MAX_SIZE_BYTES + RGXFWIF_KM_GENERAL_HEAP_TDM_SECURE_CONTEXT_MAX_SIZE_BYTES), DEVMEM_HEAP_RESERVED_SIZE_GRANULARITY)
+#define RGXFWIF_KM_GENERAL_HEAP_RESERVED_SIZE                      PVR_ALIGN((RGXFWIF_KM_GENERAL_HEAP_TDM_SECURE_QUEUE_MAX_SIZE_BYTES + RGXFWIF_KM_GENERAL_HEAP_CDM_SECURE_QUEUE_MAX_SIZE_BYTES), DEVMEM_HEAP_RESERVED_SIZE_GRANULARITY)
 #else
 #define RGXFWIF_KM_GENERAL_HEAP_RESERVED_SIZE                      0
 #endif

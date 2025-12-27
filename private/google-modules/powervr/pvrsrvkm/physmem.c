@@ -273,7 +273,7 @@ void DevPhysMemFree(PVRSRV_DEVICE_NODE *psDevNode,
 
 }
 
-PVRSRV_ERROR PhysMemValidateMappingTable(IMG_UINT32 ui32TotalNumVirtChunks,
+static PVRSRV_ERROR _ValidateMappingTable(IMG_UINT32 ui32TotalNumVirtChunks,
                                          IMG_UINT32 ui32IndexCount,
                                          const IMG_UINT32 *pui32MappingTable)
 {
@@ -497,9 +497,9 @@ PVRSRV_ERROR PhysMemValidateParams(PVRSRV_DEVICE_NODE *psDevNode,
 
 	/* Parameter validation - Mapping table entries */
 	{
-		PVRSRV_ERROR eErr = PhysMemValidateMappingTable(ui32LogicalChunkCount,
-		                                                ui32PhysChunkCount,
-		                                                pui32MappingTable);
+		PVRSRV_ERROR eErr = _ValidateMappingTable(ui32LogicalChunkCount,
+		                                          ui32PhysChunkCount,
+		                                          pui32MappingTable);
 		PVR_RETURN_IF_ERROR(eErr);
 	}
 
@@ -810,23 +810,7 @@ PVRSRVPhysHeapGetMemInfoKM(CONNECTION_DATA *psConnection,
                            PVRSRV_DEVICE_NODE *psDevNode,
                            IMG_UINT32 ui32PhysHeapCount,
                            PVRSRV_PHYS_HEAP *paePhysHeapID,
-                           PHYS_HEAP_MEM_STATS_V1 *paPhysHeapMemStats)
-{
-	PVR_UNREFERENCED_PARAMETER(psConnection);
-	PVR_UNREFERENCED_PARAMETER(psDevNode);
-	PVR_UNREFERENCED_PARAMETER(ui32PhysHeapCount);
-	PVR_UNREFERENCED_PARAMETER(paePhysHeapID);
-	PVR_UNREFERENCED_PARAMETER(paPhysHeapMemStats);
-
-	return PVRSRV_ERROR_NOT_IMPLEMENTED;
-}
-
-PVRSRV_ERROR
-PVRSRVPhysHeapGetMemInfo2KM(CONNECTION_DATA *psConnection,
-                            PVRSRV_DEVICE_NODE *psDevNode,
-                            IMG_UINT32 ui32PhysHeapCount,
-                            PVRSRV_PHYS_HEAP *paePhysHeapID,
-                            PHYS_HEAP_MEM_STATS_V2 *paPhysHeapMemStats)
+                           PHYS_HEAP_MEM_STATS *paPhysHeapMemStats)
 {
 	PVR_UNREFERENCED_PARAMETER(psConnection);
 	return PhysHeapGetMemInfo(psDevNode,

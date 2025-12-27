@@ -53,10 +53,18 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "pdump_km.h"
 #include "osfunc.h"
 #include "tlstream.h"
+#include "tlintern.h"
 #include "rgxhwperf_common.h"
 #if defined(PVRSRV_ENABLE_GPU_MEMORY_INFO)
 #include "ri_server.h"
 #endif
+
+/* Set the maximum time the CleanupThread should retry destroying resources
+ * associated with a connection before giving up.
+ * This value is derived from MAX_HW_TIME_US which on a normal system is
+ * usually between 500 to 1000ms, so the below formula should give us time
+ * between 2 to 4 minutes on most of the systems. */
+#define CONNECTION_CLEANUP_RETRY_TIMEOUT_MS (MAX_HW_TIME_US / 1000 * 240)
 
 /* PID associated with Connection currently being purged by Cleanup thread */
 static IMG_PID gCurrentPurgeConnectionPid;
@@ -91,6 +99,12 @@ static PVRSRV_ERROR ConnectionDataDestroy(CONNECTION_DATA *psConnection)
 		PVR_DPF((PVR_DBG_MESSAGE, "Destroyed private stream."));
 	}
 
+	if (psConnection->ui32ClientFlags & SRV_FLAGS_HWPERF_DEFERRED_DESTROY)
+	{
+		TLDeactivateDeferredFree();
+	}
+
+	/* Get process handle base to decrement the refcount */
 	/* Get process handle base to decrement the refcount */
 	psProcessHandleBase = psConnection->psProcessHandleBase;
 
@@ -404,8 +418,8 @@ void PVRSRVCommonConnectionDisconnect(void *pvDataPtr)
 		 * signalled by the device MISR */
 		psConnectionData->sCleanupThreadFn.bDependsOnHW = IMG_TRUE;
 		psConnectionData->sCleanupThreadFn.eCleanupType = PVRSRV_CLEANUP_TYPE_CONNECTION;
-		CLEANUP_THREAD_SET_RETRY_COUNT(&psConnectionData->sCleanupThreadFn,
-		                               CLEANUP_THREAD_RETRY_COUNT_DEFAULT);
+		CLEANUP_THREAD_SET_RETRY_TIMEOUT(&psConnectionData->sCleanupThreadFn,
+		                                 CONNECTION_CLEANUP_RETRY_TIMEOUT_MS);
 		PVRSRVCleanupThreadAddWork(psDevNode, &psConnectionData->sCleanupThreadFn);
 	}
 }

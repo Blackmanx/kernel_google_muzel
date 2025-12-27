@@ -53,9 +53,6 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "pvr_debug.h"
 #include "connection_server.h"
 #include "pvr_bridge.h"
-#if defined(SUPPORT_RGX)
-#include "rgx_bridge.h"
-#endif
 #include "srvcore.h"
 #include "handle.h"
 
@@ -65,7 +62,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  * Server-side bridge entry points
  */
 
-static IMG_INT
+static size_t
 PVRSRVBridgePDumpTraceBuffer(IMG_UINT32 ui32DispatchTableEntry,
 			     IMG_UINT8 * psPDumpTraceBufferIN_UI8,
 			     IMG_UINT8 * psPDumpTraceBufferOUT_UI8, CONNECTION_DATA * psConnection)
@@ -79,10 +76,10 @@ PVRSRVBridgePDumpTraceBuffer(IMG_UINT32 ui32DispatchTableEntry,
 	    PVRSRVPDumpTraceBufferKM(psConnection, OSGetDevNode(psConnection),
 				     psPDumpTraceBufferIN->ui32PDumpFlags);
 
-	return 0;
+	return offsetof(PVRSRV_BRIDGE_OUT_PDUMPTRACEBUFFER, eError);
 }
 
-static IMG_INT
+static size_t
 PVRSRVBridgePDumpSignatureBuffer(IMG_UINT32 ui32DispatchTableEntry,
 				 IMG_UINT8 * psPDumpSignatureBufferIN_UI8,
 				 IMG_UINT8 * psPDumpSignatureBufferOUT_UI8,
@@ -99,12 +96,12 @@ PVRSRVBridgePDumpSignatureBuffer(IMG_UINT32 ui32DispatchTableEntry,
 	    PVRSRVPDumpSignatureBufferKM(psConnection, OSGetDevNode(psConnection),
 					 psPDumpSignatureBufferIN->ui32PDumpFlags);
 
-	return 0;
+	return offsetof(PVRSRV_BRIDGE_OUT_PDUMPSIGNATUREBUFFER, eError);
 }
 
 #define PVRSRVBridgePDumpComputeCRCSignatureCheck NULL
 
-static IMG_INT
+static size_t
 PVRSRVBridgePDumpCRCSignatureCheck(IMG_UINT32 ui32DispatchTableEntry,
 				   IMG_UINT8 * psPDumpCRCSignatureCheckIN_UI8,
 				   IMG_UINT8 * psPDumpCRCSignatureCheckOUT_UI8,
@@ -121,10 +118,30 @@ PVRSRVBridgePDumpCRCSignatureCheck(IMG_UINT32 ui32DispatchTableEntry,
 	    PVRSRVPDumpCRCSignatureCheckKM(psConnection, OSGetDevNode(psConnection),
 					   psPDumpCRCSignatureCheckIN->ui32PDumpFlags);
 
-	return 0;
+	return offsetof(PVRSRV_BRIDGE_OUT_PDUMPCRCSIGNATURECHECK, eError);
 }
 
-static IMG_INT
+static size_t
+PVRSRVBridgePDumpTRPSignatureCheck(IMG_UINT32 ui32DispatchTableEntry,
+				   IMG_UINT8 * psPDumpTRPSignatureCheckIN_UI8,
+				   IMG_UINT8 * psPDumpTRPSignatureCheckOUT_UI8,
+				   CONNECTION_DATA * psConnection)
+{
+	PVRSRV_BRIDGE_IN_PDUMPTRPSIGNATURECHECK *psPDumpTRPSignatureCheckIN =
+	    (PVRSRV_BRIDGE_IN_PDUMPTRPSIGNATURECHECK *)
+	    IMG_OFFSET_ADDR(psPDumpTRPSignatureCheckIN_UI8, 0);
+	PVRSRV_BRIDGE_OUT_PDUMPTRPSIGNATURECHECK *psPDumpTRPSignatureCheckOUT =
+	    (PVRSRV_BRIDGE_OUT_PDUMPTRPSIGNATURECHECK *)
+	    IMG_OFFSET_ADDR(psPDumpTRPSignatureCheckOUT_UI8, 0);
+
+	psPDumpTRPSignatureCheckOUT->eError =
+	    PVRSRVPDumpTRPSignatureCheckKM(psConnection, OSGetDevNode(psConnection),
+					   psPDumpTRPSignatureCheckIN->ui32PDumpFlags);
+
+	return offsetof(PVRSRV_BRIDGE_OUT_PDUMPTRPSIGNATURECHECK, eError);
+}
+
+static size_t
 PVRSRVBridgePDumpValCheckPreCommand(IMG_UINT32 ui32DispatchTableEntry,
 				    IMG_UINT8 * psPDumpValCheckPreCommandIN_UI8,
 				    IMG_UINT8 * psPDumpValCheckPreCommandOUT_UI8,
@@ -141,10 +158,10 @@ PVRSRVBridgePDumpValCheckPreCommand(IMG_UINT32 ui32DispatchTableEntry,
 	    PVRSRVPDumpValCheckPreCommandKM(psConnection, OSGetDevNode(psConnection),
 					    psPDumpValCheckPreCommandIN->ui32PDumpFlags);
 
-	return 0;
+	return offsetof(PVRSRV_BRIDGE_OUT_PDUMPVALCHECKPRECOMMAND, eError);
 }
 
-static IMG_INT
+static size_t
 PVRSRVBridgePDumpValCheckPostCommand(IMG_UINT32 ui32DispatchTableEntry,
 				     IMG_UINT8 * psPDumpValCheckPostCommandIN_UI8,
 				     IMG_UINT8 * psPDumpValCheckPostCommandOUT_UI8,
@@ -161,7 +178,7 @@ PVRSRVBridgePDumpValCheckPostCommand(IMG_UINT32 ui32DispatchTableEntry,
 	    PVRSRVPDumpValCheckPostCommandKM(psConnection, OSGetDevNode(psConnection),
 					     psPDumpValCheckPostCommandIN->ui32PDumpFlags);
 
-	return 0;
+	return offsetof(PVRSRV_BRIDGE_OUT_PDUMPVALCHECKPOSTCOMMAND, eError);
 }
 
 /* ***************************************************************************
@@ -198,6 +215,11 @@ PVRSRV_ERROR InitRGXPDUMPBridge(void)
 			      sizeof(PVRSRV_BRIDGE_IN_PDUMPCRCSIGNATURECHECK),
 			      sizeof(PVRSRV_BRIDGE_OUT_PDUMPCRCSIGNATURECHECK));
 
+	SetDispatchTableEntry(PVRSRV_BRIDGE_RGXPDUMP, PVRSRV_BRIDGE_RGXPDUMP_PDUMPTRPSIGNATURECHECK,
+			      PVRSRVBridgePDumpTRPSignatureCheck, NULL,
+			      sizeof(PVRSRV_BRIDGE_IN_PDUMPTRPSIGNATURECHECK),
+			      sizeof(PVRSRV_BRIDGE_OUT_PDUMPTRPSIGNATURECHECK));
+
 	SetDispatchTableEntry(PVRSRV_BRIDGE_RGXPDUMP,
 			      PVRSRV_BRIDGE_RGXPDUMP_PDUMPVALCHECKPRECOMMAND,
 			      PVRSRVBridgePDumpValCheckPreCommand, NULL,
@@ -229,6 +251,9 @@ void DeinitRGXPDUMPBridge(void)
 
 	UnsetDispatchTableEntry(PVRSRV_BRIDGE_RGXPDUMP,
 				PVRSRV_BRIDGE_RGXPDUMP_PDUMPCRCSIGNATURECHECK);
+
+	UnsetDispatchTableEntry(PVRSRV_BRIDGE_RGXPDUMP,
+				PVRSRV_BRIDGE_RGXPDUMP_PDUMPTRPSIGNATURECHECK);
 
 	UnsetDispatchTableEntry(PVRSRV_BRIDGE_RGXPDUMP,
 				PVRSRV_BRIDGE_RGXPDUMP_PDUMPVALCHECKPRECOMMAND);

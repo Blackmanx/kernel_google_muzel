@@ -11,6 +11,8 @@ WORKSPACE = os.getcwd()
 MANIFEST_BRANCH = "android15-gs-pixel-6.6"
 
 ALLOWED_MODULES = ["powervr", "trusty", "soc", "perf", "iif", "power/mitigation"]
+DISALLOWED_KOS = ["dwc3-google"]
+DISALLOWED_PIXEL_SUBDIRS = ["common-staging"]
 ALLOWED_DEVICES = ["common", "lga", "muzel"]
 
 def acquire_manifest():
@@ -34,14 +36,26 @@ def fix_manifest():
             if pattern in name:
                 found = False
                 for am in allow_list:
-                    if am in name:
+                    if pattern + "/" + am in name:
                         found = True
                         break
                 if not found:
                     root.remove(project)
+    def apply_disallow_list(pattern, disallow_list):
+        for project in root.findall('project'):
+            name = project.attrib['name']
+            if pattern in name:
+                found = False
+                for am in disallow_list:
+                    if pattern + "/" + am in name:
+                        found = True
+                        break
+                if found:
+                    root.remove(project)
 
     apply_allow_list("google-modules", ALLOWED_MODULES)
-    apply_allow_list("devices", ALLOWED_DEVICES)
+    apply_allow_list("devices/google", ALLOWED_DEVICES)
+    apply_disallow_list("kernel-pixel", DISALLOWED_PIXEL_SUBDIRS)
 
     tree.write(os.path.join(WORKSPACE, ".repo", "manifests", "default.xml"))
 
@@ -96,9 +110,14 @@ def patch_unneeded_dependencies():
     def patcher(line):
         if module_re.search(line):
             for m in ALLOWED_MODULES:
-                if m in line:
+                if "google-modules/" + m in line:
                     return line
             return None
+        if ".ko" in line:
+            for m in DISALLOWED_KOS:
+                if m in line:
+                    return None
+            return line
         return line
     for p in paths_to_patch:
         patch_path(p, patcher)
@@ -179,6 +198,8 @@ def patch_defconfig():
         "CONFIG_GOOGLE_POWER_CONTROLLER",
         "CONFIG_GOOGLE_ACFW_DEBUG",
         "CONFIG_PIXEL_POWER_REBOOT",
+        # USB driver is broken
+        "CONFIG_USB_DWC3_GOOGLE",
     ]
     def patcher(line):
         for c in suppressed_configs:
@@ -253,6 +274,19 @@ def patch_power_controller_ko():
         "lga",
         "BUILD.bazel"), patcher)
 
+def patch_kernel_package():
+    def patcher(line):
+        if "build --kernel_package=@//aosp-staging" in line:
+            return "-build --kernel_package=@//aosp-with-prebuilts"
+        return line
+    patch_path(os.path.join(
+        WORKSPACE,
+        "private",
+        "devices",
+        "google",
+        "common",
+        "device.bazelrc"), patcher)
+
 def check_workspace():
     assert os.path.exists(os.path.join(WORKSPACE, "tools", "bazel"))
     assert os.path.exists(os.path.join(WORKSPACE, "private", "google-modules", "powervr"))
@@ -266,6 +300,7 @@ def patch_workspace():
     patch_serial_8250()
     patch_serial_8250_kos()
     patch_power_controller_ko()
+    patch_kernel_package()
 
 def build_workspace():
     subprocess.check_call([

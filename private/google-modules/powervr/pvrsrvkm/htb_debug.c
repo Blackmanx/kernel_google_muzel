@@ -81,7 +81,7 @@ static HTB_DBG_INFO g_sHTBData;
 // #define HTB_CHATTY_PRINT(x) PVR_DPF(x)
 #define HTB_CHATTY_PRINT(x)
 
-typedef void (DI_PRINTF)(const OSDI_IMPL_ENTRY *, const IMG_CHAR *, ...);
+typedef void (DI_PRINTF)(const OSDI_IMPL_ENTRY *, const IMG_CHAR *, ...) __printf(2, 3);
 
 /******************************************************************************
  * debugFS display routines

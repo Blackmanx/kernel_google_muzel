@@ -73,7 +73,7 @@ struct pvr_opp_freq_table
 @Output         min_freq   Min clock freq (Hz)
 @Output         min_volt   Min voltage (V)
 @Output         max_freq   Max clock freq (Hz)
-@Return			PVRSRV_ERROR
+@Return			0 on success
 */ /**************************************************************************/
 #if defined(CONFIG_PM_OPP)
 int GetOPPValues(struct device *dev,
@@ -81,6 +81,25 @@ int GetOPPValues(struct device *dev,
                  unsigned long *min_volt,
                  unsigned long *max_freq,
                  struct pvr_opp_freq_table *pvr_freq_table);
+
+/*************************************************************************/ /*!
+@Function       FindOPPFreq
+
+@Description    Common code to look up the OPP entry for the given frequency.
+                Returns the level (OPP table index) if the exact freq exists,
+                -ENODATA otherwise.
+                Requires CONFIG_PM_OPP support in the kernel.
+
+@Input          dev        OS Device node
+@Input          freq_table  array of valid frequency points
+@Input          freq       Clock freq (Hz)
+@Output         level      OPP table index
+@Return			0 on success
+*/ /**************************************************************************/
+int FindOPPFreq(struct device *dev,
+                unsigned long *freq_table,
+                unsigned long freq,
+                unsigned int *level);
 #endif
 
 /*************************************************************************/ /*!
@@ -108,6 +127,7 @@ PVRSRV_ERROR DVFSCopyOPPTable(PPVRSRV_DEVICE_NODE psDeviceNode,
 
 @Description    Extract the Linux minor number corresponding to a PVR device, for
 				future use with PVRSRVGetDeviceInstanceByKernelDevID().
+
 
 @Input          dev        OS Device node
 @Return			The corresponding Linux device minor number.

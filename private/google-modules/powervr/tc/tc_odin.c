@@ -782,11 +782,11 @@ static void odin_fpga_update_dut_clk_freq(struct tc_device *tc,
 }
 
 static int odin_hard_reset_fpga(struct tc_device *tc,
-				int *core_clock, int *mem_clock, int *clock_mulitplex)
+				int *core_clock, int *mem_clock, int *clock_multiplex)
 {
 	int err = 0;
 
-	odin_fpga_update_dut_clk_freq(tc, core_clock, mem_clock, clock_mulitplex);
+	odin_fpga_update_dut_clk_freq(tc, core_clock, mem_clock, clock_multiplex);
 
 	err = odin_fpga_set_dut_core_clk(tc, ODN_INPUT_CLOCK_SPEED, *core_clock);
 	if (err != 0)
@@ -799,12 +799,12 @@ err_out:
 }
 
 static int odin_get_default_clocks_vali(struct tc_device *tc,
-				int *core_clock, int *mem_clock, int *clock_mulitplex)
+				int *core_clock, int *mem_clock, int *clock_multiplex)
 {
 	/* For now use default TC values */
 	*core_clock = RGX_TC_CORE_CLOCK_SPEED;
 	*mem_clock = RGX_TC_MEM_CLOCK_SPEED;
-	*clock_mulitplex = RGX_TC_CLOCK_MULTIPLEX;
+	*clock_multiplex = RGX_TC_CLOCK_MULTIPLEX;
 	return 0;
 }
 
@@ -1245,15 +1245,15 @@ err_out:
 
 /* Do a hard reset on the DUT */
 static int odin_hard_reset(struct tc_device *tc, int *core_clock, int *mem_clock,
-							int *clock_mulitplex)
+							int *clock_multiplex)
 {
 #if defined(SUPPORT_RGX)
 	if (tc->version == ODIN_VERSION_TCF_BONNIE)
 		return odin_hard_reset_bonnie(tc);
 	if (tc->version == ODIN_VERSION_VALI)
-		return odin_get_default_clocks_vali(tc, core_clock, mem_clock, clock_mulitplex);
+		return odin_get_default_clocks_vali(tc, core_clock, mem_clock, clock_multiplex);
 	if (tc->version == ODIN_VERSION_FPGA)
-		return odin_hard_reset_fpga(tc, core_clock, mem_clock, clock_mulitplex);
+		return odin_hard_reset_fpga(tc, core_clock, mem_clock, clock_multiplex);
 	if (tc->version == ODIN_VERSION_ORION)
 		return orion_hard_reset(tc, core_clock, mem_clock);
 
@@ -1362,13 +1362,13 @@ static void odin_set_fbc_bypass(struct tc_device *tc, bool fbc_bypass)
 }
 
 static int odin_hw_init(struct tc_device *tc, int *core_clock,
-			int *mem_clock, int *clock_mulitplex, int mem_latency,
+			int *mem_clock, int *clock_multiplex, int mem_latency,
 			int mem_wresp_latency, int mem_mode,
 			bool fbc_bypass)
 {
 	int err;
 
-	err = odin_hard_reset(tc, core_clock, mem_clock, clock_mulitplex);
+	err = odin_hard_reset(tc, core_clock, mem_clock, clock_multiplex);
 	if (err) {
 		dev_err(&tc->pdev->dev, "Failed to initialise Odin");
 		goto err_out;
@@ -1734,7 +1734,7 @@ static u32 odin_interrupt_id_to_flag(int interrupt_id)
 }
 
 int odin_init(struct tc_device *tc, struct pci_dev *pdev,
-	      int *core_clock, int *mem_clock, int *clock_mulitplex,
+	      int *core_clock, int *mem_clock, int *clock_multiplex,
 	      int pdp_mem_size, int secure_mem_size,
 	      int mem_latency, int mem_wresp_latency, int mem_mode,
 	      bool fbc_bypass)
@@ -1747,7 +1747,7 @@ int odin_init(struct tc_device *tc, struct pci_dev *pdev,
 		goto err_out;
 	}
 
-	err = odin_hw_init(tc, core_clock, mem_clock, clock_mulitplex,
+	err = odin_hw_init(tc, core_clock, mem_clock, clock_multiplex,
 			   mem_latency, mem_wresp_latency, mem_mode,
 			   fbc_bypass);
 	if (err) {

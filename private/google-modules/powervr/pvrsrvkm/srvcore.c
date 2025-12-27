@@ -84,6 +84,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 #include "pvrsrv_tlstreams.h"
 #include "tlstream.h"
+#include "tlintern.h"
 
 #if defined(PVRSRV_MISSING_NO_SPEC_IMPL)
 #pragma message ("There is no implementation of OSConfineArrayIndexNoSpeculation() - see osfunc.h")
@@ -95,7 +96,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  * env,*,pvr_bridge_k.c
  */
 
-PVRSRV_BRIDGE_DISPATCH_TABLE_ENTRY g_BridgeDispatchTable[BRIDGE_DISPATCH_TABLE_ENTRY_COUNT] = { {.pfFunction = DummyBW,} ,};
+PVRSRV_BRIDGE_DISPATCH_TABLE_ENTRY g_BridgeDispatchTable[BRIDGE_DISPATCH_TABLE_ENTRY_COUNT] = {0};
 
 #define PVR_DISPATCH_OFFSET_FIRST_FUNC			0
 #define PVR_DISPATCH_OFFSET_LAST_FUNC			1
@@ -692,6 +693,11 @@ if (PVRSRVIsEmulator(psDeviceNode))
 				PVRVERSION_MAJ, PVRVERSION_MIN, PVRVERSION_MAJ, PVRVERSION_MIN));
 	}
 
+	if (psConnection->ui32ClientFlags & SRV_FLAGS_HWPERF_DEFERRED_DESTROY)
+	{
+		TLActivateDeferredFree();
+	}
+
 	/* Create stream for every connection except for the special clients
 	 * that don't need it e.g.: recipients of HWPerf data. */
 	if (!(psConnection->ui32ClientFlags & SRV_NO_HWPERF_CLIENT_STREAM))
@@ -866,6 +872,7 @@ PVRSRVReleaseGlobalEventObjectKM(IMG_HANDLE hGlobalEventObject)
 	return PVRSRV_OK;
 }
 
+__printf(2, 3)
 static void _DumpDebugUMReqPrintWrapper(void *pvPriv, const IMG_CHAR *pszFmt, ...)
 {
 	va_list pvArgs;
@@ -916,6 +923,23 @@ PVRSRVGetDevClockSpeedKM(CONNECTION_DATA * psConnection,
 	return eError;
 }
 
+/*
+	PVRSRVGetMaxClockSpeedKM
+*/
+PVRSRV_ERROR
+PVRSRVGetMaxClockSpeedKM(CONNECTION_DATA * psConnection,
+                         PVRSRV_DEVICE_NODE *psDeviceNode,
+                         IMG_PUINT32  pui32RGXClockSpeed)
+{
+	PVR_UNREFERENCED_PARAMETER(psConnection);
+	PVR_UNREFERENCED_PARAMETER(psDeviceNode);
+
+	*pui32RGXClockSpeed =
+		psDeviceNode->psDevConfig->sDVFS.sDVFSDevice.psDevFreq->scaling_max_freq;
+
+	return PVRSRV_OK;
+}
+
 
 /*
 	PVRSRVHWOpTimeoutKM
@@ -935,28 +959,6 @@ PVRSRVHWOpTimeoutKM(CONNECTION_DATA *psConnection,
 	return PVRSRV_OK;
 }
 
-
-IMG_INT
-DummyBW(IMG_UINT32 ui32DispatchTableEntry,
-		IMG_UINT8 *psBridgeIn,
-		IMG_UINT8 *psBridgeOut,
-		CONNECTION_DATA *psConnection)
-{
-	PVR_UNREFERENCED_PARAMETER(psBridgeIn);
-	PVR_UNREFERENCED_PARAMETER(psBridgeOut);
-	PVR_UNREFERENCED_PARAMETER(psConnection);
-
-#if defined(DEBUG_BRIDGE_KM)
-	PVR_DPF((PVR_DBG_ERROR, "%s: BRIDGE ERROR: ui32DispatchTableEntry %u (%s) mapped to "
-			 "Dummy Wrapper (probably not what you want!)",
-			 __func__, ui32DispatchTableEntry, g_BridgeDispatchTable[ui32DispatchTableEntry].pszIOCName));
-#else
-	PVR_DPF((PVR_DBG_ERROR, "%s: BRIDGE ERROR: ui32DispatchTableEntry %u mapped to "
-			 "Dummy Wrapper (probably not what you want!)",
-			 __func__, ui32DispatchTableEntry));
-#endif
-	return PVRSRV_ERROR_BRIDGE_ENOTTY;
-}
 
 PVRSRV_ERROR PVRSRVAlignmentCheckKM(CONNECTION_DATA *psConnection,
                                     PVRSRV_DEVICE_NODE *psDeviceNode,
@@ -1057,6 +1059,27 @@ PVRSRV_ERROR PVRSRVGetSLCSizeKM(CONNECTION_DATA *psConnection,
 	PVR_ASSERT(psDeviceNode->pfnGetSLCSize != NULL);
 	*pui32SLCSizeInBytes = psDeviceNode->pfnGetSLCSize(psDeviceNode);
 	return PVRSRV_OK;
+}
+
+PVRSRV_ERROR PVRSRVGetSocFreqKM(CONNECTION_DATA *psConnection,
+                                      PVRSRV_DEVICE_NODE *psDeviceNode,
+                                      IMG_UINT32 *pui32SocFreq)
+{
+#if defined(SUPPORT_RGX)
+	RGX_DATA *psRGXData = (RGX_DATA*)psDeviceNode->psDevConfig->hDevData;
+	PVR_UNREFERENCED_PARAMETER(psConnection);
+
+	if (psRGXData->psRGXTimingInfo->ui32SOCClockSpeed == 0)
+	{
+		PVR_DPF((PVR_DBG_ERROR, "SOC Timer is not configured correctly"));
+	}
+
+	*pui32SocFreq = psRGXData->psRGXTimingInfo->ui32SOCClockSpeed;
+
+	return PVRSRV_OK;
+#else
+	return PVRSRV_ERROR_NOT_SUPPORTED;
+#endif
 }
 
 /*!
@@ -1318,6 +1341,7 @@ PVRSRV_ERROR BridgedDispatchKM(CONNECTION_DATA * psConnection,
 	BridgeWrapperFunction pfBridgeHandler;
 	IMG_UINT32   ui32DispatchTableEntry, ui32GroupBoundary;
 	PVRSRV_ERROR err = PVRSRV_OK;
+	__maybe_unused size_t uiOutErrorOffset;
 #if !defined(INTEGRITY_OS)
 	PVRSRV_POOL_TOKEN hBridgeBufferPoolToken = NULL;
 #endif
@@ -1359,12 +1383,7 @@ PVRSRV_ERROR BridgedDispatchKM(CONNECTION_DATA * psConnection,
 		         ui32GroupBoundary,
 		         psBridgePackageKM->ui32BridgeID,
 		         psBridgePackageKM->ui32FunctionID));
-		/* this points to DummyBW() which returns PVRSRV_ERROR_ENOTTY */
-		err = g_BridgeDispatchTable[ui32DispatchTableEntry].pfFunction(ui32DispatchTableEntry,
-				  psBridgeIn,
-				  psBridgeOut,
-				  psConnection);
-		goto return_error;
+		PVR_GOTO_WITH_ERROR(err, PVRSRV_ERROR_BRIDGE_ENOTTY, return_error);
 	}
 	if ((ui32DispatchTableEntry + psBridgePackageKM->ui32FunctionID) > ui32GroupBoundary)
 	{
@@ -1464,35 +1483,49 @@ PVRSRV_ERROR BridgedDispatchKM(CONNECTION_DATA * psConnection,
 		PVR_GOTO_WITH_ERROR(err, PVRSRV_ERROR_BRIDGE_EFAULT, unlock_and_return_error);
 	}
 
-	/* pfBridgeHandler functions do not fail and return an IMG_INT.
-	 * The value returned is either 0 or PVRSRV_OK (0).
-	 * In the event this changes an error may be +ve or -ve,
-	 * so try to return something consistent here.
+	/* pfBridgeHandler return an size_t containing the offset to the error code
+	 * in the output buffer.
 	 */
-	if (0 != pfBridgeHandler(ui32DispatchTableEntryIndex,
-						  psBridgeIn,
-						  psBridgeOut,
-						  psConnection)
-		)
-	{
-		PVR_LOG_GOTO_WITH_ERROR("pfBridgeHandler", err, PVRSRV_ERROR_BRIDGE_EPERM, unlock_and_return_error);
-	}
+	uiOutErrorOffset = pfBridgeHandler(ui32DispatchTableEntryIndex,
+							psBridgeIn,
+							psBridgeOut,
+							psConnection);
+
+#if !defined(INTEGRITY_OS)
+	/* The returned offset is expected to be within the range */
+	PVR_ASSERT(uiOutErrorOffset + sizeof(PVRSRV_ERROR) <= psBridgePackageKM->ui32OutBufferSize);
 
 	/*
 	   This should always be true as a.t.m. all bridge calls have to
 	   return an error message, but this could change so we do this
 	   check to be safe.
 	*/
-#if !defined(INTEGRITY_OS)
 	if (psBridgePackageKM->ui32OutBufferSize > 0)
 	{
-		if (CopyToUserWrapper (psConnection,
-						ui32DispatchTableEntryIndex,
-						psBridgePackageKM->pvParamOut,
-						psBridgeOut,
-						psBridgePackageKM->ui32OutBufferSize) != PVRSRV_OK)
+		PVRSRV_ERROR * peHandlerError = (PVRSRV_ERROR *) IMG_OFFSET_ADDR(psBridgeOut, uiOutErrorOffset);
+		if (*peHandlerError != PVRSRV_OK)
 		{
-			PVR_GOTO_WITH_ERROR(err, PVRSRV_ERROR_BRIDGE_EFAULT, unlock_and_return_error);
+			/* Only copy error code to user when pfBridgeHandler fails */
+			if (CopyToUserWrapper (psConnection,
+							ui32DispatchTableEntryIndex,
+							IMG_OFFSET_ADDR_USER(psBridgePackageKM->pvParamOut, uiOutErrorOffset),
+							peHandlerError,
+							sizeof(PVRSRV_ERROR)) != PVRSRV_OK)
+			{
+				PVR_GOTO_WITH_ERROR(err, PVRSRV_ERROR_BRIDGE_EFAULT, unlock_and_return_error);
+			}
+		}
+		else
+		{
+			/* Copy whole output to user when pfBridgeHandler succeeds */
+			if (CopyToUserWrapper (psConnection,
+							ui32DispatchTableEntryIndex,
+							psBridgePackageKM->pvParamOut,
+							psBridgeOut,
+							psBridgePackageKM->ui32OutBufferSize) != PVRSRV_OK)
+			{
+				PVR_GOTO_WITH_ERROR(err, PVRSRV_ERROR_BRIDGE_EFAULT, unlock_and_return_error);
+			}
 		}
 	}
 #endif

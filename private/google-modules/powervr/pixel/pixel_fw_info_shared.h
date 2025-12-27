@@ -32,6 +32,9 @@
 /* Max length for UINT64_T is 20, keeping it aligned to 8 bytes.*/
 #define MAX_LEN_BUILD_ID 24
 
+/* The page size of the mapping for pixel physical address ranges. */
+#define PIXEL_PA_RANGE_PAGE_SIZE (1UL << 14)
+
 /**
  * struct pixel_fw_pa_range - Physical address range
  */

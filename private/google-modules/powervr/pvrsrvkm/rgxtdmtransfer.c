@@ -399,8 +399,8 @@ PVRSRV_ERROR PVRSRVRGXTDMDestroyTransferContextKM(RGX_SERVER_TQ_TDM_CONTEXT *psT
 			return eError;
 		}
 
-		RGXFwSharedMemCacheOpValue(psFWTransferContext->ui32WorkEstCCBSubmitted, INVALIDATE);
-		ui32WorkEstCCBSubmitted = psFWTransferContext->ui32WorkEstCCBSubmitted;
+		RGXFwSharedMemCacheOpValue(psFWTransferContext->sTDMContext.ui32WorkEstCCBSubmitted, INVALIDATE);
+		ui32WorkEstCCBSubmitted = psFWTransferContext->sTDMContext.ui32WorkEstCCBSubmitted;
 
 		DevmemReleaseCpuVirtAddr(psTransferContext->psFWTransferContextMemDesc);
 
@@ -1366,36 +1366,6 @@ PVRSRV_ERROR PVRSRVRGXTDMSetTransferContextPriorityKM(CONNECTION_DATA *psConnect
 
 	OSLockRelease(psTransferContext->hLock);
 	return PVRSRV_OK;
-}
-
-PVRSRV_ERROR PVRSRVRGXTDMSetTransferContextPropertyKM(RGX_SERVER_TQ_TDM_CONTEXT *psTransferContext,
-													  RGX_CONTEXT_PROPERTY eContextProperty,
-													  IMG_UINT64 ui64Input,
-													  IMG_UINT64 *pui64Output)
-{
-	PVRSRV_ERROR eError = PVRSRV_OK;
-
-	switch (eContextProperty)
-	{
-		case RGX_CONTEXT_PROPERTY_FLAGS:
-		{
-			IMG_UINT32 ui32ContextFlags = (IMG_UINT32)ui64Input;
-
-			OSLockAcquire(psTransferContext->hLock);
-			eError = FWCommonContextSetFlags(psTransferContext->sTDMData.psServerCommonContext,
-			                                 ui32ContextFlags);
-			OSLockRelease(psTransferContext->hLock);
-			break;
-		}
-
-		default:
-		{
-			PVR_DPF((PVR_DBG_ERROR, "%s: PVRSRV_ERROR_NOT_SUPPORTED - asked to set unknown property (%d)", __func__, eContextProperty));
-			eError = PVRSRV_ERROR_NOT_SUPPORTED;
-		}
-	}
-
-	return eError;
 }
 
 void DumpTDMTransferCtxtsInfo(PVRSRV_RGXDEV_INFO *psDevInfo,

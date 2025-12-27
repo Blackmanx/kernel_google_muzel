@@ -100,6 +100,14 @@ PVRSRV_ERROR PvzOnVmOnline(IMG_UINT32 ui32DriverID, IMG_UINT32 ui32DevID)
 			goto e0;
 		}
 	}
+	else
+	{
+		if (psDevNode->eDevState != PVRSRV_DEVICE_STATE_ACTIVE)
+		{
+			eError = PVRSRV_ERROR_NOT_INITIALISED;
+			goto e0;
+		}
+	}
 
 	eError = RGXFWHealthCheckCmd(psDevNode->pvDevice);
 	if (eError != PVRSRV_OK)
@@ -144,6 +152,12 @@ PVRSRV_ERROR PvzOnVmOffline(IMG_UINT32 ui32DriverID, IMG_UINT32 ui32DevID)
 		goto e0;
 	}
 
+	if (psDevNode->eDevState != PVRSRV_DEVICE_STATE_ACTIVE)
+	{
+		eError = PVRSRV_ERROR_NOT_INITIALISED;
+		goto e0;
+	}
+
 	psDevInfo = psDevNode->pvDevice;
 	if (psDevInfo == NULL)
 	{
@@ -175,6 +189,12 @@ PVRSRV_ERROR PvzVMMConfigure(VMM_CONF_PARAM eVMMParamType,
 	if (psDevNode == NULL)
 	{
 		eError = PVRSRV_ERROR_NO_DEVICENODE_FOUND;
+		goto e0;
+	}
+
+	if (psDevNode->eDevState != PVRSRV_DEVICE_STATE_ACTIVE)
+	{
+		eError = PVRSRV_ERROR_NOT_INITIALISED;
 		goto e0;
 	}
 

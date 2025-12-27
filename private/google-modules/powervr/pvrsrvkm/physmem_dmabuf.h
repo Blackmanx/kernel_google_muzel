@@ -135,7 +135,7 @@ PVRSRV_ERROR
 PhysmemRequestFBC(CONNECTION_DATA *psConnection, PVRSRV_DEVICE_NODE *psDevNode,
                   IMG_INT fd);
 
-PVRSRV_ERROR
+void
 PhysmemFreeFBC(CONNECTION_DATA *psConnection, PVRSRV_DEVICE_NODE *psDevNode,
                   struct dma_buf *psDmaBuf);
 #endif

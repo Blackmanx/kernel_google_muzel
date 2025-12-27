@@ -619,6 +619,45 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 
 /*
+    Register RGX_TB_TRIGGER_MASK0
+*/
+#define RGX_TB_TRIGGER_MASK0                                                        (0x0390U)
+#define RGX_TB_TRIGGER_MASK0_MASKFULL                                               (IMG_UINT64_C(0x00000000FFFFFFFF))
+#define RGX_TB_TRIGGER_MASK0_RESERVED_SHIFT                                         (1U)
+#define RGX_TB_TRIGGER_MASK0_RESERVED_CLRMSK                                        (0x00000001U)
+#define RGX_TB_TRIGGER_MASK0_USR_RST_SHIFT                                          (0U)
+#define RGX_TB_TRIGGER_MASK0_USR_RST_CLRMSK                                         (0xFFFFFFFEU)
+#define RGX_TB_TRIGGER_MASK0_USR_RST_EN                                             (0x00000001U)
+
+
+/*
+    Register RGX_TB_TRIGGER_MASK1
+*/
+#define RGX_TB_TRIGGER_MASK1                                                        (0x0398U)
+#define RGX_TB_TRIGGER_MASK1_MASKFULL                                               (IMG_UINT64_C(0x00000000FFFFFFFF))
+#define RGX_TB_TRIGGER_MASK1_MASK_SHIFT                                             (0U)
+#define RGX_TB_TRIGGER_MASK1_MASK_CLRMSK                                            (0x00000000U)
+
+
+/*
+    Register RGX_TB_TRIGGER_MASK2
+*/
+#define RGX_TB_TRIGGER_MASK2                                                        (0x03A0U)
+#define RGX_TB_TRIGGER_MASK2_MASKFULL                                               (IMG_UINT64_C(0x00000000FFFFFFFF))
+#define RGX_TB_TRIGGER_MASK2_MASK_SHIFT                                             (0U)
+#define RGX_TB_TRIGGER_MASK2_MASK_CLRMSK                                            (0x00000000U)
+
+
+/*
+    Register RGX_TB_TRIGGER_MASK3
+*/
+#define RGX_TB_TRIGGER_MASK3                                                        (0x03A8U)
+#define RGX_TB_TRIGGER_MASK3_MASKFULL                                               (IMG_UINT64_C(0x00000000FFFFFFFF))
+#define RGX_TB_TRIGGER_MASK3_MASK_SHIFT                                             (0U)
+#define RGX_TB_TRIGGER_MASK3_MASK_CLRMSK                                            (0x00000000U)
+
+
+/*
     Register RGX_TB_TRIGGER_SHORT
 */
 #define RGX_TB_TRIGGER_SHORT                                                        (0x1500U)

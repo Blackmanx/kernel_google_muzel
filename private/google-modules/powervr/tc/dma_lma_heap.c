@@ -409,8 +409,7 @@ static const struct dma_buf_ops lma_heap_buf_ops = {
 };
 
 #if (defined(ANDROID) && \
-	((LINUX_VERSION_CODE > KERNEL_VERSION(6, 6, 0)) && \
-	 (LINUX_VERSION_CODE < KERNEL_VERSION(6, 7, 0))))
+	(LINUX_VERSION_CODE > KERNEL_VERSION(6, 6, 0)))
 static struct dma_buf *lma_heap_allocate(struct dma_heap *heap,
 		unsigned long len,
 		u32 fd_flags,
@@ -490,9 +489,6 @@ struct dma_heap *dma_lma_heap_create(struct tc_dma_heap_info *heap_data)
 	struct dma_heap_export_info exp_info;
 	size_t size = heap_data->size;
 	struct dma_lma_heap *lma_heap;
-	struct page *page;
-
-	page = pfn_to_page(PFN_DOWN(heap_data->base));
 
 	/* Do not zero the LMA heap from the CPU. This is very slow with
 	 * the current TCF (w/ no DMA engine). We will use the TLA to clear

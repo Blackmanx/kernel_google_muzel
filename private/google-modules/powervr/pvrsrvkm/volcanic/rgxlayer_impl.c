@@ -66,6 +66,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #endif
 
 
+#if defined(RGX_FEATURE_META_MAX_VALUE_IDX)
 #define MAX_NUM_COHERENCY_TESTS  (10)
 IMG_BOOL RGXDoFWSlaveBoot(const void *hPrivate)
 {
@@ -539,6 +540,7 @@ e0:
 
 	return eError;
 }
+#endif
 
 static IMG_UINT64 RGXMMUComputeRangeValue(IMG_UINT32 ui32DataPageShift, IMG_UINT64 ui64BaseAddress, IMG_UINT64 ui64RangeSize)
 {

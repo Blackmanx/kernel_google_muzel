@@ -2004,7 +2004,7 @@ _ApplyCacheMaintenance(PVRSRV_DEVICE_NODE *psDevNode,
 
 			CacheOpExec(psDevNode,
 						pvAddr,
-						pvAddr + PAGE_SIZE,
+						pvAddr + (PAGE_SIZE * uiToClean),
 						sUnused,
 						sUnused,
 						PVRSRV_CACHE_OP_FLUSH);
@@ -3593,41 +3593,33 @@ _ExtractPages(PMR_OSPAGEARRAY_DATA *psSrcPageArrayData,
 	for (i = 0; i < ui32ExtractPageCount; i++)
 	{
 		IMG_UINT32 idxSrc = pai32ExtractIndices[i] << uiOrder;
-		IMG_UINT32 idxExtracted = i << uiOrder;
+		IMG_UINT32 idxDst = i << uiOrder;
 
-		if (psSrcPageArrayData->pagearray[idxSrc] != NULL)
+		if (psSrcPageArrayData->pagearray[idxSrc] == NULL)
 		{
-			for (uiSubPageInOrder = 0; uiSubPageInOrder < (1 << uiOrder); uiSubPageInOrder++)
-			{
-				psDstPageArrayData->pagearray[idxExtracted + uiSubPageInOrder] =
-				    psSrcPageArrayData->pagearray[idxSrc + uiSubPageInOrder];
-
-				psSrcPageArrayData->pagearray[idxSrc + uiSubPageInOrder] = NULL;
-			}
+			PVR_DPF((PVR_DBG_WARNING, "Empty page array index (%d) referenced in %s", idxSrc, __func__));
+			continue;
 		}
-	}
 
-	/* Do the same for dmaphysarray and dmavirtarray if allocated with CMA */
-	if (BIT_ISSET(psSrcPageArrayData->ui32AllocFlags, FLAG_DMA_CMA))
-	{
-		for (i = 0; i < ui32ExtractPageCount; i++)
+		for (uiSubPageInOrder = 0; uiSubPageInOrder < (1 << uiOrder); uiSubPageInOrder++)
 		{
-			IMG_UINT32 idxSrc = pai32ExtractIndices[i] << uiOrder;
-			IMG_UINT32 idxDst = i << uiOrder;
+			psDstPageArrayData->pagearray[idxDst + uiSubPageInOrder] =
+				psSrcPageArrayData->pagearray[idxSrc + uiSubPageInOrder];
 
-			if (psSrcPageArrayData->dmaphysarray[idxSrc] != (dma_addr_t)0 ||
-			    psSrcPageArrayData->dmavirtarray[idxSrc] != NULL)
+			psSrcPageArrayData->pagearray[idxSrc + uiSubPageInOrder] = NULL;
+
+			/* Do the same for dmaphysarray and dmavirtarray if allocated with CMA */
+			if (BIT_ISSET(psSrcPageArrayData->ui32AllocFlags, FLAG_DMA_CMA) &&
+			    (psSrcPageArrayData->dmaphysarray[idxSrc] != (dma_addr_t)0 ||
+			     psSrcPageArrayData->dmavirtarray[idxSrc] != NULL))
 			{
-				for (uiSubPageInOrder = 0; uiSubPageInOrder < (1 << uiOrder); uiSubPageInOrder++)
-				{
-					psDstPageArrayData->dmaphysarray[idxDst + uiSubPageInOrder] =
-					    psSrcPageArrayData->dmaphysarray[idxSrc + uiSubPageInOrder];
-					psDstPageArrayData->dmavirtarray[idxDst + uiSubPageInOrder] =
-					    psSrcPageArrayData->dmavirtarray[idxSrc + uiSubPageInOrder];
+				psDstPageArrayData->dmaphysarray[idxDst + uiSubPageInOrder] =
+					psSrcPageArrayData->dmaphysarray[idxSrc + uiSubPageInOrder];
+				psDstPageArrayData->dmavirtarray[idxDst + uiSubPageInOrder] =
+					psSrcPageArrayData->dmavirtarray[idxSrc + uiSubPageInOrder];
 
-					psSrcPageArrayData->dmaphysarray[idxSrc + uiSubPageInOrder] = (dma_addr_t)0;
-					psSrcPageArrayData->dmavirtarray[idxSrc + uiSubPageInOrder] = NULL;
-				}
+				psSrcPageArrayData->dmaphysarray[idxSrc + uiSubPageInOrder] = (dma_addr_t)0;
+				psSrcPageArrayData->dmavirtarray[idxSrc + uiSubPageInOrder] = NULL;
 			}
 		}
 	}
@@ -3940,7 +3932,7 @@ PMRUnlockPhysAddressesOSMem(PMR_IMPL_PRIVDATA pvPriv)
 		eError = _ExtractAllPages(psOSPageArrayData,
 		                          &psExtractedPagesPageArray);
 		PVR_LOG_GOTO_IF_ERROR(eError, "_ExtractAllPages", e0);
-		
+
 		if (psExtractedPagesPageArray)
 		{
 			/* Zombify pages to get proper stats */

@@ -99,14 +99,15 @@ typedef struct PVRSRV_DEV_CONNECTION_TAG PVRSRV_DEV_CONNECTION;
  *   Use of the 32-bit connection flags mask
  *   ( X = taken/in use, - = available/unused )
  *
- *   31  27     20             6 4   0
- *    |   |      |             | |   |
- *    X---XXXXXXXX-------------XXX----
+ *   31  27     20            7  4   0
+ *    |   |      |            |  |   |
+ *    X---XXXXXXXX------------XXXX----
  */
 
 #define SRV_NO_HWPERF_CLIENT_STREAM     (1UL << 4)  /*!< Don't create HWPerf for this connection */
 #define SRV_FLAGS_CLIENT_64BIT_COMPAT   (1UL << 5)  /*!< This flags gets set if the client is 64 Bit compatible. */
 #define SRV_FLAGS_CLIENT_SLR_DISABLED   (1UL << 6)  /*!< This flag is set if the client does not want Sync Lockup Recovery (SLR) enabled. */
+#define SRV_FLAGS_HWPERF_DEFERRED_DESTROY (1UL << 7) /*!< This flag is set if the client processes HWPerf events (e.g. pvrtld / PVRTune) */
 #define SRV_FLAGS_PDUMPCTRL             (1UL << 31) /*!< PDump Ctrl client flag */
 
 /*! @} SRV_FLAGS */

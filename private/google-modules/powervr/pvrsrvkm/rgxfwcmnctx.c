@@ -51,6 +51,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #if defined(__linux__) && defined(PVRSRV_ANDROID_TRACE_GPU_WORK_PERIOD)
 #include "linux/cred.h"
 #include "linux/pid.h"
+#include <linux/sched/task.h>
 #endif
 
 struct _RGX_SERVER_COMMON_CONTEXT_ {
@@ -146,13 +147,21 @@ PVRSRV_ERROR FWCommonContextAllocate(CONNECTION_DATA *psConnection,
 {
 	PVRSRV_RGXDEV_INFO *psDevInfo = psDeviceNode->pvDevice;
 	RGX_SERVER_COMMON_CONTEXT *psServerCommonContext;
-	RGXFWIF_FWCOMMONCONTEXT sFWCommonContext = {{0}};
+	RGXFWIF_FWCOMMONCONTEXT *psFWCommonContext;
 	IMG_UINT32 ui32FWCommonContextOffset;
 	IMG_UINT8 *pui8Ptr;
 	PVRSRV_ERROR eError;
-	IMG_UINT32 RGXFWIF_MAX_WORKLOAD_DEADLINE_MS     = 2500;
-	IMG_UINT32 RGXFWIF_MAX_CDM_WORKLOAD_DEADLINE_MS = 600000;
-	IMG_UINT32 RGXFWIF_MAX_RDM_WORKLOAD_DEADLINE_MS = 36000000;
+
+	/* Heap allocated due to stack size limitations. */
+	psFWCommonContext = OSAllocZMem(sizeof(*psFWCommonContext));
+	if (psFWCommonContext == NULL)
+	{
+		eError = PVRSRV_ERROR_OUT_OF_MEMORY;
+		goto fail_alloc_cpu_copy;
+	}
+	IMG_UINT32 RGX_MAX_WORKLOAD_DEADLINE_MS     = 2500;
+	IMG_UINT32 RGX_MAX_CDM_WORKLOAD_DEADLINE_MS = 600000;
+	IMG_UINT32 RGX_MAX_RDM_WORKLOAD_DEADLINE_MS = 36000000;
 
 #if defined(FPGA) || defined(PDUMP)
 	const IMG_BOOL increase_deadlines = true;
@@ -171,8 +180,8 @@ PVRSRV_ERROR FWCommonContextAllocate(CONNECTION_DATA *psConnection,
 	 */
 	if (increase_deadlines)
 	{
-		RGXFWIF_MAX_WORKLOAD_DEADLINE_MS     = 480000;
-		RGXFWIF_MAX_CDM_WORKLOAD_DEADLINE_MS = 10800000;
+		RGX_MAX_WORKLOAD_DEADLINE_MS     = 10800000;
+		RGX_MAX_CDM_WORKLOAD_DEADLINE_MS = 10800000;
 	}
 
 	/*
@@ -216,7 +225,7 @@ PVRSRV_ERROR FWCommonContextAllocate(CONNECTION_DATA *psConnection,
 		PDUMPCOMMENT(psDeviceNode,
 					 "Allocate Rogue firmware %s context", aszCCBRequestors[eRGXCCBRequestor][REQ_PDUMP_COMMENT]);
 		eError = DevmemFwAllocate(psDevInfo,
-								sizeof(sFWCommonContext),
+								sizeof(*psFWCommonContext),
 								RGX_FWCOMCTX_ALLOCFLAGS,
 								"FwContext",
 								&psServerCommonContext->psFWCommonContextMemDesc);
@@ -274,16 +283,16 @@ PVRSRV_ERROR FWCommonContextAllocate(CONNECTION_DATA *psConnection,
 		goto fail_allocateccb;
 	}
 
-	sFWCommonContext.eDM = eDM;
-	BITMASK_SET(sFWCommonContext.ui32CompatFlags, RGXFWIF_CONTEXT_COMPAT_FLAGS_HAS_DEFER_COUNT);
+	psFWCommonContext->sRangeCheckBeforeUse.eDM = eDM;
+	BITMASK_SET(psFWCommonContext->ui32CompatFlags, RGXFWIF_CONTEXT_COMPAT_FLAGS_HAS_DEFER_COUNT);
 
 	/* Set the firmware CCB device addresses in the firmware common context */
-	eError = RGXSetFirmwareAddress(&sFWCommonContext.psCCB,
+	eError = RGXSetFirmwareAddress(&psFWCommonContext->psCCB,
 						  psServerCommonContext->psClientCCBMemDesc,
 						  0, RFW_FWADDR_FLAG_NONE);
 	PVR_LOG_GOTO_IF_ERROR(eError, "RGXSetFirmwareAddress:1", fail_cccbfwaddr);
 
-	eError = RGXSetFirmwareAddress(&sFWCommonContext.psCCBCtl,
+	eError = RGXSetFirmwareAddress(&psFWCommonContext->psCCBCtl,
 						  psServerCommonContext->psClientCCBCtrlMemDesc,
 						  0, RFW_FWADDR_FLAG_NONE);
 	PVR_LOG_GOTO_IF_ERROR(eError, "RGXSetFirmwareAddress:2", fail_cccbctrlfwaddr);
@@ -291,16 +300,16 @@ PVRSRV_ERROR FWCommonContextAllocate(CONNECTION_DATA *psConnection,
 #if defined(RGX_FEATURE_META_DMA_BIT_MASK)
 	if (RGX_IS_FEATURE_SUPPORTED(psDevInfo, META_DMA))
 	{
-		RGXSetMetaDMAAddress(&sFWCommonContext.sCCBMetaDMAAddr,
+		RGXSetMetaDMAAddress(&psFWCommonContext->sCCBMetaDMAAddr,
 							 psServerCommonContext->psClientCCBMemDesc,
-							 &sFWCommonContext.psCCB,
+							 &psFWCommonContext->psCCB,
 							 0);
 	}
 #endif
 
 	/* Set the memory context device address */
 	psServerCommonContext->psFWMemContextMemDesc = psFWMemContextMemDesc;
-	eError = RGXSetFirmwareAddress(&sFWCommonContext.psFWMemContext,
+	eError = RGXSetFirmwareAddress(&psFWCommonContext->psFWMemContext,
 						  psFWMemContextMemDesc,
 						  0, RFW_FWADDR_FLAG_NONE);
 	PVR_LOG_GOTO_IF_ERROR(eError, "RGXSetFirmwareAddress:3", fail_fwmemctxfwaddr);
@@ -309,7 +318,7 @@ PVRSRV_ERROR FWCommonContextAllocate(CONNECTION_DATA *psConnection,
 	psServerCommonContext->psFWFrameworkMemDesc = psInfo->psFWFrameworkMemDesc;
 	if (psInfo->psFWFrameworkMemDesc != NULL)
 	{
-		eError = RGXSetFirmwareAddress(&sFWCommonContext.psRFCmd,
+		eError = RGXSetFirmwareAddress(&psFWCommonContext->psRFCmd,
 				psInfo->psFWFrameworkMemDesc,
 				0, RFW_FWADDR_FLAG_NONE);
 		PVR_LOG_GOTO_IF_ERROR(eError, "RGXSetFirmwareAddress:4", fail_fwframeworkfwaddr);
@@ -319,7 +328,7 @@ PVRSRV_ERROR FWCommonContextAllocate(CONNECTION_DATA *psConnection,
 		/* This should never be touched in this contexts without a framework
 		 * memdesc, but ensure it is zero so we see crashes if it is.
 		 */
-		sFWCommonContext.psRFCmd.ui32Addr = 0;
+		psFWCommonContext->psRFCmd.ui32Addr = 0;
 	}
 
 	eError = _CheckPriority(psDevInfo, i32Priority, eRGXCCBRequestor);
@@ -328,46 +337,50 @@ PVRSRV_ERROR FWCommonContextAllocate(CONNECTION_DATA *psConnection,
 	psServerCommonContext->i32Priority = i32Priority;
 	psServerCommonContext->eRequestor = eRGXCCBRequestor;
 
-	sFWCommonContext.i32Priority = i32Priority;
-	sFWCommonContext.ui32PrioritySeqNum = 0;
+	psFWCommonContext->i32Priority = i32Priority;
+	psFWCommonContext->ui32PrioritySeqNum = 0;
 
 	if (eDM == RGXFWIF_DM_CDM)
 	{
-		sFWCommonContext.ui32MaxDeadlineMS = MIN(ui32MaxDeadlineMS, RGXFWIF_MAX_CDM_WORKLOAD_DEADLINE_MS);
+		psFWCommonContext->ui32MaxDeadlineMS = MIN(ui32MaxDeadlineMS, RGX_MAX_CDM_WORKLOAD_DEADLINE_MS);
 	}
 	else if (eDM == RGXFWIF_DM_RAY)
 	{
-		sFWCommonContext.ui32MaxDeadlineMS = MIN(ui32MaxDeadlineMS, RGXFWIF_MAX_RDM_WORKLOAD_DEADLINE_MS);
+		psFWCommonContext->ui32MaxDeadlineMS = MIN(ui32MaxDeadlineMS, RGX_MAX_RDM_WORKLOAD_DEADLINE_MS);
 	}
 	else
 	{
-		sFWCommonContext.ui32MaxDeadlineMS = MIN(ui32MaxDeadlineMS, RGXFWIF_MAX_WORKLOAD_DEADLINE_MS);
+		psFWCommonContext->ui32MaxDeadlineMS = MIN(ui32MaxDeadlineMS, RGX_MAX_WORKLOAD_DEADLINE_MS);
 	}
 
-	sFWCommonContext.ui64RobustnessAddress = ui64RobustnessAddress;
+	psFWCommonContext->ui64RobustnessAddress = ui64RobustnessAddress;
 
 	/* Store a references to Server Common Context and PID for notifications back from the FW. */
-	sFWCommonContext.ui32ServerCommonContextID = psServerCommonContext->ui32ContextID;
-	sFWCommonContext.ui32PID                   = OSGetCurrentClientProcessIDKM();
+	psFWCommonContext->ui32ServerCommonContextID = psServerCommonContext->ui32ContextID;
+	psFWCommonContext->ui32PID                   = OSGetCurrentClientProcessIDKM();
 #if defined(__linux__) && defined(PVRSRV_ANDROID_TRACE_GPU_WORK_PERIOD)
-	sFWCommonContext.ui32UID                   = OSGetCurrentApplicationUIDKM();
+	if (OSGetUID(psFWCommonContext->ui32PID, &psFWCommonContext->ui32UID) != PVRSRV_OK)
+	{
+		PVR_DPF((PVR_DBG_ERROR, "%s: Failed to get UID", __func__));
+		psFWCommonContext->ui32UID = 0;
+	}
 #endif
-	OSStringSafeCopy(sFWCommonContext.szProcName, psConnection->pszProcName, RGXFW_PROCESS_NAME_LEN);
+	OSStringSafeCopy(psFWCommonContext->szProcName, psConnection->pszProcName, RGXFW_PROCESS_NAME_LEN);
 
 	/* Set the firmware GPU context state buffer */
 	psServerCommonContext->psContextStateMemDesc = psContextStateMemDesc;
 	if (psContextStateMemDesc)
 	{
-		eError = RGXSetFirmwareAddress(&sFWCommonContext.psContextState,
+		eError = RGXSetFirmwareAddress(&psFWCommonContext->psContextState,
 							  psContextStateMemDesc,
 							  0,
 							  RFW_FWADDR_FLAG_NONE);
 		PVR_LOG_GOTO_IF_ERROR(eError, "RGXSetFirmwareAddress:5", fail_ctxstatefwaddr);
 	}
 
-	OSCachedMemCopy(IMG_OFFSET_ADDR(pui8Ptr, ui32FWCommonContextOffset), &sFWCommonContext, sizeof(sFWCommonContext));
+	OSCachedMemCopy(IMG_OFFSET_ADDR(pui8Ptr, ui32FWCommonContextOffset), psFWCommonContext, sizeof(*psFWCommonContext));
 	RGXFwSharedMemCacheOpExec(IMG_OFFSET_ADDR(pui8Ptr, ui32FWCommonContextOffset),
-	                          sizeof(sFWCommonContext),
+	                          sizeof(*psFWCommonContext),
 	                          PVRSRV_CACHE_OP_FLUSH);
 
 	/*
@@ -377,7 +390,7 @@ PVRSRV_ERROR FWCommonContextAllocate(CONNECTION_DATA *psConnection,
 				 "Dump %s context", aszCCBRequestors[eRGXCCBRequestor][REQ_PDUMP_COMMENT]);
 	DevmemPDumpLoadMem(psServerCommonContext->psFWCommonContextMemDesc,
 					   ui32FWCommonContextOffset,
-					   sizeof(sFWCommonContext),
+					   sizeof(*psFWCommonContext),
 					   PDUMP_FLAGS_CONTINUOUS);
 
 	/* We've finished the setup so release the CPU mapping */
@@ -420,6 +433,9 @@ PVRSRV_ERROR FWCommonContextAllocate(CONNECTION_DATA *psConnection,
 	OSWRLockReleaseWrite(psDevInfo->hCommonCtxtListLock);
 
 	*ppsServerCommonContext = psServerCommonContext;
+
+	OSFreeMem(psFWCommonContext);
+
 	return PVRSRV_OK;
 
 fail_fwcommonctxfwaddr:
@@ -452,6 +468,8 @@ fail_cpuvirtacquire:
 fail_contextalloc:
 	OSFreeMem(psServerCommonContext);
 fail_alloc:
+	OSFreeMem(psFWCommonContext);
+fail_alloc_cpu_copy:
 	return eError;
 }
 
@@ -555,25 +573,6 @@ PVRSRV_RGXDEV_INFO* FWCommonContextGetRGXDevInfo(RGX_SERVER_COMMON_CONTEXT *psSe
 	return psServerCommonContext->psDevInfo;
 }
 
-PVRSRV_ERROR RGXGetFWCommonContextAddrFromServerMMUCtx(PVRSRV_RGXDEV_INFO *psDevInfo,
-													   SERVER_MMU_CONTEXT *psServerMMUContext,
-													   PRGXFWIF_FWCOMMONCONTEXT *psFWCommonContextFWAddr)
-{
-	DLLIST_NODE *psNode, *psNext;
-	dllist_foreach_node(&psDevInfo->sCommonCtxtListHead, psNode, psNext)
-	{
-		RGX_SERVER_COMMON_CONTEXT *psThisContext =
-			IMG_CONTAINER_OF(psNode, RGX_SERVER_COMMON_CONTEXT, sListNode);
-
-		if (psThisContext->psServerMMUContext == psServerMMUContext)
-		{
-			psFWCommonContextFWAddr->ui32Addr = psThisContext->sFWCommonContextFWAddr.ui32Addr;
-			return PVRSRV_OK;
-		}
-	}
-	return PVRSRV_ERROR_INVALID_PARAMS;
-}
-
 PRGXFWIF_FWCOMMONCONTEXT RGXGetFWCommonContextAddrFromServerCommonCtx(PVRSRV_RGXDEV_INFO *psDevInfo,
 													                  DLLIST_NODE *psNode)
 {
@@ -581,26 +580,6 @@ PRGXFWIF_FWCOMMONCONTEXT RGXGetFWCommonContextAddrFromServerCommonCtx(PVRSRV_RGX
 			IMG_CONTAINER_OF(psNode, RGX_SERVER_COMMON_CONTEXT, sListNode);
 
 	return FWCommonContextGetFWAddress(psThisContext);
-}
-
-PVRSRV_ERROR FWCommonContextSetFlags(RGX_SERVER_COMMON_CONTEXT *psServerCommonContext,
-                                     IMG_UINT32 ui32ContextFlags)
-{
-	PVRSRV_ERROR eError = PVRSRV_OK;
-
-	if (BITMASK_ANY(ui32ContextFlags, ~RGX_CONTEXT_FLAGS_WRITEABLE_MASK))
-	{
-		PVR_DPF((PVR_DBG_ERROR, "%s: Context flag(s) invalid or not writeable (%d)",
-		         __func__, ui32ContextFlags));
-		eError = PVRSRV_ERROR_INVALID_PARAMS;
-	}
-	else
-	{
-		RGXSetCCBFlags(psServerCommonContext->psClientCCB,
-		               ui32ContextFlags);
-	}
-
-	return eError;
 }
 
 PVRSRV_ERROR ContextSetPriority(RGX_SERVER_COMMON_CONTEXT *psContext,
@@ -627,16 +606,23 @@ PVRSRV_ERROR ContextSetPriority(RGX_SERVER_COMMON_CONTEXT *psContext,
 	*/
 	ui32CmdSize = RGX_CCB_FWALLOC_ALIGN(sizeof(RGXFWIF_CCB_CMD_HEADER) + sizeof(RGXFWIF_CMD_PRIORITY));
 
-	eError = RGXAcquireCCB(psClientCCB,
-						   ui32CmdSize,
-						   (void **) &pui8CmdPtr,
-						   PDUMP_FLAGS_CONTINUOUS);
+	LOOP_UNTIL_TIMEOUT_US(MAX_HW_TIME_US)
+	{
+		eError = RGXAcquireCCB(psClientCCB,
+							   ui32CmdSize,
+							   (void **) &pui8CmdPtr,
+							   PDUMP_FLAGS_CONTINUOUS);
+		if (eError != PVRSRV_ERROR_RETRY &&
+			eError != PVRSRV_ERROR_KERNEL_CCB_FULL)
+		{
+			break;
+		}
+		OSWaitus(MAX_HW_TIME_US/WAIT_TRY_COUNT);
+	} END_LOOP_UNTIL_TIMEOUT_US();
+
 	if (eError != PVRSRV_OK)
 	{
-		if (eError != PVRSRV_ERROR_RETRY)
-		{
-			PVR_DPF((PVR_DBG_ERROR, "%s: Failed to acquire space for client CCB", __func__));
-		}
+		PVR_DPF((PVR_DBG_ERROR, "%s: Failed to acquire space for client CCB", __func__));
 		goto fail_ccbacquire;
 	}
 
@@ -665,12 +651,6 @@ PVRSRV_ERROR ContextSetPriority(RGX_SERVER_COMMON_CONTEXT *psContext,
 	RGXReleaseCCB(psClientCCB,
 				  ui32CmdSize,
 				  PDUMP_FLAGS_CONTINUOUS);
-
-	if (eError != PVRSRV_OK)
-	{
-		PVR_DPF((PVR_DBG_ERROR, "%s: Failed to release space in client CCB", __func__));
-		return eError;
-	}
 
 	/* Construct the priority command. */
 	sPriorityCmd.eCmdType = RGXFWIF_KCCB_CMD_KICK;

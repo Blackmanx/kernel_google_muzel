@@ -627,7 +627,8 @@ PVRSRV_ERROR RGXCreateCCB(PVRSRV_RGXDEV_INFO	*psDevInfo,
 	 * indicate this in psClientCCB->ui32CCBFlags.
 	 */
 	if ((psConnectionData->ui32ClientFlags & SRV_FLAGS_CLIENT_SLR_DISABLED) ||
-	    (ui32ContextFlags & RGX_CONTEXT_FLAG_DISABLESLR))
+	    (ui32ContextFlags & RGX_CONTEXT_FLAG_DISABLESLR) ||
+	    !PVRSRV_VZ_MODE_IS(NATIVE, DEVINFO, psDevInfo))
 	{
 		BIT_SET(psClientCCB->ui32CCBFlags, CCB_FLAGS_SLR_DISABLED);
 	}
@@ -2503,18 +2504,40 @@ void DumpCCB(PVRSRV_RGXDEV_INFO *psDevInfo,
 	ui32WrapMask = RGXGetWrapMaskCCB(psCurrentClientCCB);
 
 	PVR_DUMPDEBUG_LOG("FWCtx 0x%08X (%s)", sFWCommonContext.ui32Addr, psCurrentClientCCB->szName);
-	if (ui32Offset == ui32EndOffset)
+
+	if (((ui32WrapMask & (ui32WrapMask+1)) != 0) ||
+	    (ui32WrapMask > ((1U<<MAX_SAFE_CCB_SIZE_LOG2)-1)))
 	{
-		PVR_DUMPDEBUG_LOG("  `--<Empty>");
+		PVR_DUMPDEBUG_LOG("  `--<Invalid wrap mask 0x%08x>", ui32WrapMask);
+#if defined(PVRSRV_ENABLE_CCCB_GROW)
+		OSLockRelease(psCurrentClientCCB->hCCBGrowLock);
+#endif
+		return;
 	}
 
-	if ((ui32Offset + sizeof(RGXFWIF_CCB_CMD_HEADER)) > ui32WrapMask)
+	if (((ui32Offset + sizeof(RGXFWIF_CCB_CMD_HEADER)) > ui32WrapMask) ||
+	    ((ui32Offset % sizeof(IMG_UINT32)) != 0))
 	{
 		PVR_DUMPDEBUG_LOG("  `--<Invalid offset %u>", ui32Offset);
 #if defined(PVRSRV_ENABLE_CCCB_GROW)
 		OSLockRelease(psCurrentClientCCB->hCCBGrowLock);
 #endif
 		return;
+	}
+
+	if (((ui32EndOffset + sizeof(RGXFWIF_CCB_CMD_HEADER)) > ui32WrapMask) ||
+	    ((ui32EndOffset % sizeof(IMG_UINT32)) != 0))
+	{
+		PVR_DUMPDEBUG_LOG("  `--<Invalid end offset %u>", ui32EndOffset);
+#if defined(PVRSRV_ENABLE_CCCB_GROW)
+		OSLockRelease(psCurrentClientCCB->hCCBGrowLock);
+#endif
+		return;
+	}
+
+	if (ui32Offset == ui32EndOffset)
+	{
+		PVR_DUMPDEBUG_LOG("  `--<Empty>");
 	}
 
 	while (ui32Offset != ui32EndOffset)
@@ -2529,10 +2552,10 @@ void DumpCCB(PVRSRV_RGXDEV_INFO *psDevInfo,
 		IMG_UINT32 ui32NoOfUpdates, i;
 		RGXFWIF_UFO *psUFOPtr;
 
-		if ((ui32CmdSize % sizeof(RGXFWIF_UFO)) != 0)
+		if (((ui32CmdSize + sizeof(RGXFWIF_CCB_CMD_HEADER)) > ui32WrapMask)  ||
+		    ((ui32CmdSize % sizeof(IMG_UINT32)) != 0))
 		{
-			PVR_DUMPDEBUG_LOG("  `--<Invalid CmdSize %u, not a multiple of UFO_SIZE %zu, Offset=%u CmdType=%s>",
-				ui32CmdSize, sizeof(RGXFWIF_UFO), ui32Offset, _CCBCmdTypename(psCmdHeader->eCmdType));
+			PVR_DUMPDEBUG_LOG("  `--<Invalid command size %u>", ui32CmdSize);
 			break;
 		}
 
@@ -2559,7 +2582,7 @@ void DumpCCB(PVRSRV_RGXDEV_INFO *psDevInfo,
 			{
 				for (i = 0; i < ui32NoOfUpdates; i++, psUFOPtr++)
 				{
-					if ((((uintptr_t)psUFOPtr - (uintptr_t)pvClientCCBBuff + sizeof(RGXFWIF_UFO)) > ui32WrapMask + 1) ||
+					if ((((uintptr_t)psUFOPtr - (uintptr_t)pvClientCCBBuff + sizeof(RGXFWIF_UFO)) > ui32WrapMask+1) ||
 					    (i >= RGXFWIF_CCB_CMD_MAX_UFOS))
 					{
 						PVR_DUMPDEBUG_LOG("  `--<Invalid UFO update>");
@@ -2598,7 +2621,7 @@ void DumpCCB(PVRSRV_RGXDEV_INFO *psDevInfo,
 			{
 				for (i = 0; i < ui32NoOfUpdates; i++, psUFOPtr++)
 				{
-					if ((((uintptr_t)psUFOPtr - (uintptr_t)pvClientCCBBuff + sizeof(RGXFWIF_UFO)) > ui32WrapMask + 1) ||
+					if ((((uintptr_t)psUFOPtr - (uintptr_t)pvClientCCBBuff + sizeof(RGXFWIF_UFO)) > ui32WrapMask+1) ||
 					    (i >= RGXFWIF_CCB_CMD_MAX_UFOS))
 					{
 						PVR_DUMPDEBUG_LOG("  `--<Invalid RMW UFO update>");

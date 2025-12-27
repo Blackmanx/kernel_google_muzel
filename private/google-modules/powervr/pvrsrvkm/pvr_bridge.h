@@ -102,9 +102,7 @@ extern "C" {
 #include "common_syncfallback_bridge.h"
 #endif
 
-#if defined(SUPPORT_DI_BRG_IMPL)
 #include "common_di_bridge.h"
-#endif
 
 /*
  * Bridge Cmd Ids
@@ -324,13 +322,8 @@ extern "C" {
 
 /*  25: Debug Information (DI) interface functions */
 #define PVRSRV_BRIDGE_DI					25UL
-#if defined(SUPPORT_DI_BRG_IMPL)
 #define PVRSRV_BRIDGE_DI_DISPATCH_FIRST (PVRSRV_BRIDGE_SYNCFALLBACK_DISPATCH_LAST + 1)
 #define PVRSRV_BRIDGE_DI_DISPATCH_LAST  (PVRSRV_BRIDGE_DI_DISPATCH_FIRST + PVRSRV_BRIDGE_DI_CMD_LAST)
-#else
-#define PVRSRV_BRIDGE_DI_DISPATCH_FIRST 0
-#define PVRSRV_BRIDGE_DI_DISPATCH_LAST  (PVRSRV_BRIDGE_SYNCFALLBACK_DISPATCH_LAST)
-#endif
 
 /*  26: DMA transfer functions */
 
@@ -350,7 +343,7 @@ extern "C" {
 
 /* bit mask representing the enabled PVR bridges */
 
-static const IMG_UINT32 gui32PVRBridges =
+static const IMG_UINT32 __maybe_unused gui32PVRBridges =
 	  (1U << (PVRSRV_BRIDGE_DEFAULT - PVRSRV_BRIDGE_FIRST))
 	| (1U << (PVRSRV_BRIDGE_SRVCORE - PVRSRV_BRIDGE_FIRST))
 	| (1U << (PVRSRV_BRIDGE_SYNC - PVRSRV_BRIDGE_FIRST))
@@ -397,9 +390,7 @@ static const IMG_UINT32 gui32PVRBridges =
 #if defined(SUPPORT_FALLBACK_FENCE_SYNC)
 	| (1U << (PVRSRV_BRIDGE_SYNCFALLBACK - PVRSRV_BRIDGE_FIRST))
 #endif
-#if defined(SUPPORT_DI_BRG_IMPL)
 	| (1U << (PVRSRV_BRIDGE_DI - PVRSRV_BRIDGE_FIRST))
-#endif
 #if defined(SUPPORT_DMA_TRANSFER)
 	| (1U << (PVRSRV_BRIDGE_DMA - PVRSRV_BRIDGE_FIRST))
 #endif

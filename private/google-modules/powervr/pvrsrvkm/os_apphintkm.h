@@ -1,8 +1,8 @@
 /*************************************************************************/ /*!
-@File           km_apphint.h
+@File           os_apphintkm.h
 @Title          Apphint internal header
 @Copyright      Copyright (c) Imagination Technologies Ltd. All Rights Reserved
-@Description    Linux kernel AppHint control
+@Description    kernel/server AppHint control
 @License        Dual MIT/GPLv2
 
 The contents of this file are subject to the MIT license as set out below.
@@ -41,8 +41,8 @@ IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 */ /**************************************************************************/
 
-#ifndef KM_APPHINT_H
-#define KM_APPHINT_H
+#ifndef OS_APPHINTKM_H
+#define OS_APPHINTKM_H
 
 #if defined(__cplusplus)
 extern "C" {
@@ -92,8 +92,8 @@ void pvr_apphint_register_handlers_string(APPHINT_ID id,
 #if defined(__cplusplus)
 }
 #endif
-#endif /* KM_APPHINT_H */
+#endif /* OS_APPHINTKM_H */
 
 /******************************************************************************
- End of file (km_apphint.h)
+ End of file (os_apphintkm.h)
 ******************************************************************************/

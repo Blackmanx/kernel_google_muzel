@@ -100,8 +100,8 @@ PVRSRV_ERROR PVRSRVRGXCreateRayContextKM(CONNECTION_DATA			*psConnection,
 											 IMG_INT32				i32Priority,
 											 IMG_HANDLE				hMemCtxPrivData,
 											 IMG_UINT32				ui32ContextFlags,
-											 IMG_UINT32				ui32StaticRayContextStateSize,
-											 IMG_PBYTE				pStaticRayContextState,
+											 IMG_UINT32				ui32RayContextDataSize,
+											 IMG_PBYTE				pRayData,
 											 IMG_UINT64				ui64RobustnessAddress,
 											 IMG_UINT32				ui32MaxDeadlineMS,
 											 RGX_SERVER_RAY_CONTEXT	**ppsRayContext)
@@ -187,7 +187,7 @@ PVRSRV_ERROR PVRSRVRGXCreateRayContextKM(CONNECTION_DATA			*psConnection,
 	}
 #endif
 
-	OSDeviceMemCopy(&psFWRayContext->sStaticRayContextState, pStaticRayContextState, ui32StaticRayContextStateSize);
+	OSDeviceMemCopy(&psFWRayContext->sRDMContext.uDMSpecific.sRay, pRayData, ui32RayContextDataSize);
 	DevmemPDumpLoadMem(psRayContext->psFWRayContextMemDesc, 0, sizeof(RGXFWIF_FWRAYCONTEXT), PDUMP_FLAGS_CONTINUOUS);
 	DevmemReleaseCpuVirtAddr(psRayContext->psFWRayContextMemDesc);
 
@@ -231,7 +231,7 @@ PVRSRV_ERROR PVRSRVRGXDestroyRayContextKM(RGX_SERVER_RAY_CONTEXT *psRayContext)
 			return eError;
 		}
 
-		ui32WorkEstCCBSubmitted = psFWRayContext->ui32WorkEstCCBSubmitted;
+		ui32WorkEstCCBSubmitted = psFWRayContext->sRDMContext.ui32WorkEstCCBSubmitted;
 
 		DevmemReleaseCpuVirtAddr(psRayContext->psFWRayContextMemDesc);
 
@@ -299,7 +299,7 @@ PVRSRV_ERROR PVRSRVRGXKickRDMKM(RGX_SERVER_RAY_CONTEXT	*psRayContext,
 
 	RGXFWIF_KCCB_CMD		sRayKCCBCmd;
 	RGX_CCB_CMD_HELPER_DATA	asCmdHelperData[1];
-	PVRSRV_ERROR			eError, eError2;
+	PVRSRV_ERROR			eError;
 	IMG_UINT32				ui32FWCtx;
 
 	PRGXFWIF_TIMESTAMP_ADDR pPreAddr;
@@ -696,21 +696,18 @@ PVRSRV_ERROR PVRSRVRGXKickRDMKM(RGX_SERVER_RAY_CONTEXT	*psRayContext,
 		goto fail_acquirepowerlock;
 	}
 
-	if (eError == PVRSRV_OK)
-	{
 #if defined(SUPPORT_WORKLOAD_ESTIMATION)
-		if (!PVRSRV_VZ_MODE_IS(GUEST, DEVINFO, psDevInfo))
-		{
-			ui32RDMCmdOffset = RGXGetHostWriteOffsetCCB(psClientCCB);
-		}
-#endif
-		/*
-			All the required resources are ready at this point, we can't fail so
-			take the required server sync operations and commit all the resources
-		*/
-		RGXCmdHelperReleaseCmdCCB(1, asCmdHelperData, "RDM", FWCommonContextGetFWAddress(psRayContext->psServerCommonContext).ui32Addr);
+	if (!PVRSRV_VZ_MODE_IS(GUEST, DEVINFO, psDevInfo))
+	{
+		ui32RDMCmdOffset = RGXGetHostWriteOffsetCCB(psClientCCB);
 	}
+#endif
 
+	/*
+		All the required resources are ready at this point, we can't fail so
+		take the required server sync operations and commit all the resources
+	*/
+	RGXCmdHelperReleaseCmdCCB(1, asCmdHelperData, "RDM", FWCommonContextGetFWAddress(psRayContext->psServerCommonContext).ui32Addr);
 
 #if defined(SUPPORT_WORKLOAD_ESTIMATION)
 	if (!PVRSRV_VZ_MODE_IS(GUEST, DEVINFO, psDevInfo))
@@ -772,11 +769,11 @@ PVRSRV_ERROR PVRSRVRGXKickRDMKM(RGX_SERVER_RAY_CONTEXT	*psRayContext,
 	 */
 	LOOP_UNTIL_TIMEOUT_US(MAX_HW_TIME_US)
 	{
-		eError2 = RGXScheduleCommandWithoutPowerLock(psRayContext->psDeviceNode->pvDevice,
+		eError = RGXScheduleCommandWithoutPowerLock(psRayContext->psDeviceNode->pvDevice,
 									RGXFWIF_DM_RAY,
 									&sRayKCCBCmd,
 									ui32PDumpFlags);
-		if (eError2 != PVRSRV_ERROR_RETRY)
+		if (eError != PVRSRV_ERROR_RETRY)
 		{
 			break;
 		}
@@ -785,32 +782,18 @@ PVRSRV_ERROR PVRSRVRGXKickRDMKM(RGX_SERVER_RAY_CONTEXT	*psRayContext,
 
 	PVRSRVPowerUnlock(psDevInfo->psDeviceNode);
 
-	if (eError2 != PVRSRV_OK)
+	if (eError != PVRSRV_OK)
 	{
 		PVR_DPF((PVR_DBG_ERROR,
 				 "%s failed to schedule kernel CCB command (%s)",
 				 __func__,
-				 PVRSRVGetErrorString(eError2)));
-		if (eError == PVRSRV_OK)
-		{
-			eError = eError2;
-		}
-	}
-	else
-	{
-		PVRGpuTraceEnqueueEvent(psRayContext->psDeviceNode,
-		                        ui32FWCtx, ui32ExtJobRef, ui32IntJobRef,
-		                        RGX_HWPERF_KICK_TYPE2_RS);
-	}
-	/*
-	 * Now check eError (which may have returned an error from our earlier call
-	 * to RGXCmdHelperAcquireCmdCCB) - we needed to process any flush command first
-	 * so we check it now...
-	 */
-	if (eError != PVRSRV_OK )
-	{
+				 PVRSRVGetErrorString(eError)));
 		goto fail_cmdsubmit;
 	}
+
+	PVRGpuTraceEnqueueEvent(psRayContext->psDeviceNode,
+							ui32FWCtx, ui32ExtJobRef, ui32IntJobRef,
+							RGX_HWPERF_KICK_TYPE2_RS);
 
 #if defined(NO_HARDWARE)
 	/* If NO_HARDWARE, signal the output fence's sync checkpoint and sync prim */

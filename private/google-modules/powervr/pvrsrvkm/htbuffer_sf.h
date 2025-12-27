@@ -237,7 +237,7 @@ typedef enum HTB_LOG_SFids {
 }
 #endif
 
-#if defined(__GNUC__)
+#if defined(__GNUC__) && !defined(__CHECKER__)
 #if GCC_VERSION_AT_LEAST(12, 1)
 #define HTB_FILE_NAME __FILE_NAME__
 #else

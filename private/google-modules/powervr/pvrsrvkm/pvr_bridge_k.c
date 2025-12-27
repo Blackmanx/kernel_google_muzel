@@ -72,11 +72,6 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include <linux/sched.h>
 #include <linux/freezer.h>
 
-/* RGX: */
-#if defined(SUPPORT_RGX)
-#include "rgx_bridge.h"
-#endif
-
 #include "srvcore.h"
 #include "common_srvcore_bridge.h"
 #include "kernel_compatibility.h"

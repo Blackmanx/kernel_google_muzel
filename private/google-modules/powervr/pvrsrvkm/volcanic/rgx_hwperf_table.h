@@ -225,9 +225,11 @@ static inline IMG_BOOL rgx_hwperf_blk_present(const RGXFW_HWPERF_CNTBLK_TYPE_MOD
 #if defined(__KERNEL__)	/* Server context -- Run-time Only */
 	PVRSRV_RGXDEV_INFO *psDevInfo = (PVRSRV_RGXDEV_INFO *)pvDev_km;
 	PVRSRV_DEVICE_NODE *psNode;
-	IMG_UINT32	ui32MaxTPUPerSPU;
-	IMG_UINT32	ui32NumMemBus;
-	IMG_UINT32	ui32RTArchVal;
+	IMG_UINT32 ui32MaxTPUPerSPU;
+#if !defined(RGX_FEATURE_CATURIX_TOP_INFRASTRUCTURE)
+	IMG_UINT32 ui32NumMemBus;
+#endif
+	IMG_UINT32 ui32RTArchVal;
 
 	DBG_ASSERT(psDevInfo != NULL);
 	DBG_ASSERT(psBlkTypeDesc != NULL);
@@ -249,6 +251,7 @@ static inline IMG_BOOL rgx_hwperf_blk_present(const RGXFW_HWPERF_CNTBLK_TYPE_MOD
 	ui32MaxTPUPerSPU =
 		PVRSRV_GET_DEVICE_FEATURE_VALUE(psNode, MAX_TPU_PER_SPU);
 
+#if !defined(RGX_FEATURE_CATURIX_TOP_INFRASTRUCTURE)
 	if (PVRSRV_IS_FEATURE_SUPPORTED(psNode, CATURIX_TOP_INFRASTRUCTURE))
 	{
 		ui32NumMemBus = 1U;
@@ -258,6 +261,7 @@ static inline IMG_BOOL rgx_hwperf_blk_present(const RGXFW_HWPERF_CNTBLK_TYPE_MOD
 		ui32NumMemBus =
 			PVRSRV_GET_DEVICE_FEATURE_VALUE(psNode, NUM_MEMBUS);
 	}
+#endif
 
 	ui32RTArchVal =
 		PVRSRV_GET_DEVICE_FEATURE_VALUE(psNode, RAY_TRACING_ARCH);
@@ -326,18 +330,34 @@ static inline IMG_BOOL rgx_hwperf_blk_present(const RGXFW_HWPERF_CNTBLK_TYPE_MOD
 			}
 			break;
 
+#if defined(RGX_FEATURE_ERYX_TOP_INFRASTRUCTURE)
+		case RGX_CNTBLK_ID_USC0:
+			psRtInfo->uiNumUnits =
+				PVRSRV_GET_DEVICE_FEATURE_VALUE(psNode, NUM_CLUSTERS);
+			break;
+		/* No accessible counters present in the MERCER block so just return
+		 * a configuration of 0 instances.
+		 */
+		case RGX_CNTBLK_ID_MERCER0:
+			psRtInfo->uiNumUnits = 0;
+#else
 		case RGX_CNTBLK_ID_USC0:
 		case RGX_CNTBLK_ID_MERCER0:
 			psRtInfo->uiNumUnits =
 				PVRSRV_GET_DEVICE_FEATURE_VALUE(psNode, NUM_CLUSTERS);
+#endif	/* defined(RGX_FEATURE_ERYX_TOP_INFRASTRUCTURE) */
 			break;
 
 		case RGX_CNTBLK_ID_PBE0:
-
+#if defined(RGX_FEATURE_ERYX_TOP_INFRASTRUCTURE)
+			/* No PBE block present in the ERYX layout. */
+			psRtInfo->uiNumUnits = 0;
+#else
 			psRtInfo->uiNumUnits =
 				PVRSRV_GET_DEVICE_FEATURE_VALUE(psNode, PBE_PER_SPU);
 			psRtInfo->uiNumUnits *=
 				PVRSRV_GET_DEVICE_FEATURE_VALUE(psNode, NUM_SPU);
+#endif	/* defined(RGX_FEATURE_ERYX_TOP_INFRASTRUCTURE) */
 			break;
 
 		case RGX_CNTBLK_ID_ISP0:

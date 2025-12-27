@@ -44,22 +44,22 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #ifndef PVRVERSION_H
 #define PVRVERSION_H
 
-#define PVRVERSION_MAJ               24U
-#define PVRVERSION_MIN               3U
+#define PVRVERSION_MAJ               25U
+#define PVRVERSION_MIN               1U
 
 #define PVRVERSION_FAMILY           "rogueddk"
-#define PVRVERSION_BRANCHNAME       "24.3"
-#define PVRVERSION_BUILD             6660496
+#define PVRVERSION_BRANCHNAME       "25.1"
+#define PVRVERSION_BUILD             6794074
 #define PVRVERSION_BSCONTROL        "Rogue_DDK_Android"
 
-#define PVRVERSION_STRING           "Rogue_DDK_Android rogueddk 24.3@6660496"
-#define PVRVERSION_STRING_SHORT     "24.3@6660496"
+#define PVRVERSION_STRING           "Rogue_DDK_Android rogueddk 25.1@6794074"
+#define PVRVERSION_STRING_SHORT     "25.1@6794074"
 
 #define COPYRIGHT_TXT               "Copyright (c) Imagination Technologies Ltd. All Rights Reserved."
 
-#define PVRVERSION_BUILD_HI          666
-#define PVRVERSION_BUILD_LO          496
-#define PVRVERSION_STRING_NUMERIC   "24.3.666.496"
+#define PVRVERSION_BUILD_HI          679
+#define PVRVERSION_BUILD_LO          4074
+#define PVRVERSION_STRING_NUMERIC   "25.1.679.4074"
 
 #define PVRVERSION_PACK(MAJOR,MINOR) (((IMG_UINT32)((IMG_UINT32)(MAJOR) & 0xFFFFU) << 16U) | (((MINOR) & 0xFFFFU) << 0U))
 #define PVRVERSION_UNPACK_MAJ(VERSION) (((VERSION) >> 16U) & 0xFFFFU)

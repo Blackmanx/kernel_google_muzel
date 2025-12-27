@@ -18,6 +18,7 @@
 #include <pvrsrvkm/rgx_memallocflags.h>
 
 #include <pvr_drv.h>
+#include <pvrversion.h>
 
 #include "sysconfig.h"
 #include "pm_domain.h"
@@ -401,10 +402,15 @@ static int map_physmem_fw(struct pixel_gpu_device *pixel_dev)
 	struct pixel_devmap_phys_ranges_info map_info;
 	int i, ret = 0;
 
+	/* PA ranges are aligned to 16k from ABI version 15 */
+	uint64_t pa_range_align = (footer->fwabi_version < PIXEL_PA_RANGE_16K_PAGE_ABI_VERSION) ?
+		PAGE_SIZE : PIXEL_PA_RANGE_PAGE_SIZE;
+
 	for (i = 0; i < footer->pa_range_count; ++i) {
+		uint64_t pa_offset = footer->pa_ranges[i].base_pa & (pa_range_align - 1);
 		phys_ranges[i] = (struct pixel_devmap_phys_range){
-			.pa = footer->pa_ranges[i].base_pa,
-			.size = footer->pa_ranges[i].extent,
+			.pa = footer->pa_ranges[i].base_pa & ~(pa_range_align - 1),
+			.size = PVR_ALIGN(footer->pa_ranges[i].extent + pa_offset, pa_range_align),
 		};
 	}
 	map_info = (struct pixel_devmap_phys_ranges_info){
@@ -823,3 +829,4 @@ MODULE_LICENSE("GPL v2");
 MODULE_AUTHOR("Google LLC");
 MODULE_DESCRIPTION("Pixel PowerVR GPU Driver");
 MODULE_INFO(fw_abi_ver, __stringify(FW_ABI_VERSION));
+MODULE_INFO(ddk_version, PVRVERSION_BRANCHNAME);

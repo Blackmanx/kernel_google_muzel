@@ -54,6 +54,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "rgxlayer.h"
 #include "rgxmmudefs_km.h"
 #include "rgxta3d.h"
+#include "devicemem_server.h"
 
 PVRSRV_ERROR RGXQueryAPMState(const PVRSRV_DEVICE_NODE *psDeviceNode,
 	const void *pvPrivateData,
@@ -554,21 +555,47 @@ void UnrefAndReleaseCriticalBuffer(DEVMEMINT_RESERVATION* psReservation)
 {
 	PVRSRV_ERROR eError;
 	PMR* psPMR;
-	IMG_DEV_VIRTADDR sDummy;
+	IMG_DEV_VIRTADDR sUnused;
 	/* Skip error check. If this function is called it means we already
 	   Acquired a reservation and confirmed that mapping exists. */
-	eError = DevmemIntGetReservationData(psReservation, &psPMR, &sDummy);
-	PVR_LOG_IF_ERROR_VA(PVR_DBG_ERROR, eError,
-	    "Error when trying to obtain reservation data in %s", __func__);
+	eError = DevmemIntGetReservationData(psReservation, &psPMR, &sUnused);
+	PVR_LOG_IF_ERROR(eError, "DevmemIntGetReservationData");
 
 	/* Ignore return value. Clearing the flag cannot fail. */
 	PMR_SetExclusiveUse(psPMR, IMG_FALSE);
 
 	eError = PMRUnrefPMR(psPMR);
-	PVR_LOG_IF_ERROR_VA(PVR_DBG_ERROR, eError,
-	    "Error on PMR unref in %s", __func__);
+	PVR_LOG_IF_ERROR(eError, "PMRUnrefPMR");
 
 	DevmemIntReservationRelease(psReservation);
+}
+
+/* The upper bound comes from theoretical maximum range that PM can address
+ * when accessing tail ptr buffer.
+ * The size is bound by:
+ *     - maximum number of RTA layers (at most 2048)
+ *     - TPC stride (at most 16384 pages).
+ * The address is also offset in FW by half of the buffer size
+ * when TRP is enabled so maximum upper bound is:
+ * 2048 * 16384 pages * 1.5 = 192GB
+ */
+#define PM_BUFFER_SIZE_UPPER_BOUND (0x3000000000)
+
+static_assert(RGX_PMMETA_PROTECT_HEAP_BASE - (RGX_GENERAL_HEAP_BASE + RGX_GENERAL_HEAP_SIZE) > PM_BUFFER_SIZE_UPPER_BOUND,
+			  "Distance between PMMETA_PROTECT and GENERAL heaps is less than PM buffer size upper bound");
+PVRSRV_ERROR ValidatePMAddrs(IMG_DEV_VIRTADDR* psDevVAddr, IMG_UINT32 ui32NumAddr)
+{
+	IMG_UINT32 i;
+
+	for (i=0; i<ui32NumAddr; i++)
+	{
+		if (psDevVAddr[i].uiAddr >= (RGX_GENERAL_HEAP_BASE + RGX_GENERAL_HEAP_SIZE))
+		{
+			return PVRSRV_ERROR_INVALID_PARAMS;
+		}
+	}
+
+	return PVRSRV_OK;
 }
 
 /******************************************************************************

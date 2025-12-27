@@ -116,8 +116,8 @@ PVRSRV_ERROR PVRSRVRGXCreateComputeContextKM(CONNECTION_DATA			*psConnection,
 											 IMG_UINT32					ui32FrameworkCommandSize,
 											 IMG_PBYTE					pbyFrameworkCommand,
 											 IMG_HANDLE					hMemCtxPrivData,
-											 IMG_UINT32					ui32StaticComputeContextStateSize,
-											 IMG_PBYTE					pStaticComputeContextState,
+											 IMG_UINT32					ui32CompContextDataSize,
+											 IMG_PBYTE					pCompData,
 											 IMG_UINT32					ui32PackedCCBSizeU88,
 											 IMG_UINT32					ui32ContextFlags,
 											 IMG_UINT64					ui64RobustnessAddress,
@@ -234,8 +234,13 @@ PVRSRV_ERROR PVRSRVRGXCreateComputeContextKM(CONNECTION_DATA			*psConnection,
 	ui32CCBMaxAllocSizeLog2 = U32toU8_Unpack2(ui32PackedCCBSizeU88);
 	eError = FWCommonContextAllocate(psConnection,
 									 psDeviceNode,
+#if defined(SUPPORT_UDM)
+									 BITMASK_HAS(ui32ContextFlags, RGX_CONTEXT_FLAG_CDM_TRANSFER) ? REQ_TYPE_TQ_TDM : REQ_TYPE_CDM,
+									 BITMASK_HAS(ui32ContextFlags, RGX_CONTEXT_FLAG_CDM_TRANSFER) ? RGXFWIF_DM_TDM : RGXFWIF_DM_CDM,
+#else
 									 REQ_TYPE_CDM,
 									 RGXFWIF_DM_CDM,
+#endif
 									 hMemCtxPrivData,
 									 psComputeContext->psFWComputeContextMemDesc,
 									 offsetof(RGXFWIF_FWCOMPUTECONTEXT, sCDMContext),
@@ -261,7 +266,7 @@ PVRSRV_ERROR PVRSRVRGXCreateComputeContextKM(CONNECTION_DATA			*psConnection,
 		goto fail_acquire_cpu_mapping;
 	}
 
-	OSDeviceMemCopy(&psFWComputeContext->sStaticComputeContextState, pStaticComputeContextState, ui32StaticComputeContextStateSize);
+	OSDeviceMemCopy(&psFWComputeContext->sCDMContext.uDMSpecific.sComp, pCompData, ui32CompContextDataSize);
 	DevmemPDumpLoadMem(psComputeContext->psFWComputeContextMemDesc, 0, sizeof(RGXFWIF_FWCOMPUTECONTEXT), PDUMP_FLAGS_CONTINUOUS);
 	RGXFwSharedMemCacheOpValue(psFWComputeContext->sStaticComputeContextState, FLUSH);
 	DevmemReleaseCpuVirtAddr(psComputeContext->psFWComputeContextMemDesc);
@@ -358,8 +363,8 @@ PVRSRV_ERROR PVRSRVRGXDestroyComputeContextKM(RGX_SERVER_COMPUTE_CONTEXT *psComp
 					PVRSRVGetErrorString(eError)));
 			return eError;
 		}
-		RGXFwSharedMemCacheOpValue(psFWComputeContext->ui32WorkEstCCBSubmitted, INVALIDATE);
-		ui32WorkEstCCBSubmitted = psFWComputeContext->ui32WorkEstCCBSubmitted;
+		RGXFwSharedMemCacheOpValue(psFWComputeContext->sCDMContext.ui32WorkEstCCBSubmitted, INVALIDATE);
+		ui32WorkEstCCBSubmitted = psFWComputeContext->sCDMContext.ui32WorkEstCCBSubmitted;
 
 		DevmemReleaseCpuVirtAddr(psComputeContext->psFWComputeContextMemDesc);
 
@@ -430,15 +435,15 @@ PVRSRV_ERROR PVRSRVRGXKickCDMKM(RGX_SERVER_COMPUTE_CONTEXT	*psComputeContext,
 								IMG_UINT64					ui64DeadlineInus,
 								IMG_PUINT32					pui32IntJobRef)
 {
-	RGXFWIF_KCCB_CMD		sCmpKCCBCmd;
-	RGX_CCB_CMD_HELPER_DATA	asCmdHelperData[1];
-	PVRSRV_ERROR			eError;
-	IMG_UINT32				ui32CDMCmdOffset = 0;
-	PVRSRV_RGXDEV_INFO      *psDevInfo = FWCommonContextGetRGXDevInfo(psComputeContext->psServerCommonContext);
-	RGX_CLIENT_CCB          *psClientCCB = FWCommonContextGetClientCCB(psComputeContext->psServerCommonContext);
-	IMG_UINT32              ui32IntJobRef = OSAtomicIncrement(&psDevInfo->iCCBSubmissionOrdinal);
-	IMG_UINT32				ui32FWCtx;
-	IMG_BOOL				bCCBStateOpen = IMG_FALSE;
+	RGXFWIF_KCCB_CMD          sCmpKCCBCmd;
+	RGX_CCB_CMD_HELPER_DATA   asCmdHelperData[1];
+	PVRSRV_ERROR              eError;
+	__maybe_unused IMG_UINT32 ui32CDMCmdOffset = 0;
+	PVRSRV_RGXDEV_INFO *psDevInfo = FWCommonContextGetRGXDevInfo(psComputeContext->psServerCommonContext);
+	RGX_CLIENT_CCB     *psClientCCB = FWCommonContextGetClientCCB(psComputeContext->psServerCommonContext);
+	IMG_UINT32         ui32IntJobRef = OSAtomicIncrement(&psDevInfo->iCCBSubmissionOrdinal);
+	IMG_UINT32         ui32FWCtx;
+	IMG_BOOL           bCCBStateOpen = IMG_FALSE;
 
 	PRGXFWIF_TIMESTAMP_ADDR pPreAddr;
 	PRGXFWIF_TIMESTAMP_ADDR pPostAddr;
@@ -688,23 +693,21 @@ PVRSRV_ERROR PVRSRVRGXKickCDMKM(RGX_SERVER_COMPUTE_CONTEXT	*psComputeContext,
 			 */
 			if (ui32FenceSyncCheckpointCount > 0)
 			{
+				IMG_UINT32 iii;
+
 				CHKPT_DBG((PVR_DBG_ERROR, "%s:   Checking export fence is not part of check fence...", __func__));
 				CHKPT_DBG((PVR_DBG_ERROR, "%s:   ui32FenceSyncCheckpointCount=%d",
 						   __func__, ui32FenceSyncCheckpointCount));
-				if (ui32FenceSyncCheckpointCount > 0)
-				{
-					IMG_UINT32 iii;
 
-					for (iii=0; iii<ui32FenceSyncCheckpointCount; iii++)
+				for (iii=0; iii<ui32FenceSyncCheckpointCount; iii++)
+				{
+					CHKPT_DBG((PVR_DBG_ERROR, "%s: apsFenceSyncCheckpoints[%d]=<%p>, FWAddr=0x%x", __func__, iii, apsFenceSyncCheckpoints[iii], SyncCheckpointGetFirmwareAddr(apsFenceSyncCheckpoints[iii])));
+					if (apsFenceSyncCheckpoints[iii] == psExportFenceSyncCheckpoint)
 					{
-						CHKPT_DBG((PVR_DBG_ERROR, "%s: apsFenceSyncCheckpoints[%d]=<%p>, FWAddr=0x%x", __func__, iii, apsFenceSyncCheckpoints[iii], SyncCheckpointGetFirmwareAddr(apsFenceSyncCheckpoints[iii])));
-						if (apsFenceSyncCheckpoints[iii] == psExportFenceSyncCheckpoint)
-						{
-							CHKPT_DBG((PVR_DBG_ERROR, "%s: ERROR psExportFenceSyncCheckpoint=<%p>", __func__, psExportFenceSyncCheckpoint));
-							eError = PVRSRV_ERROR_INVALID_PARAMS;
-							PVR_DPF((PVR_DBG_ERROR, " %s - iCheckFence includes iExportFenceToSignal", PVRSRVGetErrorString(eError)));
-							goto fail_check_fence_includes_export_fence;
-						}
+						CHKPT_DBG((PVR_DBG_ERROR, "%s: ERROR psExportFenceSyncCheckpoint=<%p>", __func__, psExportFenceSyncCheckpoint));
+						eError = PVRSRV_ERROR_INVALID_PARAMS;
+						PVR_DPF((PVR_DBG_ERROR, " %s - iCheckFence includes iExportFenceToSignal", PVRSRVGetErrorString(eError)));
+						goto fail_check_fence_includes_export_fence;
 					}
 				}
 			}
@@ -1427,39 +1430,6 @@ PVRSRV_ERROR PVRSRVRGXSetComputeContextPriorityKM(CONNECTION_DATA *psConnection,
 	}
 
 	OSLockRelease(psComputeContext->hLock);
-	return eError;
-}
-
-/*
- * PVRSRVRGXSetComputeContextPropertyKM
- */
-PVRSRV_ERROR PVRSRVRGXSetComputeContextPropertyKM(RGX_SERVER_COMPUTE_CONTEXT *psComputeContext,
-                                                  RGX_CONTEXT_PROPERTY eContextProperty,
-                                                  IMG_UINT64 ui64Input,
-                                                  IMG_UINT64 *pui64Output)
-{
-	PVRSRV_ERROR eError = PVRSRV_OK;
-
-	switch (eContextProperty)
-	{
-		case RGX_CONTEXT_PROPERTY_FLAGS:
-		{
-			IMG_UINT32 ui32ContextFlags = (IMG_UINT32)ui64Input;
-
-			OSLockAcquire(psComputeContext->hLock);
-			eError = FWCommonContextSetFlags(psComputeContext->psServerCommonContext,
-			                                 ui32ContextFlags);
-			OSLockRelease(psComputeContext->hLock);
-			break;
-		}
-
-		default:
-		{
-			PVR_DPF((PVR_DBG_ERROR, "%s: PVRSRV_ERROR_NOT_SUPPORTED - asked to set unknown property (%d)", __func__, eContextProperty));
-			eError = PVRSRV_ERROR_NOT_SUPPORTED;
-		}
-	}
-
 	return eError;
 }
 

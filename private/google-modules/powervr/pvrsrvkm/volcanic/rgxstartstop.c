@@ -48,9 +48,25 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  * Any new code should be built on top of the existing abstraction layer,
  * which should be extended when necessary. */
 #include "rgxstartstop.h"
-#include "rgxdevice.h"
 
 
+/* This module must remain portable to allow it to be built into
+ * external system components such as the TEE. Most DDK
+ * types and helper functions can't be used here */
+#define RGX_LAYER_PARAMS   ERROR_ILLEGAL_TYPEDEF
+#define PVRSRV_RGXDEV_INFO ERROR_ILLEGAL_TYPEDEF
+#define PVRSRV_DEVICE_NODE ERROR_ILLEGAL_TYPEDEF
+#define PVR_DPF            ERROR_ILLEGAL_TYPEDEF
+
+#if  defined(RGXLAYER_IMPL_H)
+#error "Driver-only headers are included that break portability."
+#endif
+
+#if defined(PDUMP) && defined(SUPPORT_TRUSTED_DEVICE) && !defined(SUPPORT_SECURITY_VALIDATION)
+#error "Security builds do not support PDUMP"
+#endif
+
+#if defined(RGX_FEATURE_META_MAX_VALUE_IDX)
 /*
 	RGXWriteMetaRegThroughSP
 */
@@ -287,6 +303,7 @@ static void RGXInitMetaProcWrapper(const void *hPrivate)
 	RGXCommentLog(hPrivate, "RGXStart: Configure META wrapper");
 	RGXWriteReg64(hPrivate, RGX_CR_MTS_GARTEN_WRAPPER_CONFIG, ui64GartenConfig);
 }
+#endif
 
 #if defined(RGX_FEATURE_MIPS_BIT_MASK)
 /*!
@@ -510,7 +527,6 @@ static void RGXInitRiscvProcWrapper(const void *hPrivate)
 		              RGX_CR_FWCORE_ADDR_REMAP_CONFIG0_FETCH_EN_EN);
 
 		RGXCommentLog(hPrivate, "RGXStart: Write boot data remap");
-		RGXAcquireBootDataAddr(hPrivate, &sTmp);
 		RGXWriteReg64(hPrivate,
 		              ui32BootDataRemap,
 		              sTmp.uiAddr |
@@ -533,6 +549,7 @@ static void RGXWriteKernelCatBase(const void *hPrivate, IMG_DEV_PHYADDR sPCAddr)
 {
 	IMG_UINT32 uiPCAddr;
 
+#if !defined(RGX_FEATURE_ERYX_TOP_INFRASTRUCTURE)
 #if defined(RGX_FEATURE_HOST_SECURITY_VERSION_MAX_VALUE_IDX)
 	if (RGX_DEVICE_GET_FEATURE_VALUE(hPrivate, HOST_SECURITY_VERSION) > 1)
 	{
@@ -601,6 +618,7 @@ static void RGXWriteKernelCatBase(const void *hPrivate, IMG_DEV_PHYADDR sPCAddr)
 	}
 #endif /* defined(RGX_FEATURE_HOST_SECURITY_VERSION_MAX_VALUE_IDX) */
 	else
+#endif
 	{
 		uiPCAddr = (((sPCAddr.uiAddr >> RGX_CR_MMU_CBASE_MAPPING_BASE_ADDR_ALIGNSHIFT)
 		             << RGX_CR_MMU_CBASE_MAPPING_BASE_ADDR_SHIFT)
@@ -685,8 +703,20 @@ static void RGXInitBIF(const void *hPrivate)
  */ /**************************************************************************/
 static void RGXInitMMURangeRegisters(const void *hPrivate)
 {
-	IMG_UINT32 ui32RegAddr = RGX_CR_MMU_PAGE_SIZE_RANGE_ONE;
+	IMG_UINT32 ui32RegAddr;
 	IMG_UINT32 i;
+
+#if defined(RGX_FEATURE_HOST_SECURITY_VERSION_MAX_VALUE_IDX) && defined(RGX_CR_MMU_PAGE_SIZE_RANGE_ONE__HOST_SECURITY_GEQ5)
+	if (RGX_DEVICE_GET_FEATURE_VALUE(hPrivate, HOST_SECURITY_VERSION) >= 5)
+	{
+		ui32RegAddr = RGX_CR_MMU_PAGE_SIZE_RANGE_ONE__HOST_SECURITY_GEQ5;
+	}
+	else
+#endif
+	{
+		ui32RegAddr = RGX_CR_MMU_PAGE_SIZE_RANGE_ONE;
+	}
+
 
 	for (i = 0; i < RGX_MAX_NUM_MMU_PAGE_SIZE_RANGES; ++i, ui32RegAddr += sizeof(IMG_UINT64))
 	{
@@ -773,6 +803,7 @@ static void RGXInitAXIACE(const void *hPrivate)
 	RGXWriteReg64(hPrivate, ui32RegAddr, ui64RegVal);
 }
 
+#if !defined(RGX_FEATURE_ERYX_TOP_INFRASTRUCTURE)
 static void RGXMercerSoftResetSet(const void *hPrivate, IMG_UINT64 ui32MercerFlags)
 {
 	RGXWriteReg64(hPrivate, RGX_CR_MERCER_SOFT_RESET, ui32MercerFlags & RGX_CR_MERCER_SOFT_RESET_MASKFULL);
@@ -780,9 +811,11 @@ static void RGXMercerSoftResetSet(const void *hPrivate, IMG_UINT64 ui32MercerFla
 	/* Read soft-reset to fence previous write in order to clear the SOCIF pipeline */
 	(void) RGXReadReg64(hPrivate, RGX_CR_MERCER_SOFT_RESET);
 }
+#endif
 
 static void RGXSPUSoftResetAssert(const void *hPrivate)
 {
+#if !defined(RGX_FEATURE_ERYX_TOP_INFRASTRUCTURE)
 	/* Assert Mercer0 */
 	RGXMercerSoftResetSet(hPrivate, RGX_CR_MERCER0_SOFT_RESET_SPU_EN);
 	/* Assert Mercer1 */
@@ -790,25 +823,44 @@ static void RGXSPUSoftResetAssert(const void *hPrivate)
 	/* Assert Mercer2 */
 	RGXMercerSoftResetSet(hPrivate, RGX_CR_MERCER0_SOFT_RESET_SPU_EN | RGX_CR_MERCER1_SOFT_RESET_SPU_EN | RGX_CR_MERCER2_SOFT_RESET_SPU_EN);
 
-	RGXWriteReg32(hPrivate, RGX_CR_SWIFT_SOFT_RESET, RGX_CR_SWIFT_SOFT_RESET_MASKFULL);
-	/* Fence the previous write */
-	(void) RGXReadReg32(hPrivate, RGX_CR_SWIFT_SOFT_RESET);
+	if (RGX_DEVICE_HAS_FEATURE(hPrivate, ALBIORIX_TOP_INFRASTRUCTURE))
+	{
+		RGXWriteReg64(hPrivate, RGX_CR_SWIFT_SOFT_RESET, RGX_CR_SWIFT_SOFT_RESET__AXT_IF_GT0__MASKFULL);
+		/* Fence the previous write */
+		(void) RGXReadReg64(hPrivate, RGX_CR_SWIFT_SOFT_RESET);
+	}
+	else
+	{
+		RGXWriteReg32(hPrivate, RGX_CR_SWIFT_SOFT_RESET, RGX_CR_SWIFT_SOFT_RESET_MASKFULL);
+		/* Fence the previous write */
+		(void) RGXReadReg32(hPrivate, RGX_CR_SWIFT_SOFT_RESET);
+	}
 
 	RGXWriteReg32(hPrivate, RGX_CR_TEXAS_SOFT_RESET, RGX_CR_TEXAS_SOFT_RESET_MASKFULL);
 	/* Fence the previous write */
 	(void) RGXReadReg32(hPrivate, RGX_CR_TEXAS_SOFT_RESET);
+#endif
 }
 
 static void RGXSPUSoftResetDeAssert(const void *hPrivate)
 {
+#if !defined(RGX_FEATURE_ERYX_TOP_INFRASTRUCTURE)
 	RGXWriteReg32(hPrivate, RGX_CR_TEXAS_SOFT_RESET, 0);
 	/* Fence the previous write */
 	(void) RGXReadReg32(hPrivate, RGX_CR_TEXAS_SOFT_RESET);
 
-
-	RGXWriteReg32(hPrivate, RGX_CR_SWIFT_SOFT_RESET, 0);
-	/* Fence the previous write */
-	(void) RGXReadReg32(hPrivate, RGX_CR_SWIFT_SOFT_RESET);
+	if (RGX_DEVICE_HAS_FEATURE(hPrivate, ALBIORIX_TOP_INFRASTRUCTURE))
+	{
+		RGXWriteReg64(hPrivate, RGX_CR_SWIFT_SOFT_RESET, 0);
+		/* Fence the previous write */
+		(void) RGXReadReg64(hPrivate, RGX_CR_SWIFT_SOFT_RESET);
+	}
+	else
+	{
+		RGXWriteReg32(hPrivate, RGX_CR_SWIFT_SOFT_RESET, 0);
+		/* Fence the previous write */
+		(void) RGXReadReg32(hPrivate, RGX_CR_SWIFT_SOFT_RESET);
+	}
 
 	/* Deassert Mercer2 */
 	RGXMercerSoftResetSet(hPrivate, RGX_CR_MERCER0_SOFT_RESET_SPU_EN | RGX_CR_MERCER1_SOFT_RESET_SPU_EN);
@@ -816,6 +868,7 @@ static void RGXSPUSoftResetDeAssert(const void *hPrivate)
 	RGXMercerSoftResetSet(hPrivate, RGX_CR_MERCER0_SOFT_RESET_SPU_EN);
 	/* Deassert Mercer0 */
 	RGXMercerSoftResetSet(hPrivate, 0);
+#endif
 }
 
 static void RGXResetSequence(const void *hPrivate, const IMG_CHAR *pcRGXFW_PROCESSOR)
@@ -842,11 +895,19 @@ static void RGXResetSequence(const void *hPrivate, const IMG_CHAR *pcRGXFW_PROCE
 
 	/* Take everything out of reset but the FW processor */
 	RGXCommentLog(hPrivate, "RGXStart: soft reset de-assert step 1 excluding %s", pcRGXFW_PROCESSOR);
+#if defined(RGX_FEATURE_ERYX_TOP_INFRASTRUCTURE)
+	RGXWriteReg64(hPrivate, RGX_CR_SOFT_RESET, RGX_SOFT_RESET_EXTRA | RGX_CR_SOFT_RESET_FW_PROC_EN);
+#else
 	RGXWriteReg64(hPrivate, RGX_CR_SOFT_RESET, RGX_SOFT_RESET_EXTRA | RGX_CR_SOFT_RESET_GARTEN_EN);
+#endif
 
 	(void) RGXReadReg64(hPrivate, RGX_CR_SOFT_RESET);
 
+#if defined(RGX_FEATURE_ERYX_TOP_INFRASTRUCTURE)
+	RGXWriteReg64(hPrivate, RGX_CR_SOFT_RESET, RGX_CR_SOFT_RESET_FW_PROC_EN);
+#else
 	RGXWriteReg64(hPrivate, RGX_CR_SOFT_RESET, RGX_CR_SOFT_RESET_GARTEN_EN);
+#endif
 
 	(void) RGXReadReg64(hPrivate, RGX_CR_SOFT_RESET);
 
@@ -871,11 +932,13 @@ static void DeassertMetaReset(const void *hPrivate)
 static PVRSRV_ERROR InitJonesECCRAM(const void *hPrivate)
 {
 	PVRSRV_ERROR eError;
-	IMG_UINT32 ui32Value;
+#if defined(RGX_FEATURE_META_MAX_VALUE_IDX)
 	IMG_BOOL bMetaFW = IMG_FALSE;
+#endif
 	IMG_UINT32 ui32Mask;
 
 #if defined(RGX_FEATURE_META_MAX_VALUE_IDX)
+	IMG_UINT32 ui32Value;
 	bMetaFW = RGX_DEVICE_HAS_FEATURE_VALUE(hPrivate, META);
 #endif
 
@@ -884,12 +947,14 @@ static PVRSRV_ERROR InitJonesECCRAM(const void *hPrivate)
 		return PVRSRV_ERROR_NOT_SUPPORTED;
 	}
 
+#if defined(RGX_FEATURE_META_MAX_VALUE_IDX)
 	if (bMetaFW)
 	{
 		/* META must be taken out of reset (without booting) during Coremem initialization. */
 		RGXWriteReg32(hPrivate, RGX_CR_META_BOOT, 0);
 		DeassertMetaReset(hPrivate);
 	}
+#endif
 
 	/* Clocks must be set to "on" during RAMs initialization. */
 	if (RGX_DEVICE_GET_FEATURE_VALUE(hPrivate, PIPELINED_DATAMASTERS_VERSION) > 0)
@@ -903,16 +968,20 @@ static PVRSRV_ERROR InitJonesECCRAM(const void *hPrivate)
 	RGXWriteReg64(hPrivate, RGX_CR_CLK_CTRL1, RGX_CR_CLK_CTRL1_ALL_ON);
 	RGXWriteReg32(hPrivate, RGX_CR_CLK_CTRL2, RGX_CR_CLK_CTRL2_ALL_ON);
 
+#if defined(RGX_FEATURE_META_MAX_VALUE_IDX)
 	if (bMetaFW)
 	{
 		RGXWriteMetaRegThroughSP(hPrivate, META_CR_SYSC_JTAG_THREAD, META_CR_SYSC_JTAG_THREAD_PRIV_EN);
 		RGXWriteMetaRegThroughSP(hPrivate, META_CR_TXCLKCTRL, META_CR_TXCLKCTRL_ALL_ON);
 		RGXReadMetaRegThroughSP(hPrivate, META_CR_TXCLKCTRL, &ui32Value);
 	}
+#endif
 
-	ui32Mask = bMetaFW ?
-		RGX_CR_JONES_RAM_INIT_KICK_MASKFULL
-		: RGX_CR_JONES_RAM_INIT_KICK_MASKFULL & ~RGX_CR_JONES_RAM_INIT_KICK_GARTEN_EN;
+	ui32Mask =
+#if defined(RGX_FEATURE_META_MAX_VALUE_IDX)
+				bMetaFW ? RGX_CR_JONES_RAM_INIT_KICK_MASKFULL :
+#endif
+				RGX_CR_JONES_RAM_INIT_KICK_MASKFULL & ~RGX_CR_JONES_RAM_INIT_KICK_GARTEN_EN;
 
 	/* SLC component in CHEST either does not exist or not powered at this point */
 	ui32Mask &= RGX_CR_JONES_RAM_INIT_KICK_SLC_CHEST_CLRMSK;
@@ -926,11 +995,13 @@ static PVRSRV_ERROR InitJonesECCRAM(const void *hPrivate)
 	RGXWriteReg64(hPrivate, RGX_CR_JONES_RAM_INIT_KICK, ui32Mask);
 	eError = RGXPollReg64(hPrivate, RGX_CR_JONES_RAM_STATUS, ui32Mask, ui32Mask);
 
+#if defined(RGX_FEATURE_META_MAX_VALUE_IDX)
 	if (bMetaFW)
 	{
 		RGXWriteMetaRegThroughSP(hPrivate, META_CR_TXCLKCTRL, META_CR_TXCLKCTRL_ALL_AUTO);
 		RGXReadMetaRegThroughSP(hPrivate, META_CR_TXCLKCTRL, &ui32Value);
 	}
+#endif
 
 	if (RGX_DEVICE_GET_FEATURE_VALUE(hPrivate, PIPELINED_DATAMASTERS_VERSION) > 0)
 	{
@@ -943,22 +1014,25 @@ static PVRSRV_ERROR InitJonesECCRAM(const void *hPrivate)
 	RGXWriteReg64(hPrivate, RGX_CR_CLK_CTRL1, RGX_CR_CLK_CTRL1_ALL_AUTO);
 	RGXWriteReg32(hPrivate, RGX_CR_CLK_CTRL2, RGX_CR_CLK_CTRL2_ALL_AUTO);
 
+#if defined(RGX_FEATURE_META_MAX_VALUE_IDX)
 	if (bMetaFW)
 	{
 		RGXWriteReg64(hPrivate, RGX_CR_SOFT_RESET, RGX_CR_SOFT_RESET_GARTEN_EN);
 		RGXReadReg64(hPrivate, RGX_CR_SOFT_RESET);
 	}
+#endif
 
 	return eError;
 }
-
 
 PVRSRV_ERROR RGXStart(const void *hPrivate)
 {
 	PVRSRV_ERROR eError = PVRSRV_OK;
 	IMG_CHAR *pcRGXFW_PROCESSOR;
+#if defined(RGX_FEATURE_META_MAX_VALUE_IDX)
 	IMG_BOOL bDoFWSlaveBoot = IMG_FALSE;
 	IMG_BOOL bMetaFW = IMG_FALSE;
+#endif
 
 	if (RGX_DEVICE_HAS_FEATURE(hPrivate, RISCV_FW_PROCESSOR))
 	{
@@ -970,12 +1044,14 @@ PVRSRV_ERROR RGXStart(const void *hPrivate)
 		pcRGXFW_PROCESSOR = RGXFW_PROCESSOR_MIPS;
 	}
 #endif
+#if defined(RGX_FEATURE_META_MAX_VALUE_IDX)
 	else
 	{
 		pcRGXFW_PROCESSOR = RGXFW_PROCESSOR_META;
 		bMetaFW = IMG_TRUE;
 		bDoFWSlaveBoot = RGXDoFWSlaveBoot(hPrivate);
 	}
+#endif
 
 	if (RGX_DEVICE_HAS_FEATURE(hPrivate, SYS_BUS_SECURE_RESET))
 	{
@@ -995,6 +1071,7 @@ PVRSRV_ERROR RGXStart(const void *hPrivate)
 	}
 #endif
 
+#if defined(RGX_FEATURE_RISCV_DUAL_LOCKSTEP_ARRAY_BIT_MASK)
 	if (RGX_DEVICE_HAS_FEATURE(hPrivate, RISCV_DUAL_LOCKSTEP))
 	{
 		/* Enable the dual LS mode */
@@ -1002,6 +1079,7 @@ PVRSRV_ERROR RGXStart(const void *hPrivate)
 		RGXWriteReg32(hPrivate, RGX_CR_FIRMWARE_PROCESSOR_LS, (0x3 << RGX_CR_FIRMWARE_PROCESSOR_LS__RDL__ENABLE_SHIFT));
 		(void) RGXReadReg32(hPrivate, RGX_CR_FIRMWARE_PROCESSOR_LS);
 	}
+#endif
 
 
 	/*!
@@ -1018,16 +1096,19 @@ PVRSRV_ERROR RGXStart(const void *hPrivate)
 			return eError;
 		}
 
+#if !defined(RGX_FEATURE_ERYX_TOP_INFRASTRUCTURE)
 		if (RGX_DEVICE_HAS_FEATURE(hPrivate, GPU_MULTICORE_SUPPORT))
 		{
 			/* Set OR reduce for ECC faults to ensure faults are not missed during early boot stages */
 			RGXWriteReg32(hPrivate, RGX_CR_MULTICORE_EVENT_REDUCE, RGX_CR_MULTICORE_EVENT_REDUCE_FAULT_FW_EN | RGX_CR_MULTICORE_EVENT_REDUCE_FAULT_GPU_EN);
 		}
+#endif
 
 		/* Route fault events to the host */
 		RGXWriteReg32(hPrivate, RGX_CR_EVENT_ENABLE, RGX_CR_EVENT_ENABLE_FAULT_FW_EN);
 	}
 
+#if defined(RGX_FEATURE_META_MAX_VALUE_IDX)
 	if (bMetaFW)
 	{
 		if (bDoFWSlaveBoot)
@@ -1043,6 +1124,7 @@ PVRSRV_ERROR RGXStart(const void *hPrivate)
 			RGXWriteReg32(hPrivate, RGX_CR_META_BOOT, RGX_CR_META_BOOT_MODE_EN);
 		}
 	}
+#endif
 
 	/*
 	 * Initialise Firmware wrapper
@@ -1051,10 +1133,12 @@ PVRSRV_ERROR RGXStart(const void *hPrivate)
 	{
 		RGXInitRiscvProcWrapper(hPrivate);
 	}
+#if defined(RGX_FEATURE_META_MAX_VALUE_IDX)
 	else if (bMetaFW)
 	{
 		RGXInitMetaProcWrapper(hPrivate);
 	}
+#endif
 #if defined(RGX_FEATURE_MIPS_BIT_MASK)
 	else
 	{
@@ -1085,9 +1169,11 @@ PVRSRV_ERROR RGXStart(const void *hPrivate)
 
 	RGXSetPoweredState(hPrivate, IMG_TRUE);
 
+
 	RGXCommentLog(hPrivate, "RGXStart: Take %s out of reset", pcRGXFW_PROCESSOR);
 	DeassertMetaReset(hPrivate);
 
+#if defined(RGX_FEATURE_META_MAX_VALUE_IDX)
 	if (bMetaFW && bDoFWSlaveBoot)
 	{
 		eError = RGXFabricCoherencyTest(hPrivate);
@@ -1098,12 +1184,16 @@ PVRSRV_ERROR RGXStart(const void *hPrivate)
 		if (eError != PVRSRV_OK) return eError;
 	}
 	else
+#endif
 	{
 		RGXCommentLog(hPrivate, "RGXStart: RGX Firmware Master boot Start");
 
 		if (RGX_DEVICE_HAS_FEATURE(hPrivate, RISCV_FW_PROCESSOR))
 		{
 			/* Bring Debug Module out of reset */
+#if defined(RGX_FEATURE_ERYX_TOP_INFRASTRUCTURE)
+			RGXWriteReg32(hPrivate, RGX_CR_FWCORE_DMI_DMCONTROL, RGX_CR_FWCORE_DMI_DMCONTROL_DMACTIVE_EN);
+#else
 #if defined(RGX_FEATURE_HOST_SECURITY_VERSION_MAX_VALUE_IDX)
 			if (RGX_DEVICE_GET_FEATURE_VALUE(hPrivate, HOST_SECURITY_VERSION) >= 4)
 			{
@@ -1114,6 +1204,8 @@ PVRSRV_ERROR RGXStart(const void *hPrivate)
 			{
 				RGXWriteReg32(hPrivate, RGX_CR_FWCORE_DMI_DMCONTROL, RGX_CR_FWCORE_DMI_DMCONTROL_DMACTIVE_EN);
 			}
+#endif
+
 
 			/* Boot the FW */
 			RGXWriteReg32(hPrivate, RGX_CR_FWCORE_BOOT, 1);
@@ -1138,7 +1230,9 @@ PVRSRV_ERROR RGXStart(const void *hPrivate)
 PVRSRV_ERROR RGXStop(const void *hPrivate)
 {
 	PVRSRV_ERROR eError = PVRSRV_OK;
+#if defined(RGX_FEATURE_META_MAX_VALUE_IDX)
 	IMG_BOOL bMetaFW = IMG_FALSE;
+#endif
 	IMG_UINT32 ui32JonesIdleMask = RGX_CR_JONES_IDLE_MASKFULL^(RGX_CR_JONES_IDLE_AXI2IMG_EN|RGX_CR_JONES_IDLE_SI_AXI2IMG_EN);
 
 #if defined(RGX_FEATURE_META_MAX_VALUE_IDX)
@@ -1155,7 +1249,10 @@ PVRSRV_ERROR RGXStop(const void *hPrivate)
 	if (!RGX_DEVICE_HAS_FEATURE_VALUE(hPrivate, RAY_TRACING_ARCH) ||
 	    RGX_DEVICE_GET_FEATURE_VALUE(hPrivate, RAY_TRACING_ARCH) < 2)
 	{
-		ui32JonesIdleMask ^= (RGX_CR_JONES_IDLE_ASC_EN|RGX_CR_JONES_IDLE_RCE_EN);
+		ui32JonesIdleMask ^= RGX_CR_JONES_IDLE_RCE_EN;
+#if !defined(RGX_FEATURE_ERYX_TOP_INFRASTRUCTURE)
+		ui32JonesIdleMask ^= RGX_CR_JONES_IDLE_ASC_EN;
+#endif
 	}
 
 #if defined(FIX_HW_BRN_74812_BIT_MASK)
@@ -1183,28 +1280,18 @@ PVRSRV_ERROR RGXStop(const void *hPrivate)
 
 
 	/* Unset MTS DM association with threads */
-	RGXWriteReg32(hPrivate,
-	              RGX_CR_MTS_INTCTX_THREAD0_DM_ASSOC,
-	              RGX_CR_MTS_INTCTX_THREAD0_DM_ASSOC_DM_ASSOC_CLRMSK
-	              & RGX_CR_MTS_INTCTX_THREAD0_DM_ASSOC_MASKFULL);
-	RGXWriteReg32(hPrivate,
-	              RGX_CR_MTS_BGCTX_THREAD0_DM_ASSOC,
-	              RGX_CR_MTS_BGCTX_THREAD0_DM_ASSOC_DM_ASSOC_CLRMSK
-	              & RGX_CR_MTS_BGCTX_THREAD0_DM_ASSOC_MASKFULL);
+	RGXWriteReg32(hPrivate, RGX_CR_MTS_INTCTX_THREAD0_DM_ASSOC, 0);
+	RGXWriteReg32(hPrivate, RGX_CR_MTS_BGCTX_THREAD0_DM_ASSOC, 0);
 
+#if defined(RGX_FEATURE_META_MAX_VALUE_IDX)
 	if (bMetaFW)
 	{
-		RGXWriteReg32(hPrivate,
-					  RGX_CR_MTS_INTCTX_THREAD1_DM_ASSOC,
-					  RGX_CR_MTS_INTCTX_THREAD1_DM_ASSOC_DM_ASSOC_CLRMSK
-					  & RGX_CR_MTS_INTCTX_THREAD1_DM_ASSOC_MASKFULL);
-		RGXWriteReg32(hPrivate,
-					  RGX_CR_MTS_BGCTX_THREAD1_DM_ASSOC,
-					  RGX_CR_MTS_BGCTX_THREAD1_DM_ASSOC_DM_ASSOC_CLRMSK
-					  & RGX_CR_MTS_BGCTX_THREAD1_DM_ASSOC_MASKFULL);
+		RGXWriteReg32(hPrivate, RGX_CR_MTS_INTCTX_THREAD1_DM_ASSOC, 0);
+		RGXWriteReg32(hPrivate, RGX_CR_MTS_BGCTX_THREAD1_DM_ASSOC, 0);
 	}
+#endif
 
-#if defined(PDUMP)
+#if defined(PDUMP) && defined(RGX_FEATURE_META_MAX_VALUE_IDX)
 	if (bMetaFW)
 	{
 		/* Disabling threads is only required for pdumps to stop the fw gracefully */
@@ -1305,6 +1392,7 @@ PVRSRV_ERROR RGXStop(const void *hPrivate)
 	                      ui32JonesIdleMask^(RGX_CR_JONES_IDLE_GARTEN_EN|RGX_CR_JONES_IDLE_SOCIF_EN));
 	if (eError != PVRSRV_OK) return eError;
 
+#if defined(RGX_FEATURE_META_MAX_VALUE_IDX)
 	if (bMetaFW)
 	{
 		IMG_UINT32 ui32RegValue;
@@ -1327,6 +1415,7 @@ PVRSRV_ERROR RGXStop(const void *hPrivate)
 		}
 	}
 	else
+#endif
 	{
 		eError = RGXPollReg32(hPrivate,
 		                      RGX_CR_JONES_IDLE,

@@ -72,7 +72,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 /*
 	SVM heap management support functions for CPU (un)mapping
  */
-#define DEVMEM_MAP_SVM_USER_MANAGED_RETRY				2
+#define DEVMEM_MAP_SVM_USER_MANAGED_RETRY				10
 
 static inline PVRSRV_ERROR
 DevmemCPUMapSVMKernelManaged(DEVMEM_HEAP *psHeap,
@@ -138,17 +138,115 @@ DevmemCPUUnmapSVMKernelManaged(DEVMEM_HEAP *psHeap, DEVMEM_IMPORT *psImport)
 	DevmemImportStructCPUUnmap(psImport);
 }
 
+static PVRSRV_ERROR
+DevmemSVMCPUMapFallback(DEVMEM_HEAP *psHeap,
+                        DEVMEM_IMPORT *psImport,
+                        IMG_UINT uiAlign,
+                        IMG_UINT64 *pui64MapAddress)
+{
+	IMG_UINT64 ui64SvmMapAddr;
+	RA_LENGTH_T uiAllocatedSize;
+	RA_BASE_T uiAllocatedAddr;
+	IMG_UINT uiRetry = 0;
+	IMG_UINT32 ui32TmpPaddingCount = 0;
+	DEVMEM_SIZE_T uiTmpPaddingSize = 0;
+	PVRSRV_ERROR eError;
+
+	do
+	{
+		/* We instruct the kernel to use the RA_Alloc supplied virtual address
+		 * to map-in this SVM import suballocation; there is no guarantee that
+		 * this RA_Alloc virtual address may not collide with an already in-use
+		 * VMA range in the process */
+		eError = RA_Alloc(psHeap->psQuantizedVMRA,
+				psImport->uiSize,
+				RA_NO_IMPORT_MULTIPLIER,
+				0, /* flags: this RA doesn't use flags*/
+				uiAlign,
+				"SVM_Virtual_Alloc",
+				&uiAllocatedAddr,
+				&uiAllocatedSize,
+				NULL /* don't care about per-import priv data */);
+		if (eError != PVRSRV_OK)
+		{
+			PVR_LOG_ERROR(eError, "RA_Alloc");
+#if defined(PVRSRV_ENABLE_PROCESS_STATS)
+			if (eError == PVRSRV_ERROR_RA_REQUEST_ALLOC_FAIL)
+			{
+				PVRSRV_ERROR eErr;
+				eErr = BridgePVRSRVStatsUpdateOOMStat(GetBridgeHandle(psHeap->psCtx->hDevConnection),
+				                                      PVRSRV_DEVICE_STAT_TYPE_OOM_VIRTMEM_COUNT,
+				                                      OSGetCurrentProcessID());
+				PVR_LOG_IF_ERROR(eErr, "BridgePVRSRVStatsUpdateOOMStat");
+			}
+#endif
+			goto failSVM;
+		}
+
+		/* No reason for allocated virtual size to be different from
+		   the PMR's size */
+		psImport->sCPUImport.pvCPUVAddr = (void*)(uintptr_t)uiAllocatedAddr;
+		PVR_ASSERT(uiAllocatedSize == psImport->uiSize);
+
+		/* Map the import or allocation using the RA_Alloc virtual address;
+		   the kernel may fail the request if the supplied virtual address
+		   is already in-use in which case we re-try using another virtual
+		   address obtained from the RA_Alloc */
+		eError = DevmemImportStructCPUMap(psImport);
+		if (eError != PVRSRV_OK)
+		{
+			if (psHeap->ui32SVMBasePaddingCount == 0)
+			{
+				ui32TmpPaddingCount++;
+				uiTmpPaddingSize = uiAllocatedSize;
+			}
+
+			/* For now we simply discard failed RA_Alloc() obtained virtual
+			   address (i.e. plenty of virtual space), this prevents us from
+			   re-using these and furthermore essentially blacklists these
+			   addresses from future SVM consideration; We exit fall-back
+			   attempt if retry exceeds the fall-back retry limit */
+			if (uiRetry++ > DEVMEM_MAP_SVM_USER_MANAGED_RETRY)
+			{
+				PVR_DPF((PVR_DBG_ERROR,
+				         "%s: Cannot find SVM compatible address, bad mapping",
+				         __func__));
+				psImport->sCPUImport.pvCPUVAddr = NULL;
+				PVR_GOTO_WITH_ERROR(eError, PVRSRV_ERROR_BAD_MAPPING, failSVM);
+			}
+		}
+		else
+		{
+			/* Found compatible SVM virtual address, set as device virtual address */
+			ui64SvmMapAddr = (IMG_UINT64)(uintptr_t)psImport->sCPUImport.pvCPUVAddr;
+		}
+	} while (eError != PVRSRV_OK);
+
+	if (psHeap->ui32SVMBasePaddingCount == 0)
+	{
+		psHeap->ui32SVMBasePaddingCount = ui32TmpPaddingCount;
+		psHeap->uiSVMBasePaddingSize = uiTmpPaddingSize;
+	}
+
+	*pui64MapAddress = ui64SvmMapAddr;
+
+failSVM:
+	return eError;
+}
+
 static inline PVRSRV_ERROR
 DevmemCPUMapSVMUserManaged(DEVMEM_HEAP *psHeap,
 		DEVMEM_IMPORT *psImport,
 		IMG_UINT uiAlign,
-		IMG_UINT64 *ui64MapAddress)
+		IMG_UINT64 *pui64MapAddress)
 {
-	RA_LENGTH_T uiAllocatedSize;
-	RA_BASE_T uiAllocatedAddr;
-	IMG_UINT64 ui64SvmMapAddr;
-	IMG_UINT uiRetry = 0;
 	PVRSRV_ERROR eError;
+#if defined(__linux__)
+	IMG_BOOL bIsMapped = IMG_FALSE;
+	IMG_UINT32 ui32Retry = 0;
+	IMG_UINT64 ui64HintAddress = 0;
+	DEVMEM_SIZE_T uiSize = PVR_ALIGN(psImport->uiSize, uiAlign);
+#endif
 
 	/* If SVM heap management has transitioned to XXX_MANAGER_USER,
 	   this is essentially a fall back approach that ensures we
@@ -173,102 +271,124 @@ DevmemCPUMapSVMUserManaged(DEVMEM_HEAP *psHeap,
 		   XXX_MANAGER_KERNEL failure. As we are not responsible for
 		   this, we cannot progress any further so need to fail */
 		PVR_DPF((PVR_DBG_ERROR,
-				"%s: Previously obtained CPU map address not SVM compatible"
-				, __func__));
+		         "%s: Previously obtained CPU map address not SVM compatible"
+		         , __func__));
 
 		/* Revert SVM heap to DEVMEM_HEAP_MANAGER_KERNEL */
 		psHeap->ui32HeapManagerFlags = DEVMEM_HEAP_MANAGER_KERNEL;
 		PVR_DPF((PVR_DBG_MESSAGE,
-				"%s: Reverting SVM heap back to kernel managed",
-				__func__));
+		         "%s: Reverting SVM heap back to kernel managed",
+		         __func__));
 
 		OSLockRelease(psImport->sCPUImport.hLock);
 
-		/* Do we need a more specific error code here */
-		eError = PVRSRV_ERROR_DEVICEMEM_ALREADY_MAPPED;
-		goto failSVM;
+		return PVRSRV_ERROR_DEVICEMEM_ALREADY_MAPPED;
 	}
 
 	OSLockRelease(psImport->sCPUImport.hLock);
 
-	do
+#if defined(__linux__)
+	/* Re-enter fallback mode */
+	if (psHeap->bSVMFallbackEnabled == IMG_TRUE)
 	{
-		/* Next we proceed to instruct the kernel to use the RA_Alloc supplied
-		   virtual address to map-in this SVM import suballocation; there is no
-		   guarantee that this RA_Alloc virtual address may not collide with an
-		   already in-use VMA range in the process */
-		eError = RA_Alloc(psHeap->psQuantizedVMRA,
-				psImport->uiSize,
-				RA_NO_IMPORT_MULTIPLIER,
-				0, /* flags: this RA doesn't use flags*/
-				uiAlign,
-				"SVM_Virtual_Alloc",
-				&uiAllocatedAddr,
-				&uiAllocatedSize,
-				NULL /* don't care about per-import priv data */);
-		if (eError != PVRSRV_OK)
+		eError = DevmemSVMCPUMapFallback(psHeap, psImport, uiAlign, pui64MapAddress);
+		PVR_LOG_IF_ERROR(eError, "DevmemSVMCPUMapFallback");
+		return eError;
+	}
+
+	if (psHeap->ui64LastMappedSVMAddress != 0)
+	{
+		IMG_BOOL bIsUnderflow;
+		IMG_BOOL bIsInSVM;
+
+		/* BridgeDevmemIntFindSVMAddress will find addresses topdown, so we need
+		 * to hint at an address < psHeap->ui64LastMappedSVMAddress */
+		ui64HintAddress = psHeap->ui64LastMappedSVMAddress - uiSize;
+
+		bIsUnderflow = ui64HintAddress > psHeap->ui64LastMappedSVMAddress;
+		bIsInSVM = ui64HintAddress >= psHeap->sBaseAddress.uiAddr &&
+			ui64HintAddress < psHeap->sBaseAddress.uiAddr + psHeap->uiSize;
+
+		if (bIsUnderflow || !bIsInSVM)
 		{
-			PVR_LOG_ERROR(eError, "RA_Alloc");
-#if defined(PVRSRV_ENABLE_PROCESS_STATS)
-			if (eError == PVRSRV_ERROR_RA_REQUEST_ALLOC_FAIL)
+			ui64HintAddress = 0;
+		}
+	}
+
+	for (ui32Retry = 0;
+	     !bIsMapped && ui32Retry < DEVMEM_MAP_SVM_USER_MANAGED_RETRY;
+	     ui32Retry++)
+	{
+		eError = BridgeDevmemIntFindCPUAddress(GetBridgeHandle(psHeap->psCtx->hDevConnection),
+		                                       psHeap->hDevMemServerHeap,
+		                                       PVR_ALIGN(psImport->uiSize, uiAlign),
+		                                       ui64HintAddress,
+		                                       pui64MapAddress);
+		if (eError == PVRSRV_ERROR_BRIDGE_CALL_FAILED)
+		{
+			psHeap->bSVMFallbackEnabled = IMG_TRUE;
+			eError = DevmemSVMCPUMapFallback(psHeap, psImport, uiAlign, pui64MapAddress);
+			if (eError != PVRSRV_OK)
 			{
-				PVRSRV_ERROR eErr;
-				eErr = BridgePVRSRVStatsUpdateOOMStat(GetBridgeHandle(psHeap->psCtx->hDevConnection),
-								  PVRSRV_DEVICE_STAT_TYPE_OOM_VIRTMEM_COUNT,
-								  OSGetCurrentProcessID());
-				PVR_LOG_IF_ERROR(eErr, "BridgePVRSRVStatsUpdateOOMStat");
+				PVR_LOG_ERROR(eError, "DevmemSVMCPUMapFallback");
 			}
-#endif
-			goto failSVM;
+			else
+			{
+				bIsMapped = IMG_TRUE;
+			}
+
+			break; /* Important! */
+		}
+		else if (eError == PVRSRV_ERROR_CPU_ADDR_NOT_FOUND &&
+		         ui64HintAddress != 0)
+		{
+			PVR_DPF((PVR_DBG_WARNING,
+			         "%s: Failed to find memory below 0x%08"IMG_UINT64_FMTSPECX,
+			          __func__,
+			          ui64HintAddress));
+			ui64HintAddress = 0; /* Don't hint on the retry. */
+			continue;
 		}
 
-		/* No reason for allocated virtual size to be different from
-		   the PMR's size */
-		psImport->sCPUImport.pvCPUVAddr = (void*)(uintptr_t)uiAllocatedAddr;
-		PVR_ASSERT(uiAllocatedSize == psImport->uiSize);
+		PVR_LOG_RETURN_IF_ERROR(eError, "BridgeDevmemIntFindSVMAddress");
 
-		/* Map the import or allocation using the RA_Alloc virtual address;
-		   the kernel may fail the request if the supplied virtual address
-		   is already in-use in which case we re-try using another virtual
-		   address obtained from the RA_Alloc */
+		psImport->sCPUImport.pvCPUVAddr = (void*)(uintptr_t)*pui64MapAddress;
 		eError = DevmemImportStructCPUMap(psImport);
-		if (eError != PVRSRV_OK)
+		if (eError == PVRSRV_OK)
 		{
-			/* For now we simply discard failed RA_Alloc() obtained virtual
-			   address (i.e. plenty of virtual space), this prevents us from
-			   re-using these and furthermore essentially blacklists these
-			   addresses from future SVM consideration; We exit fall-back
-			   attempt if retry exceeds the fall-back retry limit */
-			if (uiRetry++ > DEVMEM_MAP_SVM_USER_MANAGED_RETRY)
-			{
-				PVR_DPF((PVR_DBG_ERROR,
-						"%s: Cannot find SVM compatible address, bad mapping",
-						__func__));
-				eError = PVRSRV_ERROR_BAD_MAPPING;
-				goto failSVM;
-			}
+			/* Only cache the last address here, so that we don't pick up an
+			 * address from any other fallback methods. */
+			psHeap->ui64LastMappedSVMAddress = *pui64MapAddress;
+			bIsMapped = IMG_TRUE;
 		}
-		else
-		{
-			/* Found compatible SVM virtual address, set as device virtual address */
-			ui64SvmMapAddr = (IMG_UINT64)(uintptr_t)psImport->sCPUImport.pvCPUVAddr;
-		}
-	} while (eError != PVRSRV_OK);
+	}
 
-	*ui64MapAddress = ui64SvmMapAddr;
-failSVM:
+	if (!bIsMapped)
+	{
+		psImport->sCPUImport.pvCPUVAddr = NULL;
+	}
+#else
+	eError = DevmemSVMCPUMapFallback(psHeap, psImport, uiAlign, pui64MapAddress);
+	PVR_LOG_IF_ERROR(eError, "DevmemSVMCPUMapFallback");
+#endif
+
 	return eError;
 }
 
 static inline void
 DevmemCPUUnmapSVMUserManaged(DEVMEM_HEAP *psHeap, DEVMEM_IMPORT *psImport)
 {
-	RA_BASE_T uiAllocatedAddr;
+#if defined(__linux__)
+	if (psHeap->bSVMFallbackEnabled == IMG_TRUE)
+#endif
+	{
+		RA_BASE_T uiAllocatedAddr;
 
-	/* We only free SVM compatible addresses, all addresses in
-	   the blacklist are essentially excluded from future RA_Alloc */
-	uiAllocatedAddr = psImport->sDeviceImport.sDevVAddr.uiAddr;
-	RA_Free(psHeap->psQuantizedVMRA, uiAllocatedAddr);
+		/* We only free SVM compatible addresses, all addresses in
+		   the blacklist are essentially excluded from future RA_Alloc */
+		uiAllocatedAddr = psImport->sDeviceImport.sDevVAddr.uiAddr;
+		RA_Free(psHeap->psQuantizedVMRA, uiAllocatedAddr);
+	}
 
 	DevmemImportStructCPUUnmap(psImport);
 }
@@ -685,7 +805,6 @@ PVRSRV_ERROR DevmemImportStructAlloc(SHARED_DEV_CONNECTION hDevConnection,
 
 	/* Setup some known bad values for things we don't have yet */
 	psImport->sDeviceImport.hReservation = LACK_OF_RESERVATION_POISON;
-	psImport->sDeviceImport.hMapping = LACK_OF_MAPPING_POISON;
 	psImport->sDeviceImport.psHeap = NULL;
 	psImport->sDeviceImport.bMapped = IMG_FALSE;
 
@@ -1009,7 +1128,6 @@ PVRSRV_ERROR DevmemImportStructDevMap(DEVMEM_HEAP *psHeap,
 			/* No virtual address reservation and mapping are required for
 			 * memory that is already pre-mapped e.g. FW heaps in VZ configs */
 			psDeviceImport->hReservation = LACK_OF_RESERVATION_POISON;
-			psDeviceImport->hMapping = LACK_OF_MAPPING_POISON;
 		}
 		else
 		{
@@ -1025,7 +1143,6 @@ PVRSRV_ERROR DevmemImportStructDevMap(DEVMEM_HEAP *psHeap,
 				                                              uiFlags,
 				                                              &psDeviceImport->hReservation);
 
-				psDeviceImport->hMapping = LACK_OF_MAPPING_POISON;
 				PVR_GOTO_IF_ERROR(eError, failReserve);
 
 				psDeviceImport->bMapped = IMG_TRUE;
@@ -1117,7 +1234,6 @@ IMG_BOOL DevmemImportStructDevUnmap(DEVMEM_IMPORT *psImport)
 		}
 
 		psDeviceImport->bMapped = IMG_FALSE;
-		psDeviceImport->hMapping = LACK_OF_MAPPING_POISON;
 		psDeviceImport->hReservation = LACK_OF_RESERVATION_POISON;
 
 		/* DEVMEM_HEAP_MANAGER_RA can also come from a dual managed heap in which case,

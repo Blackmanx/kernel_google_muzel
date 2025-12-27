@@ -55,8 +55,13 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #define RGX_HWPERF_NUM_SPU ((RGX_FEATURE_NUM_SPU))
 #define RGX_HWPERF_NUM_USC ((RGX_FEATURE_NUM_CLUSTERS))
 #define RGX_HWPERF_NUM_ISP_PER_SPU ((RGX_FEATURE_NUM_ISP_PER_SPU))
+#if defined(RGX_FEATURE_ERYX_TOP_INFRASTRUCTURE)
+#define RGX_HWPERF_NUM_PBE ((0))
+#define RGX_HWPERF_NUM_MERCER ((0))
+#else
 #define RGX_HWPERF_NUM_PBE ((RGX_FEATURE_PBE_PER_SPU) * (RGX_FEATURE_NUM_SPU))
 #define RGX_HWPERF_NUM_MERCER ((RGX_FEATURE_NUM_CLUSTERS))
+#endif /* defined(RGX_FEATURE_ERYX_TOP_INFRASTRUCTURE) */
 #define RGX_HWPERF_NUM_PBE_SHARED ((RGX_FEATURE_NUM_SPU))
 #define RGX_HWPERF_NUM_SWIFT ((RGX_FEATURE_NUM_SPU * RGX_FEATURE_MAX_TPU_PER_SPU))
 #define RGX_HWPERF_NUM_TEXAS ((RGX_FEATURE_NUM_SPU))
@@ -119,19 +124,7 @@ typedef struct
 	IMG_UINT32                         ui32Reserved;
 	IMG_UINT32                         ui32CtrlWord;
 	IMG_UINT32                         ui32EnabledBlksCount;
-	IMG_UINT32                         ui32NumBlocks;
+	IMG_UINT32                         ui32BlocksNumRangeCheckBeforeUse;
 	RGXFWIF_HWPERF_CTL_BLK RGXFW_ALIGN sBlkCfg[IMG_FLEX_ARRAY_MEMBER];	// First array entry
 } UNCACHED_ALIGN RGXFWIF_HWPERF_CTL;
-
-/* Compat struct for align size checks since we now use the new
- * Flex Array Member syntax above which will adjust struct size.
- .*/
-typedef struct
-{
-	IMG_UINT32                         ui32Reserved;
-	IMG_UINT32                         ui32CtrlWord;
-	IMG_UINT32                         ui32EnabledBlksCount;
-	IMG_UINT32                         ui32NumBlocks;
-	RGXFWIF_HWPERF_CTL_BLK RGXFW_ALIGN sBlkCfg;
-} UNCACHED_ALIGN RGXFWIF_HWPERF_CTL_COMPAT;
 #endif

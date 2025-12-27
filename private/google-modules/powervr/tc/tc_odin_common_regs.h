@@ -91,7 +91,7 @@ static const struct odin_orion_reg common_regs[] = {
 	COMMON_REG_ENTRY(REG_BANK_ODN_CLK_BLK),
 };
 
-static inline const u32 common_reg_offset(struct tc_device *tc, u32 reg)
+static inline u32 common_reg_offset(struct tc_device *tc, u32 reg)
 {
 	if (tc->odin)
 		return common_regs[reg].odin_offset;

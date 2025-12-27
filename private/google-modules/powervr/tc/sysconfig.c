@@ -59,6 +59,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "pvr_bridge_k.h"
 #include "pvr_drv.h"
 #include "tc_drv.h"
+#include "fpga.h"
 
 #include <linux/platform_device.h>
 #include <linux/dma-mapping.h>
@@ -73,30 +74,8 @@ typedef struct
 	IMG_BOOL bUsed;
 } CARD_PHYS_HEAP_CONFIG_SPEC;
 
-#define HEAP_SPEC_IDX_GPU_PRIVATE (0U)
-#define HEAP_SPEC_IDX_GPU_LOCAL   (1U)
-
 static const CARD_PHYS_HEAP_CONFIG_SPEC gasCardHeapTemplate[] =
 {
-	{
-	 PHYS_HEAP_USAGE_GPU_PRIVATE,
-	 0,					/* determined at runtime by apphints */
-	 false				/* determined at runtime by apphints */
-	},
-	{
-	 PHYS_HEAP_USAGE_GPU_LOCAL,
-	 0,					/* determined at runtime */
-	 true
-	},
-	{
-	 PHYS_HEAP_USAGE_GPU_SECURE,
-	 SECURE_MEM_SIZE,
-#if defined(SUPPORT_SECURITY_VALIDATION)
-	 true
-#else
-	 false
-#endif
-	},
 	{
 	 PHYS_HEAP_USAGE_FW_PRIVATE,
 	 SECURE_FW_MEM_SIZE,
@@ -119,6 +98,25 @@ static const CARD_PHYS_HEAP_CONFIG_SPEC gasCardHeapTemplate[] =
 	true				/* VZ drivers need dedicated Fw heaps */
 #else
 	false				/* Native drivers can fallback on GPU_LOCAL for Fw mem */
+ #endif
+ 	},
+	{
+	 PHYS_HEAP_USAGE_GPU_PRIVATE,
+	 0,					/* determined at runtime by apphints */
+	 false				/* determined at runtime by apphints */
+	},
+	{
+	 PHYS_HEAP_USAGE_GPU_LOCAL,
+	 0,					/* determined at runtime */
+	 true
+	},
+	{
+	 PHYS_HEAP_USAGE_GPU_SECURE,
+	 SECURE_MEM_SIZE,
+#if defined(SUPPORT_SECURITY_VALIDATION)
+	 true
+#else
+	 false
 #endif
 	},
 	{
@@ -167,6 +165,36 @@ static void SetVoltage(IMG_HANDLE hSysData, IMG_UINT32 ui32Voltage)
 }
 
 #endif
+
+static IMG_INT32 GetGpuPrivateHeapCfgIdx(void)
+{
+	IMG_UINT32 ui32SpecIdx;
+
+	for (ui32SpecIdx = 0; ui32SpecIdx < ARRAY_SIZE(gasCardHeapTemplate); ui32SpecIdx++)
+	{
+		if (gasCardHeapTemplate[ui32SpecIdx].ui32UsageFlags == PHYS_HEAP_USAGE_GPU_PRIVATE)
+		{
+			return ui32SpecIdx;
+		}
+	}
+
+	return -1;
+}
+
+static IMG_INT32 GetGpuLocalHeapCfgIdx(void)
+{
+	IMG_UINT32 ui32SpecIdx;
+
+	for (ui32SpecIdx = 0; ui32SpecIdx < ARRAY_SIZE(gasCardHeapTemplate); ui32SpecIdx++)
+	{
+		if (gasCardHeapTemplate[ui32SpecIdx].ui32UsageFlags == PHYS_HEAP_USAGE_GPU_LOCAL)
+		{
+			return ui32SpecIdx;
+		}
+	}
+
+	return -1;
+}
 
 static void TCLocalCpuPAddrToDevPAddr(IMG_HANDLE hPrivData,
 				      IMG_UINT32 ui32NumOfAddr,
@@ -293,6 +321,14 @@ static IMG_CHAR *GetDeviceVersionString(SYS_DATA *psSysData)
 	return pszVersion;
 }
 
+#if defined(SUPPORT_SOC_TIMER)
+static IMG_UINT64 TCSystemTimerRead(IMG_HANDLE hSysData)
+{
+	SYS_DATA *psSysData = hSysData;
+
+	return FPGA_SystemTimerRead(psSysData->registers);
+}
+#endif
 
 static void TCLocalCpuPAddrToDevPAddr(IMG_HANDLE hPrivData,
 				      IMG_UINT32 ui32NumOfAddr,
@@ -632,10 +668,12 @@ PhysHeapSetRequirements(const SYS_DATA *psSysData,
 {
 	IMG_UINT32 i;
 	IMG_UINT64 ui64FreeCardMemory = psSysData->pdata->rogue_heap_memory_size;
+	IMG_INT32 GpuPvtHeapCfgIdx = GetGpuPrivateHeapCfgIdx();
+	IMG_INT32 GpuLocalHeapCfgIdx = GetGpuLocalHeapCfgIdx();
 
 	PVR_LOG_RETURN_IF_FALSE(
-		BITMASK_HAS(pasCardHeapSpec[HEAP_SPEC_IDX_GPU_PRIVATE].ui32UsageFlags, PHYS_HEAP_USAGE_GPU_PRIVATE) &&
-		BITMASK_HAS(pasCardHeapSpec[HEAP_SPEC_IDX_GPU_LOCAL].ui32UsageFlags, PHYS_HEAP_USAGE_GPU_LOCAL),
+		(GpuPvtHeapCfgIdx >= 0) &&
+		(GpuLocalHeapCfgIdx >= 0),
 		"PhysHeapConfigs not set correctly in the system layer.", PVRSRV_ERROR_PHYSHEAP_CONFIG);
 
 	for (i = 0; i < ARRAY_SIZE(gasCardHeapTemplate); i++)
@@ -661,15 +699,15 @@ PhysHeapSetRequirements(const SYS_DATA *psSysData,
 		else
 		{
 			/* Set up the GPU private heap */
-			pasCardHeapSpec[HEAP_SPEC_IDX_GPU_PRIVATE].bUsed = true;
-			pasCardHeapSpec[HEAP_SPEC_IDX_GPU_PRIVATE].uiSize = ui64FreeCardMemory - ui64GpuSharedMem;
+			pasCardHeapSpec[GpuPvtHeapCfgIdx].bUsed = true;
+			pasCardHeapSpec[GpuPvtHeapCfgIdx].uiSize = ui64FreeCardMemory - ui64GpuSharedMem;
 			ui64FreeCardMemory = ui64GpuSharedMem;
 			(*pui32CardPhysHeapCfgCount)++;
 		}
 	}
 
 	/* all remaining memory card memory goes to GPU_LOCAL */
-	pasCardHeapSpec[HEAP_SPEC_IDX_GPU_LOCAL].uiSize = ui64FreeCardMemory;
+	pasCardHeapSpec[GpuLocalHeapCfgIdx].uiSize = ui64FreeCardMemory;
 
 	return PVRSRV_OK;
 }
@@ -697,7 +735,7 @@ PhysHeapsCreate(const SYS_DATA *psSysData, PVRSRV_DEVICE_CONFIG *psDevConfig,
 		return eError;
 	}
 
-	psDevConfig->bHasNonMappableLocalMemory = asCardHeapSpec[HEAP_SPEC_IDX_GPU_PRIVATE].bUsed;
+	psDevConfig->bHasNonMappableLocalMemory = asCardHeapSpec[GetGpuPrivateHeapCfgIdx()].bUsed;
 
 	if (psSysData->pdata->mem_mode == TC_MEMORY_HYBRID)
 	{
@@ -896,6 +934,10 @@ static PVRSRV_ERROR DeviceConfigCreate(SYS_DATA *psSysData,
 	psRGXTimingInfo->ui32CoreClockSpeed = tc_core_clock_speed(psSysData->pdev->dev.parent) /
 											tc_core_clock_multiplex(psSysData->pdev->dev.parent);
 #endif
+
+#if defined(SUPPORT_SOC_TIMER)
+	psRGXTimingInfo->ui32SOCClockSpeed = RGX_TC_SYS_CLOCK_SPEED;
+#endif
 	psRGXTimingInfo->bEnableActivePM = IMG_FALSE;
 	psRGXTimingInfo->bEnableRDPowIsland = IMG_FALSE;
 	psRGXTimingInfo->ui32ActivePMLatencyms = SYS_RGX_ACTIVE_POWER_LATENCY_MS;
@@ -910,6 +952,9 @@ static PVRSRV_ERROR DeviceConfigCreate(SYS_DATA *psSysData,
 
 	psDevConfig->sRegsCpuPBase.uiAddr = psSysData->registers->start;
 	psDevConfig->ui32RegsSize = resource_size(psSysData->registers);
+#if defined(SUPPORT_SOC_TIMER)
+	psDevConfig->pfnSoCTimerRead = TCSystemTimerRead;
+#endif
 
 	PVRSRVAcquireInternalID(&ui32DeviceID);
 #if defined(RGX_NUM_DRIVERS_SUPPORTED) && (RGX_NUM_DRIVERS_SUPPORTED > 1)

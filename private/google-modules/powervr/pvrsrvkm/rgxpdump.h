@@ -86,6 +86,21 @@ PVRSRV_ERROR PVRSRVPDumpCRCSignatureCheckKM(CONNECTION_DATA * psConnection,
 /*!
 *******************************************************************************
 
+ @Function	PVRSRVPDumpTRPSignatureCheckKM
+
+ @Description
+
+ Poll on TRP signature status
+
+ @Return   PVRSRV_ERROR
+
+******************************************************************************/
+PVRSRV_ERROR PVRSRVPDumpTRPSignatureCheckKM(CONNECTION_DATA * psConnection,
+                                            PVRSRV_DEVICE_NODE * psDeviceNode,
+                                            IMG_UINT32 ui32PDumpFlags);
+/*!
+*******************************************************************************
+
  @Function	PVRSRVPDumpValCheckPreCommandKM
 
  @Description

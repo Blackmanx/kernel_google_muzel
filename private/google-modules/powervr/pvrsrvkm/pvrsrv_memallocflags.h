@@ -68,8 +68,8 @@ typedef IMG_UINT64 PVRSRV_MEMALLOCFLAGS_T;
  * | GPU-RW | CPU-RW | GPU-Caching | CPU-Caching | KM-Mappable |
  *
  * --- MISC FLAGS         15..20 (9-bits) ---
- * | 15    | 16        | 17  | 18         | 19              | 20      |
- * | Defer | Reserved  | SVM | Scratch-Pg | CPU-Cache-Clean | Zero-Pg |
+ * | 15    | 16  | 17  | 18         | 19              | 20      |
+ * | Defer | ... | SVM | Scratch-Pg | CPU-Cache-Clean | Zero-Pg |
  *
  * --- RI FLAGS  21..23 (3-bits) ---
  * | 21     | 22       | 23        |
@@ -546,10 +546,8 @@ typedef IMG_UINT64 PVRSRV_MEMALLOCFLAGS_T;
 
 /*! ----- Bit 16
 
-    This flag is unused but kept for compatibility reasons. Once not a concern
-    the flag can be removed and but reused.
+    Not used.
  */
-#define PVRSRV_MEMALLOCFLAG_PHYS_RESERVED				(IMG_UINT64_C(1)<<16)
 
 /*! ----- Bit 17
 
@@ -763,7 +761,8 @@ typedef IMG_UINT64 PVRSRV_MEMALLOCFLAGS_T;
 #define PVRSRV_CHECK_NO_CACHE_LINE_ALIGN(uiFlags)		(((uiFlags) & PVRSRV_MEMALLOCFLAG_NO_CACHE_LINE_ALIGN) != 0U)
 
 /*!
- * Trigger a PT invalidate kick command when mapping the allocation.
+ * Trigger a PT invalidate kick command when mapping the allocation
+ * if immediate invalidate required rather than relying on driver default.
  */
 #define PVRSRV_MEMALLOCFLAG_KICK_PT_INVALIDATE			(IMG_UINT64_C(1)<<32)
 

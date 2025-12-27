@@ -80,6 +80,7 @@ struct DI_VZ_DATA {
 };
 #endif
 
+__printf(2, 3)
 static void _DumpDebugDIPrintfWrapper(void *pvDumpDebugFile, const IMG_CHAR *pszFormat, ...)
 {
 	IMG_CHAR szBuffer[PVR_MAX_DEBUG_MESSAGE_LEN];
@@ -641,47 +642,6 @@ static void *_DebugStatusDINext(OSDI_IMPL_ENTRY *psEntry,
 										  *pui64Pos);
 	OSWRLockReleaseRead(psPVRSRVData->hDeviceNodeListLock);
 
-#ifdef SUPPORT_RGX
-	if (psDeviceNode && !PVRSRV_VZ_MODE_IS(GUEST, DEVNODE, psDeviceNode))
-	{
-		PVRSRV_RGXDEV_INFO *psDevInfo = psDeviceNode->pvDevice;
-		const IMG_BOOL bPreSilicon = PVRSRVIsEmulator(psDeviceNode) ||
-		                             PVRSRVIsVirtualPlatform(psDeviceNode);
-
-		if (psDevInfo && psDevInfo->pfnGetGpuUtilStats)
-		{
-			PVRSRV_DEVICE_DEBUG_INFO *psDebugInfo = &psDeviceNode->sDebugInfo;
-			PVRSRV_DEVICE_HEALTH_STATUS eHealthStatus = OSAtomicRead(&psDeviceNode->eHealthStatus);
-
-			if (eHealthStatus == PVRSRV_DEVICE_HEALTH_STATUS_OK)
-			{
-				PVRSRV_ERROR eError;
-
-				static IMG_BOOL bSkip = IMG_FALSE;
-
-				OSLockAcquire(psDevInfo->hGpuUtilStatsLock);
-
-				eError = psDevInfo->pfnGetGpuUtilStats(psDeviceNode,
-													   psDebugInfo->hGpuUtilUserDebugFS,
-													   &psDevInfo->sGpuUtilStats);
-
-				OSLockRelease(psDevInfo->hGpuUtilStatsLock);
-
-				if (eError != PVRSRV_OK)
-				{
-					if (!bSkip)
-					{
-						bSkip = bPreSilicon;
-					PVR_DPF((PVR_DBG_ERROR,
-					        "%s: Failed to get GPU statistics (%s)",
-					        __func__, PVRSRVGetErrorString(eError)));
-					}
-				}
-			}
-		}
-	}
-#endif
-
 	return psDeviceNode;
 }
 
@@ -829,78 +789,7 @@ static int _DebugStatusDIShow(OSDI_IMPL_ENTRY *psEntry, void *pvData)
 
 				/* Write the number of APM events... */
 				DIPrintf(psEntry, "APM Event Count: %d\n", psDevInfo->ui32ActivePMReqTotal);
-
-				/* Write the current GPU Utilisation values... */
-				if (psDevInfo->pfnGetGpuUtilStats &&
-					eHealthStatus == PVRSRV_DEVICE_HEALTH_STATUS_OK)
-				{
-					PVRSRV_RGXDEV_INFO *psDevInfo = psDeviceNode->pvDevice;
-					RGXFWIF_GPU_UTIL_STATS *psGpuUtilStats = &psDevInfo->sGpuUtilStats;
-
-					OSLockAcquire(psDevInfo->hGpuUtilStatsLock);
-
-					if ((IMG_UINT32)psGpuUtilStats->ui64GpuStatCumulative)
-					{
-						const IMG_CHAR *apszDmNames[RGXFWIF_DM_MAX] = {"GP", "TDM", "GEOM", "3D", "CDM", "RAY", "GEOM2", "GEOM3", "GEOM4"};
-						IMG_UINT64 util;
-						IMG_UINT32 rem;
-						IMG_UINT32 ui32DriverID;
-						RGXFWIF_DM eDM;
-						IMG_INT    iDM_Util = 0;
-
-#if defined(RGX_FEATURE_FASTRENDER_DM_BIT_MASK)
-						if (!(RGX_IS_FEATURE_SUPPORTED(psDevInfo, FASTRENDER_DM)))
-						{
-							apszDmNames[RGXFWIF_DM_TDM] = "2D";
-						}
-#endif
-
-						util = 100 * psGpuUtilStats->ui64GpuStatActive;
-						util = OSDivide64(util, (IMG_UINT32)psGpuUtilStats->ui64GpuStatCumulative, &rem);
-
-						DIPrintf(psEntry, "GPU Utilisation: %u%%\n", (IMG_UINT32)util);
-
-						DIPrintf(psEntry, "DM Utilisation:");
-
-						FOREACH_SUPPORTED_DRIVER(ui32DriverID)
-						{
-							DIPrintf(psEntry, "  VM%u", ui32DriverID);
-						}
-
-						DIPrintf(psEntry, "\n");
-
-						for (eDM = RGXFWIF_DM_TDM; eDM < psDevInfo->sDevFeatureCfg.ui32MAXDMCount; eDM++,iDM_Util++)
-						{
-							DIPrintf(psEntry, "        %5s: ", apszDmNames[eDM]);
-
-							FOREACH_SUPPORTED_DRIVER(ui32DriverID)
-							{
-								IMG_UINT32 uiDivisor = (IMG_UINT32)psGpuUtilStats->aaui64DMOSStatCumulative[iDM_Util][ui32DriverID];
-
-								if (uiDivisor == 0U)
-								{
-									DIPrintf(psEntry, "   - ");
-									continue;
-								}
-
-								util = 100 * psGpuUtilStats->aaui64DMOSStatActive[iDM_Util][ui32DriverID];
-								util = OSDivide64(util, uiDivisor, &rem);
-
-								DIPrintf(psEntry, "%3u%% ", (IMG_UINT32)util);
-							}
-
-
-							DIPrintf(psEntry, "\n");
-						}
-					}
-					else
-					{
-						DIPrintf(psEntry, "GPU Utilisation: -\n");
-					}
-
-					OSLockRelease(psDevInfo->hGpuUtilStatsLock);
-
-				}
+				DIPrintf(psEntry, "FW Forced Idle Timeout Count: %d\n", psDevInfo->ui32FWNonIdleTimeoutCount);
 			}
 #endif /* SUPPORT_RGX */
 		}
@@ -998,6 +887,98 @@ static int _DebugDumpDebugDIShow(OSDI_IMPL_ENTRY *psEntry, void *pvData)
 }
 
 #ifdef SUPPORT_RGX
+/*************************************************************************/ /*!
+ Utilisation statistics DebugFS entry
+*/ /**************************************************************************/
+static int _UtilStatsDIShow(OSDI_IMPL_ENTRY *psEntry, void *pvData)
+{
+	PVRSRV_DEVICE_NODE *psDeviceNode = DIGetPrivData(psEntry);
+	PVRSRV_RGXDEV_INFO *psDevInfo;
+	RGX_GPU_UTIL_STATS *psGpuUtilStats;
+	PVRSRV_DEVICE_HEALTH_STATUS eHealthStatus;
+	PVRSRV_ERROR eError;
+	OS_SPINLOCK_FLAGS uiFlags = 0;
+
+	PVR_LOG_GOTO_IF_INVALID_PARAM(psDeviceNode, eError, fail_params);
+
+	eHealthStatus = OSAtomicRead(&psDeviceNode->eHealthStatus);
+	PVR_LOG_GOTO_IF_FALSE(eHealthStatus == PVRSRV_DEVICE_HEALTH_STATUS_OK,
+						  "Device in bad state", fail_params);
+
+	psDevInfo = psDeviceNode->pvDevice;
+	PVR_LOG_GOTO_IF_INVALID_PARAM(psDevInfo , eError, fail_params);
+	PVR_LOG_GOTO_IF_INVALID_PARAM(psDevInfo->pfnGetDetailedGpuUtilStats, eError,
+								  fail_params);
+
+	psGpuUtilStats = &psDevInfo->sGpuUtilStats;
+
+	eError = psDevInfo->pfnGetDetailedGpuUtilStats(psDeviceNode, psGpuUtilStats);
+	PVR_LOG_GOTO_IF_ERROR(eError, "GetGpuUtilStats", fail_stats);
+
+	OSSpinLockAcquire(psGpuUtilStats->hSpinlock, uiFlags);
+
+	if (psGpuUtilStats->bBasicStatsValid)
+	{
+		DIPrintf(psEntry, "GPU Utilisation: %u%%\n", psGpuUtilStats->ui32GpuUsage);
+		DIPrintf(psEntry, "  Measured over %" IMG_UINT64_FMTSPEC " ns\n", psGpuUtilStats->ui64MeasurementPeriodNS);
+	}
+	else
+	{
+		DIPrintf(psEntry, "GPU Utilisation: -\n");
+	}
+
+	if (psGpuUtilStats->bDetailedStatsValid)
+	{
+		const IMG_CHAR *apszDmNames[RGXFWIF_DM_MAX] = {"GP", "TDM", "GEOM", "3D", "CDM", "RAY", "GEOM2", "GEOM3", "GEOM4"};
+		IMG_UINT32 ui32DriverID;
+		RGXFWIF_DM eDM;
+		IMG_INT    iDM_Util = 0;
+
+#if defined(RGX_FEATURE_FASTRENDER_DM_BIT_MASK)
+		if (!(RGX_IS_FEATURE_SUPPORTED(psDevInfo, FASTRENDER_DM)))
+		{
+			apszDmNames[RGXFWIF_DM_TDM] = "2D";
+		}
+#endif
+
+		DIPrintf(psEntry, "\nDM Utilisation:");
+
+		FOREACH_SUPPORTED_DRIVER(ui32DriverID)
+		{
+			DIPrintf(psEntry, "  VM%u", ui32DriverID);
+		}
+
+		DIPrintf(psEntry, "\n");
+
+		for (eDM = RGXFWIF_DM_TDM; eDM < psDevInfo->sDevFeatureCfg.ui32MAXDMCount; eDM++,iDM_Util++)
+		{
+			DIPrintf(psEntry, "        %5s: ", apszDmNames[eDM]);
+
+			FOREACH_SUPPORTED_DRIVER(ui32DriverID)
+			{
+				DIPrintf(psEntry, "%3u%% ", psGpuUtilStats->aaui32DriverDmUsage[eDM-1][ui32DriverID]);
+			}
+
+			DIPrintf(psEntry, "\n");
+		}
+
+		DIPrintf(psEntry, "  Measured over %" IMG_UINT64_FMTSPEC " GPU timer ticks\n", psGpuUtilStats->ui64MeasurementPeriodTicks);
+	}
+	else
+	{
+		DIPrintf(psEntry, "DM Utilisation: -");
+	}
+
+	OSSpinLockRelease(psGpuUtilStats->hSpinlock, uiFlags);
+
+	return 0;
+
+fail_params:
+	return -EINVAL;
+
+fail_stats:
+	return -EIO;
+}
 
 /*************************************************************************/ /*!
  Firmware Trace DebugFS entry
@@ -1022,7 +1003,7 @@ static int _DebugFWTraceDIShow(OSDI_IMPL_ENTRY *psEntry, void *pvData)
  Firmware Translated Page Tables DebugFS entry
 */ /**************************************************************************/
 
-#if !defined(SUPPORT_TRUSTED_DEVICE) || defined(SUPPORT_SECURITY_VALIDATION)
+#if !(defined(SUPPORT_TRUSTED_DEVICE) && defined(RGX_PREMAP_FW_HEAPS)) || defined(SUPPORT_SECURITY_VALIDATION)
 static int _FirmwareMappingsDIShow(OSDI_IMPL_ENTRY *psEntry, void *pvData)
 {
 	PVRSRV_DEVICE_NODE *psDeviceNode;
@@ -1649,11 +1630,6 @@ PVRSRV_ERROR DebugCommonInitDevice(PVRSRV_DEVICE_NODE *psDeviceNode)
 	eError = DICreateGroup(pszDeviceId, NULL, &psDebugInfo->psGroup);
 	PVR_GOTO_IF_ERROR(eError, return_error_);
 
-#if defined(SUPPORT_RGX) && !defined(NO_HARDWARE)
-	eError = SORgxGpuUtilStatsRegister(&psDebugInfo->hGpuUtilUserDebugFS);
-	PVR_GOTO_IF_ERROR(eError, return_error_);
-#endif
-
 	{
 		DI_ITERATOR_CB sIterator = {.pfnShow = _DebugDumpDebugDIShow};
 		eError = DICreateEntry("debug_dump", psDebugInfo->psGroup, &sIterator,
@@ -1665,6 +1641,14 @@ PVRSRV_ERROR DebugCommonInitDevice(PVRSRV_DEVICE_NODE *psDeviceNode)
 #ifdef SUPPORT_RGX
 	if (! PVRSRV_VZ_MODE_IS(GUEST, DEVNODE, psDeviceNode))
 	{
+		{
+			DI_ITERATOR_CB sIterator = {.pfnShow = _UtilStatsDIShow};
+			eError = DICreateEntry("utilisation_stats", psDebugInfo->psGroup, &sIterator,
+			                       psDeviceNode, DI_ENTRY_TYPE_GENERIC,
+			                       &psDebugInfo->psUtilStatsEntry);
+			PVR_GOTO_IF_ERROR(eError, return_error_);
+		}
+
 		{
 			DI_ITERATOR_CB sIterator = {.pfnShow = _DebugFWTraceDIShow};
 			eError = DICreateEntry("firmware_trace", psDebugInfo->psGroup, &sIterator,
@@ -1689,7 +1673,7 @@ PVRSRV_ERROR DebugCommonInitDevice(PVRSRV_DEVICE_NODE *psDeviceNode)
 		}
 #endif /* SUPPORT_FIRMWARE_GCOV */
 
-#if !defined(SUPPORT_TRUSTED_DEVICE) || defined(SUPPORT_SECURITY_VALIDATION)
+#if !(defined(SUPPORT_TRUSTED_DEVICE) && defined(RGX_PREMAP_FW_HEAPS)) || defined(SUPPORT_SECURITY_VALIDATION)
 		{
 			DI_ITERATOR_CB sIterator = {.pfnShow = _FirmwareMappingsDIShow};
 			eError = DICreateEntry("firmware_mappings", psDebugInfo->psGroup, &sIterator,
@@ -1921,6 +1905,11 @@ void DebugCommonDeInitDevice(PVRSRV_DEVICE_NODE *psDeviceNode)
 		}
 	}
 #endif
+	if (psDebugInfo->psUtilStatsEntry != NULL)
+	{
+		DIDestroyEntry(psDebugInfo->psUtilStatsEntry);
+		psDebugInfo->psUtilStatsEntry = NULL;
+	}
 
 	if (psDebugInfo->psFWTraceEntry != NULL)
 	{
@@ -1957,14 +1946,6 @@ void DebugCommonDeInitDevice(PVRSRV_DEVICE_NODE *psDeviceNode)
 		DIDestroyEntry(psDebugInfo->psDumpDebugEntry);
 		psDebugInfo->psDumpDebugEntry = NULL;
 	}
-
-#if defined(SUPPORT_RGX) && !defined(NO_HARDWARE)
-	if (psDebugInfo->hGpuUtilUserDebugFS != NULL)
-	{
-		SORgxGpuUtilStatsUnregister(psDebugInfo->hGpuUtilUserDebugFS);
-		psDebugInfo->hGpuUtilUserDebugFS = NULL;
-	}
-#endif /* defined(SUPPORT_RGX) && !defined(NO_HARDWARE) */
 
 	if (psDebugInfo->psGroup != NULL)
 	{

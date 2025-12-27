@@ -51,6 +51,7 @@
 #include "services_kernel_client.h"
 #include "sync_checkpoint_external.h"
 #include "osfunc_common.h"
+#include "pvr_debug.h"
 
 #define CREATE_TRACE_POINTS
 #include "pvr_fence_trace.h"
@@ -230,12 +231,25 @@ pvr_fence_sched_free(struct rcu_head *rcu)
 	kmem_cache_free(pvr_fence_cache, pvr_fence);
 }
 
+static inline bool pvr_fence_is_proxy(struct pvr_fence *fence)
+{
+	if (fence->type == PVR_FENCE_TYPE_PROXY_FOREIGN ||
+	    fence->type == PVR_FENCE_TYPE_PROXY_MIRROR ||
+	    fence->type == PVR_FENCE_TYPE_PROXY_SW) {
+		return true;
+	}
+
+	return false;
+}
+
 static inline void
 pvr_fence_context_free_deferred(struct pvr_fence_context *fctx)
 {
 	struct pvr_fence *pvr_fence, *tmp;
-	LIST_HEAD(deferred_free_list);
+	struct list_head deferred_free_list;
 	unsigned long flags;
+
+	INIT_LIST_HEAD(&deferred_free_list);
 
 	spin_lock_irqsave(&fctx->list_lock, flags);
 	list_for_each_entry_safe(pvr_fence, tmp,
@@ -248,6 +262,11 @@ pvr_fence_context_free_deferred(struct pvr_fence_context *fctx)
 				 &deferred_free_list,
 				 fence_head) {
 		list_del(&pvr_fence->fence_head);
+
+		if (pvr_fence_is_proxy(pvr_fence)) {
+			dma_fence_put(pvr_fence->fence);
+		}
+
 		SyncCheckpointFree(pvr_fence->sync_checkpoint);
 		call_rcu(&pvr_fence->rcu, pvr_fence_sched_free);
 		module_put(THIS_MODULE);
@@ -271,8 +290,9 @@ pvr_fence_context_signal_fences(void *data)
 	struct pvr_fence_context *fctx = (struct pvr_fence_context *)data;
 	struct pvr_fence *pvr_fence, *tmp;
 	unsigned long flags1;
+	struct list_head signal_list;
 
-	LIST_HEAD(signal_list);
+	INIT_LIST_HEAD(&signal_list);
 
 	/*
 	 * We can't call fence_signal while holding the lock as we can end up
@@ -851,7 +871,6 @@ pvr_fence_foreign_release(struct dma_fence *fence)
 
 	if (pvr_fence) {
 		struct pvr_fence_context *fctx = pvr_fence->fctx;
-		struct dma_fence *foreign_fence = pvr_fence->fence;
 
 		PVR_FENCE_TRACE(&pvr_fence->base,
 				"released fence for foreign fence %llu#%d (%s)\n",
@@ -860,11 +879,11 @@ pvr_fence_foreign_release(struct dma_fence *fence)
 		trace_pvr_fence_foreign_release(pvr_fence);
 
 		spin_lock_irqsave(&fctx->list_lock, flags);
+		/* Move the fence to the deferred list where dma_fence_put will be
+		 * called on the foreign fence. */
 		list_move(&pvr_fence->fence_head,
 			  &fctx->deferred_free_list);
 		spin_unlock_irqrestore(&fctx->list_lock, flags);
-
-		dma_fence_put(foreign_fence);
 
 		kref_put(&fctx->kref,
 			 pvr_fence_context_destroy_kref);
@@ -1127,6 +1146,9 @@ pvr_fence_create_from_fence(struct pvr_fence_context *fctx,
 				name);
 		dma_fence_put(&proxy_fence->base);
 	}
+
+	PVR_ASSERT(pvr_fence_is_proxy(proxy_fence) == true);
+	PVR_ASSERT(proxy_fence->base.ops == &pvr_fence_foreign_ops);
 
 	trace_pvr_fence_foreign_create(proxy_fence);
 

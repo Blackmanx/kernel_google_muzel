@@ -876,7 +876,6 @@ static void _ProcessStatsDKPShow(PVRSRV_DEVICE_NODE *psDevNode,
 
 #endif
 
-#if IS_ENABLED(CONFIG_PIXEL_STAT)
 struct kobject *pixel_stat_gpu_kobj, pixel_gpu_stat;
 
 unsigned long long get_total_gpu_mem_byte(void)
@@ -957,7 +956,6 @@ static int pvr_init_pixel_stats(void)
 
 	return PVRSRV_OK;
 }
-#endif
 
 /*************************************************************************/ /*!
 @Function       PVRSRVStatsInitialise
@@ -973,10 +971,11 @@ PVRSRVStatsInitialise(void)
 	PVR_ASSERT(gpsSizeTrackingHashTable == NULL);
 	PVR_ASSERT(bProcessStatsInitialised == IMG_FALSE);
 
-#if IS_ENABLED(CONFIG_PIXEL_STAT)
-	error = pvr_init_pixel_stats();
-	PVR_LOG_IF_ERROR(error, "init_pixel_stats");
-#endif
+	if (IS_ENABLED(CONFIG_PIXEL_STAT))
+	{
+		error = pvr_init_pixel_stats();
+		PVR_LOG_IF_ERROR(error, "init_pixel_stats");
+	}
 
 	/* We need a lock to protect the linked lists... */
 #if defined(__linux__) && defined(__KERNEL__)
@@ -2087,10 +2086,7 @@ PVRSRVStatsAddMemAllocRecord(PVRSRV_MEM_ALLOC_TYPE eAllocType,
 
 free_record:
 	_decrease_global_stat(eAllocType, uiBytes);
-	if (psRecord != NULL)
-	{
-		OSFreeMemNoStats(psRecord);
-	}
+	OSFreeMemNoStats(psRecord);
 #else /* defined(PVRSRV_ENABLE_MEMORY_STATS) */
 	PVR_UNREFERENCED_PARAMETER(eAllocType);
 	PVR_UNREFERENCED_PARAMETER(pvCpuVAddr);
@@ -3579,3 +3575,5 @@ PVRSRV_ERROR PVRSRVGetProcessMemUsage(IMG_UINT64 *pui64TotalMem,
 	return eError;
 
 } /* PVRSRVGetProcessMemUsage */
+
+MODULE_SOFTDEP("pre: pixel_stat_sysfs");

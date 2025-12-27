@@ -1705,7 +1705,8 @@ static INLINE PVRSRV_ERROR ReserveRangeParamValidation(DEVMEMINT_HEAP *psDevmemH
 	if ((uiVirtualSize & ui64InvalidSizeMask) != 0 || uiVirtualSize == 0)
 	{
 		PVR_LOG_VA(PVR_DBG_ERROR,
-			"uiVirtualSize ("IMG_DEVMEM_SIZE_FMTSPEC") is invalid! Must a multiple of %u and greater than 0",
+			"uiVirtualSize ("IMG_DEVMEM_SIZE_FMTSPEC") is invalid! Must a multiple of %u "
+			"and greater than 0",
 			uiVirtualSize,
 			1 << psDevmemHeap->uiLog2PageSize);
 		return PVRSRV_ERROR_INVALID_PARAMS;
@@ -2130,8 +2131,7 @@ DevmemXIntMapPages(DEVMEMXINT_RESERVATION *psRsrv,
 		{
 			if (psRsrv->ppsPMR[i] != NULL)
 			{
-				PVRSRV_ERROR eError2;
-				eError2 = PMRUnlockPhysAddresses(psRsrv->ppsPMR[i]);
+				PVRSRV_ERROR eError2 = PMRUnlockPhysAddresses(psRsrv->ppsPMR[i]);
 				PVR_LOG_IF_ERROR(eError2, "PMRUnlockPhysAddresses");
 			}
 
@@ -2253,8 +2253,7 @@ DevmemXIntUnmapPages(DEVMEMXINT_RESERVATION *psRsrv,
 		{
 			if (psRsrv->ppsPMR[i] != NULL)
 			{
-				PVRSRV_ERROR eError2;
-				eError2 = PMRUnlockPhysAddresses(psRsrv->ppsPMR[i]);
+				PVRSRV_ERROR eError2 = PMRUnlockPhysAddresses(psRsrv->ppsPMR[i]);
 				PVR_LOG_IF_ERROR(eError2, "PMRUnlockPhysAddresses");
 
 				psRsrv->ppsPMR[i] = NULL;
@@ -2367,7 +2366,6 @@ DevmemXIntMapVRangeToBackingPage(DEVMEMXINT_RESERVATION *psRsrv,
 			{
 				eError = PMRUnlockPhysAddresses(psRsrv->ppsPMR[i]);
 				PVR_LOG_IF_ERROR(eError, "PMRUnlockPhysAddresses");
-
 				psRsrv->ppsPMR[i] = NULL;
 			}
 		}
@@ -3856,6 +3854,34 @@ PVRSRV_ERROR DevmemIntPFNotify(PVRSRV_DEVICE_NODE *psDevNode,
 	}
 
 	return PVRSRV_OK;
+}
+
+PVRSRV_ERROR DevmemIntFindCPUAddress(DEVMEMINT_HEAP *psDevmemHeap,
+                                     IMG_UINT64 ui64Size,
+                                     IMG_UINT64 ui64AddrHint,
+                                     IMG_UINT64 *pui64Addr)
+{
+	PVRSRV_ERROR eError = PVRSRV_OK;
+
+	PVR_LOG_RETURN_IF_INVALID_PARAM(ui64Size != 0, "ui64Size invalid");
+	PVR_LOG_RETURN_IF_INVALID_PARAM(ui64Size <= PMR_MAX_SUPPORTED_SIZE, "ui64Size invalid");
+
+	if (ui64AddrHint != 0)
+	{
+		IMG_DEV_VIRTADDR sVirtAddr = { .uiAddr = ui64AddrHint };
+
+		eError = ReserveRangeParamValidation(psDevmemHeap, sVirtAddr, ui64Size);
+		PVR_LOG_RETURN_IF_ERROR(eError, "ReserveRangeParamValidation");
+	}
+
+	eError = OSFindFreeCPURangeTopDown(psDevmemHeap->sBaseAddr.uiAddr,
+	                                   psDevmemHeap->sLastAddr.uiAddr + 1,
+	                                   ui64Size,
+	                                   ui64AddrHint,
+	                                   pui64Addr);
+	PVR_LOG_RETURN_IF_ERROR(eError, "OSFindFreeCPURangeTopDown");
+
+	return eError;
 }
 
 
