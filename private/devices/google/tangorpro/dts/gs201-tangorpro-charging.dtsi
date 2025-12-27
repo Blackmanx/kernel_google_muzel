@@ -39,7 +39,6 @@
 				google,bd-recharge-soc = <79>;
 				/* Enable TEMP-DEFEND */
 				google,bd-temp-enable;
-				google,bd-temp-dry-run;
 
 				/* dock_defend */
 				google,dd-charge-stop-level = <90>;
