@@ -63,7 +63,7 @@ function test_kernel_kunit() {
         tar -czf "${KUNIT_TEST_DIR}/gcda.tar.gz" -C "${gcda_staging_dir}" . --exclude="*.gcno"
     fi
 
-    rmmod "${KUNIT_KO}"
+    rmmod "kunit"
     umount_debugfs "${mount_debugfs}"
 
     if [[ "${all_modules_result}" == false ]]; then
@@ -76,6 +76,7 @@ function test_kernel_kunit() {
 function test_module() {
     local module="$1"
     local module_path="${KUNIT_MODULES_DIR}/${module}"
+    local module_name="$(modinfo -F name "${module_path}")"
 
     if ! insmod "${module_path}"; then
         log "Failed to load module ${module}."
@@ -85,7 +86,7 @@ function test_module() {
     local results="$(cat /sys/kernel/debug/kunit/*/results)"
     log "KUnit Test Result Details:"
     echo "${results}"
-    rmmod "${module}"
+    rmmod "${module_name}"
 
     if grep -q 'not ok' <<< "${results}"; then
         log "Test result for module "${module}": Failed"

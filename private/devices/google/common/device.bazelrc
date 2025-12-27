@@ -17,6 +17,9 @@ build --use_prebuilt_fips140
 # include unsafe header list
 build --allow_ddk_unsafe_headers
 
+# Specifically disallow empty glob, which will be default on Android 17.
+build --incompatible_disallow_empty_glob
+
 # Debug configs
 import %workspace%/private/devices/google/common/debug/debug.bazelrc
 

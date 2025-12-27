@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 load("@bazel_skylib//lib:paths.bzl", "paths")
-load("@bazel_skylib//rules:common_settings.bzl", "bool_flag")
+load("@bazel_skylib//lib:selects.bzl", "selects")
+load("@bazel_skylib//rules:common_settings.bzl", "bool_flag", "string_flag")
 load("@kernel_toolchain_info//:dict.bzl", "VARS")
 load("//build/kernel/kleaf:hermetic_tools.bzl", "hermetic_genrule")
 load("//build/kernel/kleaf:kernel.bzl", "checkpatch")
@@ -25,6 +26,57 @@ label_flag(
     visibility = [
         "//private/devices/google:__subpackages__",
         "//private/google-modules:__subpackages__",
+    ],
+)
+
+string_flag(
+    name = "soc",
+    build_setting_default = "",
+    visibility = [
+        "//private/devices/google:__subpackages__",
+        "//private/google-modules:__subpackages__",
+    ],
+)
+
+config_setting(
+    name = "soc_is_laguna",
+    flag_values = {":soc": "laguna"},
+)
+
+config_setting(
+    name = "soc_is_zumapro",
+    flag_values = {":soc": "zumapro"},
+)
+
+config_setting(
+    name = "soc_is_zuma",
+    flag_values = {":soc": "zuma"},
+)
+
+config_setting(
+    name = "soc_is_gs201",
+    flag_values = {":soc": "gs201"},
+)
+
+config_setting(
+    name = "soc_is_gs101",
+    flag_values = {":soc": "gs101"},
+)
+
+selects.config_setting_group(
+    name = "soc_is_laguna_or_later",
+    match_any = [
+        ":soc_is_laguna",
+    ],
+)
+
+selects.config_setting_group(
+    name = "soc_is_zumapro_or_before",
+    match_any = [
+        ":soc_is_zumapro",
+        ":soc_is_zuma",
+        ":soc_is_gs201",
+        ":soc_is_gs101",
     ],
 )
 
