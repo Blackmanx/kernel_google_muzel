@@ -1,0 +1,142 @@
+{
+	"arch": "arm64",
+	"bazel_target_name": "kernel_aarch64",
+	"download_configs": {
+		"Image": {
+			"mandatory": true,
+			"remote_filename_fmt": "Image",
+			"target_suffix": "files"
+		},
+		"Image.gz": {
+			"mandatory": true,
+			"remote_filename_fmt": "Image.gz",
+			"target_suffix": "files"
+		},
+		"Image.lz4": {
+			"mandatory": true,
+			"remote_filename_fmt": "Image.lz4",
+			"target_suffix": "files"
+		},
+		"System.map": {
+			"mandatory": true,
+			"remote_filename_fmt": "System.map",
+			"target_suffix": "files"
+		},
+		"abi_symbollist": {
+			"mandatory": false,
+			"remote_filename_fmt": "abi_symbollist",
+			"target_suffix": "kmi_symbol_list"
+		},
+		"abi_symbollist.report": {
+			"mandatory": false,
+			"remote_filename_fmt": "abi_symbollist.report",
+			"target_suffix": "kmi_symbol_list"
+		},
+		"boot-gz.img": {
+			"mandatory": true,
+			"remote_filename_fmt": "boot-gz.img",
+			"target_suffix": "gki_prebuilts_outs"
+		},
+		"boot-img.tar.gz": {
+			"mandatory": true,
+			"remote_filename_fmt": "boot-img.tar.gz",
+			"target_suffix": "gki_prebuilts_outs"
+		},
+		"boot-lz4.img": {
+			"mandatory": true,
+			"remote_filename_fmt": "boot-lz4.img",
+			"target_suffix": "gki_prebuilts_outs"
+		},
+		"boot.img": {
+			"mandatory": true,
+			"remote_filename_fmt": "boot.img",
+			"target_suffix": "gki_prebuilts_outs"
+		},
+		"build.config.constants": {
+			"mandatory": true,
+			"remote_filename_fmt": "build.config.constants",
+			"target_suffix": "init_ddk_files"
+		},
+		"gki-info.txt": {
+			"mandatory": true,
+			"remote_filename_fmt": "gki-info.txt",
+			"target_suffix": "gki_prebuilts_outs"
+		},
+		"gki_aarch64_protected_modules": {
+			"mandatory": false,
+			"remote_filename_fmt": "gki_aarch64_protected_modules",
+			"target_suffix": "protected_modules"
+		},
+		"kernel-headers.tar.gz": {
+			"mandatory": true,
+			"remote_filename_fmt": "kernel-headers.tar.gz",
+			"target_suffix": "headers"
+		},
+		"kernel-uapi-headers.tar.gz": {
+			"mandatory": true,
+			"remote_filename_fmt": "kernel-uapi-headers.tar.gz",
+			"target_suffix": "uapi_headers"
+		},
+		"kernel_aarch64_ddk_headers_archive.tar.gz": {
+			"mandatory": true,
+			"remote_filename_fmt": "kernel_aarch64_ddk_headers_archive.tar.gz",
+			"target_suffix": "init_ddk_files"
+		},
+		"kernel_aarch64_filegroup_decl.tar.gz": {
+			"mandatory": true,
+			"remote_filename_fmt": "kernel_aarch64_filegroup_decl.tar.gz",
+			"target_suffix": "ddk_artifacts"
+		},
+		"manifest.xml": {
+			"mandatory": false,
+			"remote_filename_fmt": "manifest_{build_number}.xml",
+			"target_suffix": "init_ddk_files"
+		},
+		"modules.builtin": {
+			"mandatory": true,
+			"remote_filename_fmt": "modules.builtin",
+			"target_suffix": "files"
+		},
+		"modules.builtin.modinfo": {
+			"mandatory": true,
+			"remote_filename_fmt": "modules.builtin.modinfo",
+			"target_suffix": "files"
+		},
+		"signed/boot-img.tar.gz": {
+			"mandatory": false,
+			"remote_filename_fmt": "signed/certified-boot-img-{build_number}.tar.gz",
+			"target_suffix": "boot_img_archive_signed"
+		},
+		"system_dlkm.modules.blocklist": {
+			"mandatory": true,
+			"remote_filename_fmt": "system_dlkm.modules.blocklist",
+			"target_suffix": "images"
+		},
+		"system_dlkm.modules.load": {
+			"mandatory": true,
+			"remote_filename_fmt": "system_dlkm.modules.load",
+			"target_suffix": "images"
+		},
+		"system_dlkm_staging_archive.tar.gz": {
+			"mandatory": true,
+			"remote_filename_fmt": "system_dlkm_staging_archive.tar.gz",
+			"target_suffix": "images"
+		},
+		"unstripped_modules.tar.gz": {
+			"mandatory": true,
+			"remote_filename_fmt": "unstripped_modules.tar.gz",
+			"target_suffix": "unstripped_modules_archive"
+		},
+		"vmlinux": {
+			"mandatory": true,
+			"remote_filename_fmt": "vmlinux",
+			"target_suffix": "files"
+		},
+		"vmlinux.symvers": {
+			"mandatory": true,
+			"remote_filename_fmt": "vmlinux.symvers",
+			"target_suffix": "files"
+		}
+	},
+	"repo_name": "gki_prebuilts"
+}
