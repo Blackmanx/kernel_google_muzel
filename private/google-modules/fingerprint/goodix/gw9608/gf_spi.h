@@ -120,7 +120,6 @@ struct gf_dev {
 #elif defined(USE_PLATFORM_BUS)
 	struct platform_device *spi;
 #endif
-	struct platform_device *spi_pinctrl_pdev;
 	struct clk *core_clk;
 	struct clk *iface_clk;
 
@@ -136,7 +135,6 @@ struct gf_dev {
 #ifdef GF_FASYNC
 	struct fasync_struct *async;
 #endif
-	struct notifier_block notifier;
 	char device_available;
 	char fb_black;
 };

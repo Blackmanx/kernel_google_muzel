@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2016-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  */
 #define DEBUG
 #define pr_fmt(fmt) "qbt:%s: " fmt, __func__
@@ -21,12 +21,18 @@
 #include <linux/workqueue.h>
 #include <linux/pm.h>
 #include <linux/of.h>
+#include <linux/of_platform.h>
 #include <linux/mutex.h>
 #include <linux/atomic.h>
 #include <linux/gpio/consumer.h>
 #include <linux/kfifo.h>
+#include <linux/pm_runtime.h>
 #include <linux/poll.h>
 #include <linux/input.h>
+#include <linux/pm_wakeup.h>
+#include <linux/timer.h>
+#include <linux/jiffies.h>
+#include <linux/refcount.h>
 #if IS_ENABLED(CONFIG_GOOG_TOUCH_INTERFACE)
 #include <goog_touch_interface.h>
 #include <linux/notifier.h>
@@ -41,6 +47,18 @@
 #define QBT_INPUT_DEV_VERSION 0x0100
 #define QBT_TOUCH_FD_VERSION_2 2
 #define QBT_TOUCH_FD_VERSION_3 3
+#define QBT_WORK_WAKELOCK_TIMEOUT_MS 100
+#define QBT_IOCTL_WAKELOCK_TIMEOUT_MS 5000
+/**
+ * struct timed_wakelock - reference count guarded wakelock with automatic
+ * release and reference count reset after a timeout.
+ */
+struct timed_wakelock {
+	struct wakeup_source *ws;
+	struct timer_list timer;
+	refcount_t active_count;
+	spinlock_t lock;
+};
 struct finger_detect_gpio {
 	struct gpio_desc *gpio;
 	int irq;
@@ -117,10 +135,78 @@ struct qbt_drvdata {
 	wait_queue_head_t read_wait_queue_ipc;
 	bool is_wuhb_connected;
 	struct fd_userspace_buf scrath_buf;
-	atomic_t wakelock_acquired;
+	struct timed_wakelock ioctl_wakelock;
+	struct timed_wakelock touch_wakelock;
+	struct timed_wakelock gpio_wakelock;
+	struct timed_wakelock ipc_irq_wakelock;
+	struct platform_device *spi_pinctrl_pdev;
 };
+/**
+ * @timed_wakelock_acquire - Acquire the wakelock if it was not yet acquired,
+ * increase the active_count, and set the timer expiration to msec.
+ */
+static void timed_wakelock_acquire(struct timed_wakelock *tw,
+	unsigned int msec)
+{
+	unsigned long flags;
+
+	spin_lock_irqsave(&tw->lock, flags);
+
+	if (!refcount_inc_not_zero(&tw->active_count)) {
+		// Refcount was 0, acquire wakelock
+		refcount_set(&tw->active_count, 1);
+		__pm_stay_awake(tw->ws);
+	}
+	// Set/reset the timer to the desired expiration.
+	mod_timer(&tw->timer, jiffies + msecs_to_jiffies(msec));
+	spin_unlock_irqrestore(&tw->lock, flags);
+}
+/**
+ * timed_wakelock_release - Decrement the wakelock's active count and relax it if
+ * the active_count reaches 0 or if force_release is set.
+ */
+static void timed_wakelock_release(struct timed_wakelock *tw, bool force_release)
+{
+	unsigned long flags;
+
+	spin_lock_irqsave(&tw->lock, flags);
+	if (refcount_read(&tw->active_count) == 0) {
+		// Wakelock already released, do nothing.
+	} else if (refcount_dec_and_test(&tw->active_count) || force_release) {
+		del_timer(&tw->timer);
+		__pm_relax(tw->ws);
+		refcount_set(&tw->active_count, 0);
+	}
+	spin_unlock_irqrestore(&tw->lock, flags);
+}
+/**
+ * timed_wakelock_timeout - timed_wakelock timer function. Releases the timer's
+ * associated wakelock when it expires.
+ */
+static void timed_wakelock_timeout(struct timer_list *t)
+{
+	struct timed_wakelock *tw = from_timer(tw, t, timer);
+
+	pr_debug("%s timer expired\n", tw->ws->name);
+	timed_wakelock_release(tw, true);
+}
+static void init_timed_wakelock(struct timed_wakelock *tw, const char *name)
+{
+	tw->ws = wakeup_source_register(NULL, name);
+	timer_setup(&tw->timer, timed_wakelock_timeout, 0);
+	refcount_set(&tw->active_count, 0);
+	spin_lock_init(&tw->lock);
+}
+static void cleanup_timed_wakelock(struct timed_wakelock *tw)
+{
+	if (!tw->ws)
+		return;
+	del_timer_sync(&tw->timer);
+	wakeup_source_unregister(tw->ws);
+	tw->ws = NULL;
+}
 static void qbt_fd_report_event(struct qbt_drvdata *drvdata,
-		struct fd_event *event)
+	struct fd_event *event)
 {
 	if (!drvdata || !event) {
 		pr_err("NULL ptr passed\n");
@@ -180,6 +266,7 @@ static int qbt_touch_connect(struct input_handler *handler,
 static void qbt_touch_disconnect(struct input_handle *handle)
 {
 	struct qbt_drvdata *drvdata = handle->handler->private;
+
 	pr_info("Disconnected device: %s\n", dev_name(&handle->dev->dev));
 	input_close_device(handle);
 	input_unregister_handle(handle);
@@ -254,7 +341,8 @@ static void qbt_touch_report_event(struct input_handle *handle,
 					MT_MAX_FINGERS * sizeof(
 					struct touch_event));
 		else {
-			pm_stay_awake(drvdata->dev);
+			timed_wakelock_acquire(&drvdata->touch_wakelock,
+				QBT_WORK_WAKELOCK_TIMEOUT_MS);
 			schedule_work(&drvdata->fd_touch.work);
 		}
 	}
@@ -275,11 +363,10 @@ static struct input_handler qbt_touch_handler = {
 	.id_table = qbt_touch_ids
 };
 static bool qbt_touch_filter_aoi_region(struct touch_event *event,
-		struct qbt_touch_config_v3 *config)
+	struct qbt_touch_config_v3 *config)
 {
-	if ((event == NULL) || (config == NULL)) {
+	if ((event == NULL) || (config == NULL))
 		return false;
-	}
 	if (event->X < config->left ||
 			event->X > config->right ||
 			event->Y < config->top ||
@@ -289,13 +376,14 @@ static bool qbt_touch_filter_aoi_region(struct touch_event *event,
 		return true;
 }
 static bool qbt_touch_filter_by_radius(
-		struct qbt_drvdata *drvdata,
-		struct touch_event *current_event,
-		struct touch_event *last_event,
-		int slot)
+	struct qbt_drvdata *drvdata,
+	struct touch_event *current_event,
+	struct touch_event *last_event,
+	int slot)
 {
 	unsigned int del_X = 0, del_Y = 0;
 	struct qbt_touch_config_v3 *config = &drvdata->fd_touch.config;
+
 	drvdata->fd_touch.delta_X[slot] +=
 			current_event->X - last_event->X;
 	drvdata->fd_touch.delta_Y[slot] +=
@@ -325,6 +413,7 @@ static void qbt_touch_work_func(struct work_struct *work)
 	int slot = 0;
 	int i = 0;
 	bool intr2_state = false;
+
 	if (!work) {
 		pr_err("NULL pointer passed\n");
 		return;
@@ -336,6 +425,7 @@ static void qbt_touch_work_func(struct work_struct *work)
 	finger_event.touch_valid = true;
 	for (slot = 0; slot < MT_MAX_FINGERS; slot++) {
 		bool *is_finger_in = &fd_touch->is_finger_in[slot];
+
 		memcpy(&current_event, &fd_touch->current_events[slot],
 				sizeof(current_event));
 		fd_touch->current_events[slot].updated = false;
@@ -349,10 +439,10 @@ static void qbt_touch_work_func(struct work_struct *work)
 			// -1 corresponds to finger being lifted.
 			finger_event.state = QBT_EVENT_FINGER_UP;
 		} else if ((last_event.id < 0) &&
-							 (current_event.id >= 0)) {
+			(current_event.id >= 0)) {
 			// The finger was previously up, and is now down.
 			finger_event.state = QBT_EVENT_FINGER_DOWN;
-		} else if (last_event.id == current_event.id){
+		} else if (last_event.id == current_event.id) {
 			finger_event.state = QBT_EVENT_FINGER_MOVE;
 		} else {
 			// Somehow got incrementing ids with no -1 between.
@@ -363,22 +453,22 @@ static void qbt_touch_work_func(struct work_struct *work)
 		in_small_aoi = qbt_touch_filter_aoi_region(&current_event, config);
 		in_large_aoi = qbt_touch_filter_aoi_region(&current_event, large_config);
 		if (!(*is_finger_in)) {
-				if (in_small_aoi && !(current_event.id < 0)) {
-						finger_event.state = QBT_EVENT_FINGER_DOWN;
-						*is_finger_in = true;
-				} else {
-						// Don't report.
-						continue;
-				}
+			if (in_small_aoi && !(current_event.id < 0)) {
+				finger_event.state = QBT_EVENT_FINGER_DOWN;
+				*is_finger_in = true;
+			} else {
+				// Don't report.
+				continue;
+			}
 		} else {
-				// Need to update state if finger has left large AoI.
-				if (current_event.id < 0) {
-					*is_finger_in = false;
-				} else if (!in_large_aoi) {
-						finger_event.state = QBT_EVENT_FINGER_UP;
-						*is_finger_in = false;
-				}
-				// Report event.
+			// Need to update state if finger has left large AoI.
+			if (current_event.id < 0) {
+				*is_finger_in = false;
+			} else if (!in_large_aoi) {
+				finger_event.state = QBT_EVENT_FINGER_UP;
+				*is_finger_in = false;
+			}
+			// Report event.
 		}
 
 		// Radius filtering on moves to limit report frequency.
@@ -411,7 +501,7 @@ static void qbt_touch_work_func(struct work_struct *work)
 		if (config->touch_fd_enable)
 			qbt_fd_report_event(drvdata, &finger_event);
 	}
-	pm_relax(drvdata->dev);
+	timed_wakelock_release(&drvdata->touch_wakelock, true);
 }
 /**
  * qbt_open() - Function called when user space opens device.
@@ -426,6 +516,7 @@ static int qbt_open(struct inode *inode, struct file *file)
 	struct qbt_drvdata *drvdata = NULL;
 	int rc = 0;
 	int minor_no = -1;
+
 	if (!inode || !inode->i_cdev || !file) {
 		pr_err("NULL pointer passed\n");
 		return -EINVAL;
@@ -469,6 +560,7 @@ static int qbt_release(struct inode *inode, struct file *file)
 {
 	struct qbt_drvdata *drvdata;
 	int minor_no = -1;
+
 	if (!file || !file->private_data || !inode) {
 		pr_err("NULL pointer passed\n");
 		return -EINVAL;
@@ -484,11 +576,6 @@ static int qbt_release(struct inode *inode, struct file *file)
 	} else {
 		pr_err("Invalid minor number\n");
 		return -EINVAL;
-	}
-	if (atomic_read(&drvdata->wakelock_acquired) != 0) {
-		pr_debug("Releasing wakelock\n");
-		pm_relax(drvdata->dev);
-		atomic_set(&drvdata->wakelock_acquired, 0);
 	}
 	pr_debug("exit : fd_available=%d\n", atomic_read(&drvdata->fd_available));
 	return 0;
@@ -508,6 +595,7 @@ static long qbt_ioctl(
 	int rc = 0;
 	void __user *priv_arg = (void __user *)arg;
 	struct qbt_drvdata *drvdata;
+
 	if (!file || !file->private_data) {
 		pr_err("NULL pointer passed\n");
 		return -EINVAL;
@@ -526,7 +614,7 @@ static long qbt_ioctl(
 		if (!drvdata->fw_ipc.irq_enabled) {
 			enable_irq(drvdata->fw_ipc.irq);
 			drvdata->fw_ipc.irq_enabled = true;
-			pr_debug("%s: QBT_ENABLE_IPC\n", __func__);
+			pr_debug("QBT_ENABLE_IPC\n");
 		}
 		break;
 	}
@@ -535,7 +623,7 @@ static long qbt_ioctl(
 		if (drvdata->fw_ipc.irq_enabled) {
 			disable_irq(drvdata->fw_ipc.irq);
 			drvdata->fw_ipc.irq_enabled = false;
-			pr_debug("%s: QBT_DISABLE_IPC\n", __func__);
+			pr_debug("QBT_DISABLE_IPC\n");
 		}
 		break;
 	}
@@ -543,19 +631,20 @@ static long qbt_ioctl(
 	{
 		enable_irq(drvdata->fd_gpio.irq);
 		drvdata->fd_gpio.irq_enabled = true;
-		pr_debug("%s: QBT_ENABLE_FD\n", __func__);
+		pr_debug("QBT_ENABLE_FD\n");
 		break;
 	}
 	case QBT_DISABLE_FD:
 	{
 		disable_irq(drvdata->fd_gpio.irq);
 		drvdata->fd_gpio.irq_enabled = false;
-		pr_debug("%s: QBT_DISABLE_FD\n", __func__);
+		pr_debug("QBT_DISABLE_FD\n");
 		break;
 	}
 	case QBT_IS_WUHB_CONNECTED:
 	{
 		struct qbt_wuhb_connected_status wuhb_connected_status;
+
 		memset(&wuhb_connected_status, 0,
 				sizeof(wuhb_connected_status));
 		wuhb_connected_status.is_wuhb_connected =
@@ -574,6 +663,7 @@ static long qbt_ioctl(
 	case QBT_SEND_KEY_EVENT:
 	{
 		struct qbt_key_event key_event;
+
 		if (copy_from_user(&key_event, priv_arg,
 			sizeof(key_event))
 				!= 0) {
@@ -594,26 +684,34 @@ static long qbt_ioctl(
 	}
 	case QBT_ACQUIRE_WAKELOCK:
 	{
-		if (atomic_read(&drvdata->wakelock_acquired) == 0) {
-			pr_debug("Acquiring wakelock\n");
-			pm_stay_awake(drvdata->dev);
+		struct qbt_wakelock_timeout timeout;
+		int rpm_res;
+
+		if (copy_from_user(&timeout, priv_arg, sizeof(timeout)) != 0) {
+			rc = -EFAULT;
+			pr_debug("failed copy from user space %d, proceeding with timeout value %d ms\n",
+				rc, QBT_IOCTL_WAKELOCK_TIMEOUT_MS);
+			timeout.timeout_ms = QBT_IOCTL_WAKELOCK_TIMEOUT_MS;
 		}
-		atomic_inc(&drvdata->wakelock_acquired);
+		pr_debug("QBT_ACQUIRE_WAKELOCK\n");
+		timed_wakelock_acquire(&drvdata->ioctl_wakelock, timeout.timeout_ms);
+
+		rpm_res = pm_runtime_resume_and_get(&drvdata->spi_pinctrl_pdev->dev);
+		if (rpm_res < 0)
+			pr_info("pm_runtime_resume_and_get failed: %d\n", rpm_res);
 		break;
 	}
 	case QBT_RELEASE_WAKELOCK:
 	{
-		if (atomic_read(&drvdata->wakelock_acquired) == 0)
-			break;
-		if (atomic_dec_and_test(&drvdata->wakelock_acquired)) {
-			pr_debug("Releasing wakelock\n");
-			pm_relax(drvdata->dev);
-		}
+		pr_debug("QBT_RELEASE_WAKELOCK\n");
+		timed_wakelock_release(&drvdata->ioctl_wakelock, false);
+		pm_runtime_put(&drvdata->spi_pinctrl_pdev->dev);
 		break;
 	}
 	case QBT_GET_TOUCH_FD_VERSION:
 	{
 		struct qbt_touch_fd_version version;
+
 		version.version = QBT_TOUCH_FD_VERSION_3;
 		rc = copy_to_user((void __user *)priv_arg,
 				&version, sizeof(version));
@@ -664,17 +762,18 @@ static long qbt_ioctl(
 				pr_err("failed copy from user space %d\n", rc);
 				goto end;
 			} else {
-				// Succeeded in copying, multiply side lengths by 1.5 for up AoI
+				// Succeeded in copying, multiply side lengths by 2 for up AoI.
 				struct qbt_touch_config_v3 *config = &drvdata->fd_touch.config;
 				int width = config->right - config->left;
 				int height = config->bottom - config->top;
+
 				memcpy(&drvdata->fd_touch.up_config,
 							 &drvdata->fd_touch.config,
 							 sizeof(drvdata->fd_touch.config));
-				drvdata->fd_touch.up_config.right += width / 4;
-				drvdata->fd_touch.up_config.left -= width / 4;
-				drvdata->fd_touch.up_config.top -= height / 4;
-				drvdata->fd_touch.up_config.bottom += height / 4;
+				drvdata->fd_touch.up_config.right += width / 2;
+				drvdata->fd_touch.up_config.left -= width / 2;
+				drvdata->fd_touch.up_config.top -= height / 2;
+				drvdata->fd_touch.up_config.bottom += height / 2;
 			}
 		}
 		pr_debug("Touch FD enable: %d\n",
@@ -701,6 +800,7 @@ static long qbt_ioctl(
 	case QBT_INTR2_TEST:
 	{
 		struct qbt_intr2_test test;
+
 		if (copy_from_user(&test, priv_arg, sizeof(test)) != 0) {
 			rc = -EFAULT;
 			pr_err("failed copy from user space %d\n", rc);
@@ -716,6 +816,7 @@ static long qbt_ioctl(
 	case QBT_LPTW_TOUCH:
 	{
 		struct qbt_test_touch touch;
+
 		pr_debug("QBT LPTW Touch ioctl\n");
 		if (copy_from_user(&touch, priv_arg, sizeof(touch)) != 0) {
 			rc = -EFAULT;
@@ -739,6 +840,7 @@ static int get_events_fifo_len_locked(
 		struct qbt_drvdata *drvdata, int minor_no)
 {
 	int len = 0;
+
 	if (minor_no == MINOR_NUM_FD) {
 		mutex_lock(&drvdata->fd_events_mutex);
 		len = kfifo_len(&drvdata->fd_events);
@@ -762,6 +864,7 @@ static ssize_t qbt_read(struct file *filp, char __user *ubuf,
 	int minor_no = -1;
 	int fifo_len = 0;
 	ssize_t num_bytes = 0;
+
 	pr_debug("entry with numBytes = %zd, minor_no = %d\n", cnt, minor_no);
 	if (!filp || !filp->private_data) {
 		pr_err("NULL pointer passed\n");
@@ -825,13 +928,14 @@ static ssize_t qbt_read(struct file *filp, char __user *ubuf,
 		mutex_unlock(&drvdata->fd_events_mutex);
 	} else if (minor_no == MINOR_NUM_IPC) {
 		mutex_lock(&drvdata->ipc_events_mutex);
-		if (!kfifo_get(&drvdata->ipc_events, &fw_event))
+		if (!kfifo_get(&drvdata->ipc_events, &fw_event)) {
 			pr_err("IPC events fifo: error removing item\n");
-		pr_debug("IPC event %d at minor no %d read at time %lu uS\n",
+		} else {
+			pr_debug("IPC event %d at minor no %d read at time %lu uS\n",
 				(int)fw_event.ev, minor_no,
 				(unsigned long)ktime_to_us(ktime_get()));
-		num_bytes = copy_to_user(ubuf, &fw_event.ev,
-				sizeof(fw_event.ev));
+			num_bytes = copy_to_user(ubuf, &fw_event.ev, sizeof(fw_event.ev));
+		}
 		mutex_unlock(&drvdata->ipc_events_mutex);
 	} else {
 		pr_err("Invalid minor number\n");
@@ -846,6 +950,7 @@ static __poll_t qbt_poll(struct file *filp,
 	struct qbt_drvdata *drvdata;
 	__poll_t mask = 0;
 	int minor_no = -1;
+
 	if (!filp || !filp->private_data) {
 		pr_err("NULL pointer passed\n");
 		return -EINVAL;
@@ -882,6 +987,7 @@ static int qbt_dev_register(struct qbt_drvdata *drvdata)
 	char *node_name = QBT_DEV;
 	struct device *dev = drvdata->dev;
 	struct device *device;
+
 	node_size = strlen(node_name) + 1;
 	drvdata->qbt_node = devm_kzalloc(dev, node_size, GFP_KERNEL);
 	if (!drvdata->qbt_node) {
@@ -948,6 +1054,7 @@ err_alloc:
 static void qbt_gpio_report_event(struct qbt_drvdata *drvdata, int state)
 {
 	struct fd_event event;
+
 	memset(&event, 0, sizeof(event));
 	if (!drvdata->is_wuhb_connected) {
 		pr_err("Skipping as WUHB_INT is disconnected\n");
@@ -966,7 +1073,8 @@ static void qbt_gpio_report_event(struct qbt_drvdata *drvdata, int state)
 	event.timestamp = ktime_to_timespec64(ktime_get());
 	qbt_fd_report_event(drvdata, &event);
 }
-void qbt_lptw_report_event(int x, int y, int state) {
+void qbt_lptw_report_event(int x, int y, int state)
+{
 	struct fd_event event;
 	struct qbt_drvdata *drvdata = qbt_touch_handler.private;
 	int touch_width = 1;
@@ -1013,6 +1121,7 @@ static void qbt_gpio_work_func(struct work_struct *work)
 {
 	int state;
 	struct qbt_drvdata *drvdata;
+
 	if (!work) {
 		pr_err("NULL pointer passed\n");
 		return;
@@ -1021,11 +1130,12 @@ static void qbt_gpio_work_func(struct work_struct *work)
 	state = (gpiod_get_value(drvdata->fd_gpio.gpio) ?
 		 QBT_EVENT_FINGER_DOWN : QBT_EVENT_FINGER_UP);
 	qbt_gpio_report_event(drvdata, state);
-	pm_relax(drvdata->dev);
+	timed_wakelock_release(&drvdata->gpio_wakelock, true);
 }
 static irqreturn_t qbt_gpio_isr(int irq, void *dev_id)
 {
 	struct qbt_drvdata *drvdata = dev_id;
+
 	if (!drvdata) {
 		pr_err("NULL pointer passed\n");
 		return IRQ_HANDLED;
@@ -1037,7 +1147,7 @@ static irqreturn_t qbt_gpio_isr(int irq, void *dev_id)
 	}
 	pr_debug("FD event received at time %lu uS\n",
 			(unsigned long)ktime_to_us(ktime_get()));
-	pm_stay_awake(drvdata->dev);
+	timed_wakelock_acquire(&drvdata->gpio_wakelock, QBT_WORK_WAKELOCK_TIMEOUT_MS);
 	schedule_work(&drvdata->fd_gpio.work);
 	return IRQ_HANDLED;
 }
@@ -1045,6 +1155,7 @@ static void qbt_irq_report_event(struct work_struct *work)
 {
 	struct qbt_drvdata *drvdata;
 	struct ipc_event fw_ev_des;
+
 	if (!work) {
 		pr_err("NULL pointer passed\n");
 		return;
@@ -1061,7 +1172,7 @@ static void qbt_irq_report_event(struct work_struct *work)
 	}
 	mutex_unlock(&drvdata->ipc_events_mutex);
 	wake_up_interruptible(&drvdata->read_wait_queue_ipc);
-	pm_relax(drvdata->dev);
+	timed_wakelock_release(&drvdata->ipc_irq_wakelock, true);
 }
 /**
  * qbt_ipc_irq_handler() - function processes IPC
@@ -1074,6 +1185,7 @@ static void qbt_irq_report_event(struct work_struct *work)
 static irqreturn_t qbt_ipc_irq_handler(int irq, void *dev_id)
 {
 	struct qbt_drvdata *drvdata = (struct qbt_drvdata *)dev_id;
+
 	if (!drvdata) {
 		pr_err("NULL pointer passed\n");
 		return IRQ_HANDLED;
@@ -1085,7 +1197,7 @@ static irqreturn_t qbt_ipc_irq_handler(int irq, void *dev_id)
 	}
 	pr_debug("IPC event received at time %lu uS\n",
 			(unsigned long)ktime_to_us(ktime_get()));
-	pm_stay_awake(drvdata->dev);
+	timed_wakelock_acquire(&drvdata->ipc_irq_wakelock, QBT_WORK_WAKELOCK_TIMEOUT_MS);
 	schedule_work(&drvdata->fw_ipc.work);
 	return IRQ_HANDLED;
 }
@@ -1095,6 +1207,7 @@ static int setup_fd_gpio_irq(struct platform_device *pdev,
 	int rc = 0;
 	int irq;
 	const char *desc = "qbt_finger_detect";
+
 	if (!drvdata->is_wuhb_connected) {
 		pr_err("Skipping as WUHB_INT is disconnected\n");
 		goto end;
@@ -1103,7 +1216,7 @@ static int setup_fd_gpio_irq(struct platform_device *pdev,
 	if (irq < 0) {
 		rc = irq;
 		pr_err("unable to get irq number for gpio %d, error %d\n",
-		       desc_to_gpio(drvdata->fd_gpio.gpio), rc);
+					 desc_to_gpio(drvdata->fd_gpio.gpio), rc);
 		goto end;
 	}
 	drvdata->fd_gpio.irq = irq;
@@ -1125,6 +1238,7 @@ static int setup_ipc_irq(struct platform_device *pdev,
 {
 	int rc = 0;
 	const char *desc = "qbt_ipc";
+
 	drvdata->fw_ipc.irq = gpiod_to_irq(drvdata->fw_ipc.gpio);
 	INIT_WORK(&drvdata->fw_ipc.work, qbt_irq_report_event);
 	pr_debug("irq %d gpio %d\n",
@@ -1132,7 +1246,7 @@ static int setup_ipc_irq(struct platform_device *pdev,
 	if (drvdata->fw_ipc.irq < 0) {
 		rc = drvdata->fw_ipc.irq;
 		pr_err("no irq for gpio %d, error=%d\n",
-		       desc_to_gpio(drvdata->fw_ipc.gpio), rc);
+					 desc_to_gpio(drvdata->fw_ipc.gpio), rc);
 		goto end;
 	}
 	rc = devm_request_threaded_irq(&pdev->dev,
@@ -1163,8 +1277,10 @@ static int qbt_read_device_tree(struct platform_device *pdev,
 {
 	int rc = 0;
 	struct gpio_desc *gpio;
+	struct device_node *pinctrl_np;
+
 	drvdata->intr2_gpio = devm_gpiod_get_optional(&pdev->dev, "qcom,intr2",
-						      GPIOD_OUT_LOW);
+									GPIOD_OUT_LOW);
 	if (IS_ERR(drvdata->intr2_gpio)) {
 		rc = PTR_ERR(drvdata->intr2_gpio);
 		pr_err("failed to request intr2 gpio, error %d\n", rc);
@@ -1174,14 +1290,14 @@ static int qbt_read_device_tree(struct platform_device *pdev,
 		pr_warn("intr2 gpio not found\n");
 	/* read IPC gpio */
 	drvdata->fw_ipc.gpio = devm_gpiod_get(&pdev->dev, "qcom,ipc",
-					      GPIOD_IN);
+								GPIOD_IN);
 	if (IS_ERR(drvdata->fw_ipc.gpio)) {
 		rc = PTR_ERR(drvdata->fw_ipc.gpio);
 		pr_err("failed to request ipc gpio, error %d\n", rc);
 		goto end;
 	}
 	gpio = devm_gpiod_get_optional(&pdev->dev, "qcom,finger-detect",
-				       GPIOD_IN);
+							 GPIOD_IN);
 	if (IS_ERR(gpio)) {
 		rc = PTR_ERR(gpio);
 		pr_err("failed to request fd gpio, error %d\n", rc);
@@ -1193,6 +1309,20 @@ static int qbt_read_device_tree(struct platform_device *pdev,
 	} else {
 		drvdata->is_wuhb_connected = 0;
 		pr_warn("fd gpio not found\n");
+	}
+
+	pinctrl_np = of_parse_phandle(pdev->dev.of_node, "spi-gpio-provider", 0);
+	if (!pinctrl_np) {
+		dev_err(&pdev->dev, "Failed to get spi-gpio-provider phandle\n");
+		rc = -EINVAL;
+		goto end;
+	}
+
+	drvdata->spi_pinctrl_pdev = of_find_device_by_node(pinctrl_np);
+	of_node_put(pinctrl_np);
+	if (!drvdata->spi_pinctrl_pdev) {
+		dev_err(&pdev->dev, "Failed to find spi pinctrl platform device\n");
+		rc = -EPROBE_DEFER;
 	}
 end:
 	return rc;
@@ -1206,10 +1336,12 @@ end:
  */
 static int qbt_probe(struct platform_device *pdev)
 {
+	pr_debug("entry\n");
 	struct device *dev = &pdev->dev;
 	struct qbt_drvdata *drvdata;
 	int rc = 0;
 	int slot = 0;
+
 	pr_debug("entry\n");
 	drvdata = devm_kzalloc(dev, sizeof(*drvdata), GFP_KERNEL);
 	if (!drvdata)
@@ -1221,7 +1353,6 @@ static int qbt_probe(struct platform_device *pdev)
 		goto end;
 	atomic_set(&drvdata->fd_available, 1);
 	atomic_set(&drvdata->ipc_available, 1);
-	atomic_set(&drvdata->wakelock_acquired, 0);
 	mutex_init(&drvdata->mutex);
 	mutex_init(&drvdata->fd_events_mutex);
 	mutex_init(&drvdata->ipc_events_mutex);
@@ -1232,6 +1363,10 @@ static int qbt_probe(struct platform_device *pdev)
 	INIT_KFIFO(drvdata->ipc_events);
 	init_waitqueue_head(&drvdata->read_wait_queue_fd);
 	init_waitqueue_head(&drvdata->read_wait_queue_ipc);
+	init_timed_wakelock(&drvdata->ioctl_wakelock, "qbt_ioctl_wakelock");
+	init_timed_wakelock(&drvdata->touch_wakelock, "qbt_touch_wakelock");
+	init_timed_wakelock(&drvdata->gpio_wakelock, "qbt_gpio_wakelock");
+	init_timed_wakelock(&drvdata->ipc_irq_wakelock, "qbt_ipc_irq_wakelock");
 	rc = setup_fd_gpio_irq(pdev, drvdata);
 	if (rc < 0)
 		goto end;
@@ -1242,9 +1377,6 @@ static int qbt_probe(struct platform_device *pdev)
 		goto end;
 	drvdata->fw_ipc.irq_enabled = false;
 	disable_irq(drvdata->fw_ipc.irq);
-	rc = device_init_wakeup(&pdev->dev, 1);
-	if (rc < 0)
-		goto end;
 	qbt_touch_handler.private = drvdata;
 	INIT_WORK(&drvdata->fd_touch.work, qbt_touch_work_func);
 	for (slot = 0; slot < MT_MAX_FINGERS; slot++) {
@@ -1264,6 +1396,7 @@ end:
 }
 static int qbt_remove(struct platform_device *pdev)
 {
+	pr_debug("entry\n");
 	struct qbt_drvdata *drvdata = platform_get_drvdata(pdev);
 #if IS_ENABLED(CONFIG_GOOG_TOUCH_INTERFACE)
 	goog_lptw_notifier_register(&qbt_notifier_block, false);
@@ -1278,8 +1411,12 @@ static int qbt_remove(struct platform_device *pdev)
 	cdev_del(&drvdata->qbt_ipc_cdev);
 	unregister_chrdev_region(drvdata->qbt_fd_cdev.dev, 1);
 	unregister_chrdev_region(drvdata->qbt_ipc_cdev.dev, 1);
-	device_init_wakeup(&pdev->dev, 0);
+	cleanup_timed_wakelock(&drvdata->ioctl_wakelock);
+	cleanup_timed_wakelock(&drvdata->touch_wakelock);
+	cleanup_timed_wakelock(&drvdata->gpio_wakelock);
+	cleanup_timed_wakelock(&drvdata->ipc_irq_wakelock);
 	input_unregister_handler(&qbt_touch_handler);
+	put_device(&drvdata->spi_pinctrl_pdev->dev);
 	return 0;
 }
 static int qbt_suspend(struct platform_device *pdev, pm_message_t state)
@@ -1294,17 +1431,16 @@ static int qbt_suspend(struct platform_device *pdev, pm_message_t state)
 	 */
 	if (!mutex_trylock(&drvdata->mutex))
 		return -EBUSY;
-	else {
-		if (drvdata->is_wuhb_connected)
-			enable_irq_wake(drvdata->fd_gpio.irq);
-		enable_irq_wake(drvdata->fw_ipc.irq);
-	}
+	if (drvdata->is_wuhb_connected)
+		enable_irq_wake(drvdata->fd_gpio.irq);
+	enable_irq_wake(drvdata->fw_ipc.irq);
 	mutex_unlock(&drvdata->mutex);
 	return rc;
 }
 static int qbt_resume(struct platform_device *pdev)
 {
 	struct qbt_drvdata *drvdata = platform_get_drvdata(pdev);
+
 	if (drvdata->is_wuhb_connected)
 		disable_irq_wake(drvdata->fd_gpio.irq);
 	disable_irq_wake(drvdata->fw_ipc.irq);
@@ -1327,6 +1463,7 @@ static struct platform_driver qbt_plat_driver = {
 static int __init qbt_handler_init(void)
 {
 	int ret;
+
 	pr_debug("entry\n");
 	ret = platform_driver_register(&qbt_plat_driver);
 	return ret;

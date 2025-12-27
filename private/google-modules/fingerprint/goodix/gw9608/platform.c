@@ -5,16 +5,12 @@
  * Coypritht (c) 2017 Goodix
  */
 #include <linux/delay.h>
-#include <linux/err.h>
-#include <linux/gpio.h>
-#include <linux/init.h>
-#include <linux/module.h>
+#include <linux/workqueue.h>
 #include <linux/of_gpio.h>
-#include <linux/of_platform.h>
 #include <linux/gpio.h>
 #include <linux/regulator/consumer.h>
 #include <linux/timer.h>
-#include <linux/workqueue.h>
+#include <linux/err.h>
 
 #include "gf_spi.h"
 
@@ -30,7 +26,6 @@ int gf_parse_dts(struct gf_dev *gf_dev)
 	int rc = 0;
 	struct device *dev = &gf_dev->spi->dev;
 	struct device_node *np = dev->of_node;
-	struct device_node *pinctrl_np;
 
 	gf_dev->reset_gpio = of_get_named_gpio(np, "fp-gpio-reset", 0);
 	if (gf_dev->reset_gpio < 0) {
@@ -57,21 +52,6 @@ int gf_parse_dts(struct gf_dev *gf_dev)
 		return rc;
 	}
 	gpio_direction_input(gf_dev->irq_gpio);
-
-	if (IS_ENABLED(USE_PLATFORM_BUS)) {
-		pinctrl_np = of_parse_phandle(np, "spi-gpio-provider", 0);
-		if (!pinctrl_np) {
-			dev_err(dev, "Failed to get spi-gpio-provider phandle\n");
-			return -EINVAL;
-		}
-
-		gf_dev->spi_pinctrl_pdev = of_find_device_by_node(pinctrl_np);
-		of_node_put(pinctrl_np);
-		if (!gf_dev->spi_pinctrl_pdev) {
-			dev_err(dev, "Failed to find spi pinctrl platform device\n");
-			return -EPROBE_DEFER;
-		}
-	}
 
 	return rc;
 }

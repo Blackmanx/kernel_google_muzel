@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-only WITH Linux-syscall-note */
 /*
  * Copyright (c) 2016-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  */
 
 #include <linux/types.h>
@@ -171,6 +171,10 @@ struct qbt_test_touch {
 	int x;
 	int y;
 	int state;
+};
+
+struct qbt_wakelock_timeout {
+	unsigned int timeout_ms;
 };
 
 /**
