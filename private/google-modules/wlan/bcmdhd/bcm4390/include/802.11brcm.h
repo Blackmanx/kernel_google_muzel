@@ -132,7 +132,6 @@ typedef struct dpt_brcm_prop_ie_s brcm_prop_ie_t;
 #endif /* NEW_BRCM_PROP_IE */
 #define BRCM_PROP_IE_LEN	6	/* len of fixed part of brcm_prop ie */
 
-
 /**
  * Following is the generic structure for brcm_prop_ie (uses BRCM_PROP_OUI).
  * DPT uses this format with type set to DPT_IE_TYPE

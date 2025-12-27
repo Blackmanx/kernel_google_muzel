@@ -1,7 +1,7 @@
 /*
  * Linux cfg80211 Vendor Extension Code
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -398,7 +398,6 @@ enum gscan_attributes {
     GSCAN_ATTRIBUTE_BSSID_PREF_FLUSH,
     GSCAN_ATTRIBUTE_BSSID_PREF,
     GSCAN_ATTRIBUTE_RSSI_MODIFIER,
-
 
     /* Roam cfg */
     GSCAN_ATTRIBUTE_A_BAND_BOOST_THRESHOLD = GSCAN_ATTR_SET9,

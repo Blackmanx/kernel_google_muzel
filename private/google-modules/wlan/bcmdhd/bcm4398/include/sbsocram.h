@@ -1,7 +1,7 @@
 /*
  * BCM47XX Sonics SiliconBackplane embedded ram core
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -187,6 +187,5 @@ typedef volatile struct sbsocramregs {
 /* bank info to calculate bank size */
 #define   SOCRAM_BANKINFO_SZBASE          8192
 #define SOCRAM_BANKSIZE_SHIFT         13      /* SOCRAM_BANKINFO_SZBASE */
-
 
 #endif	/* _SBSOCRAM_H */

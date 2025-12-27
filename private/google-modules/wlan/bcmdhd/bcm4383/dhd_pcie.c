@@ -1899,14 +1899,9 @@ skip_intstatus_read:
 
 		bus->ipend = TRUE;
 
-		/* Due to irq mismatch WARNING in linux, currently keeping it disabled and
-		 * using dongle intmask to control INTR enable/disable
-		 */
 		if (bus->d2h_intr_control == PCIE_HOST_IRQ_CTRL) {
-			if (!dhdpcie_irq_disabled(bus)) {
-				bus->host_irq_disable_count++;
-				dhdpcie_disable_irq_nosync(bus); /* Disable interrupt!! */
-			}
+			bus->host_irq_disable_count++;
+			dhdpcie_disable_irq_nosync(bus); /* Disable interrupt!! */
 		} else {
 			dhdpcie_bus_intr_disable(bus); /* Disable interrupt using IntMask!! */
 			bus->dngl_intmask_disable_count++;
@@ -10658,8 +10653,6 @@ dhdpcie_bus_suspend(struct dhd_bus *bus, bool state)
 		 */
 #ifdef PCIE_INB_DW
 		if (INBAND_DW_ENAB(bus)) {
-			DHD_ERROR(("d3_inform:send\n"));
-			dhd_plat_check_msi();
 			DHD_BUS_INB_DW_LOCK(bus->inb_lock, flags);
 			DHD_RPM(("%s: Before D3_INFORM inband_dw_state:%d\n",
 				__FUNCTION__, dhdpcie_bus_get_pcie_inband_dw_state(bus)));
@@ -13482,20 +13475,6 @@ BCMFASTPATH(dhd_bus_dpc)(struct dhd_bus *bus)
 		}
 	}
 
-	/* Due to irq mismatch WARNING in linux, currently keeping it disabled and
-	 * using dongle intmask to control INTR enable/disable
-	 */
-	if (bus->d2h_intr_control == PCIE_HOST_IRQ_CTRL) {
-		/*
-		 * Disable IRQ at start of DPC if it is not disabled and
-		 * Enable back at the end of dpc if irq is disabled.
-		 */
-		if (!dhdpcie_irq_disabled(bus)) {
-			bus->host_irq_disable_count++;
-			dhdpcie_disable_irq_nosync(bus); /* Disable host IRQ!! */
-		}
-	}
-
 	DHD_GENERAL_LOCK(bus->dhd, flags);
 	/* Check for only DHD_BUS_DOWN and not for DHD_BUS_DOWN_IN_PROGRESS
 	 * to avoid IOCTL Resumed On timeout when ioctl is waiting for response
@@ -13521,12 +13500,9 @@ BCMFASTPATH(dhd_bus_dpc)(struct dhd_bus *bus)
 		bus->dpc_exit_time = OSL_LOCALTIME_NS();
 		bus->dpc_time_usec = (bus->dpc_exit_time - bus->dpc_entry_time) / NSEC_PER_USEC;
 		if (!dhd_query_bus_erros(bus->dhd)) {
-			/* Due to irq mismatch WARNING in linux, currently keeping it disabled and
-			 * using dongle intmask to control INTR enable/disable
-			 */
 			if (bus->d2h_intr_control == PCIE_HOST_IRQ_CTRL) {
-				bus->host_irq_enable_count += dhdpcie_irq_disabled(bus);
-				dhdpcie_enable_irq_loop(bus);
+				bus->host_irq_enable_count++;
+				dhdpcie_enable_irq(bus);
 			} else {
 				/* Enable back interrupt using Intmask! */
 				dhdpcie_bus_intr_enable(bus);
@@ -15130,6 +15106,12 @@ dhdpcie_readshared(dhd_bus_t *bus)
 		PCIE_SHARED2_DEV_TXPOST_EXT_TAG_CAP_MESH)) ? TRUE : FALSE;
 #endif /* DHD_MESH */
 
+#ifdef DHD_ART
+	dhdp->dongle_art_enabled = (dhdp->dongle_txpost_ext_enabled &&
+		(sh->device_txpost_ext_tags_bitmask &
+		PCIE_SHARED2_DEV_TXPOST_EXT_TAG_CAP_ART)) ? TRUE : FALSE;
+	DHD_PRINT(("FW support ART: %s\n", dhdp->dongle_art_enabled ? "Y" : "N"));
+#endif /* DHD_ART */
 	bus->dhd->mdring_capable =
 		(sh->flags2 & PCIE_SHARED2_METADATA_RING) ? TRUE : FALSE;
 

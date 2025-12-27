@@ -94,7 +94,6 @@ typedef uint16 chanspec_subband_t;
 
 #define INVCHANNEL                      255u    /* error value for a bad channel */
 
-
 /* length of channel vector bitmap is the MAXCHANNEL we want to handle rounded up to a byte */
 #define CHANVEC_LEN ((MAXCHANNEL + (8 - 1)) / 8)
 
@@ -406,7 +405,6 @@ typedef struct {
 		(CHSPEC_IS80(chspec) ? LL_20_SB(wf_chspec_center_channel(chspec)) : \
 		(CHSPEC_IS40(chspec) ? LOWER_20_SB(wf_chspec_center_channel(chspec)) : \
 		wf_chspec_center_channel(chspec))))))
-
 
 /* get upper most 20MHz sideband of a given chspec
  * (works with 20, 40, 80, 160, 320)
@@ -776,7 +774,6 @@ uint8 wf_chspec_primary20_chan(chanspec_t chspec);
 /* alias for old function name */
 #define wf_chspec_ctlchan(c) wf_chspec_primary20_chan(c)
 
-
 /**
  * Return the primary 20MHz chanspec of a given chanspec
  */
@@ -943,7 +940,6 @@ extern chanspec_t wf_chspec_secondary160_chspec(chanspec_t chspec);
  */
 extern void wf_chspec_get_80p80_channels(chanspec_t chspec, uint8 *ch);
 
-
 /* wf_chanspec_iter_... iterator API is deprecated. Use wlc_clm_chanspec_iter_... API instead */
 
 struct wf_iter_range {
@@ -1015,7 +1011,6 @@ bool wf_chanspec_iter_next(wf_chanspec_iter_t *iter, chanspec_t *chspec);
  * @return the current chanspec_t
  */
 chanspec_t wf_chanspec_iter_current(wf_chanspec_iter_t *iter);
-
 
 /* Populates array with all 20MHz side bands of a given chanspec_t in the following order:
  *		primary20, ext20, two ext40s, four ext80s.

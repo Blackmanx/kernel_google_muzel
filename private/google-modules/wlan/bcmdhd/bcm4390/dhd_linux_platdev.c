@@ -589,7 +589,6 @@ static int wifi_ctrlfunc_register_drv(void)
 	}
 #endif /* !defined(CONFIG_DTS) */
 
-
 #ifdef CONFIG_DTS
 	wifi_plat_dev_probe_ret = platform_driver_register(&wifi_platform_dev_driver);
 #endif /* CONFIG_DTS */
@@ -825,7 +824,6 @@ static int dhd_wifi_platform_load_pcie(void)
 	return 0;
 }
 #endif /* BCMPCIE  */
-
 
 void dhd_wifi_platform_unregister_drv(void)
 {

@@ -1686,7 +1686,6 @@ exit:
 	return err;
 }
 
-
 #ifdef GSCAN_SUPPORT
 
 static int
@@ -1879,7 +1878,6 @@ dhd_wait_batch_results_complete(dhd_pub_t *dhd)
 	return err;
 }
 
-
 int
 dhd_pno_set_cfg_gscan(dhd_pub_t *dhd, dhd_pno_gscan_cmd_cfg_t type,
     void *buf, bool flush)
@@ -2039,7 +2037,6 @@ exit:
 	return err;
 
 }
-
 
 static bool
 validate_gscan_params(struct dhd_pno_gscan_params *gscan_params)
@@ -4353,7 +4350,6 @@ dhd_handle_hotlist_scan_evt(dhd_pub_t *dhd, const void *event_data,
 	struct timespec64 tm_spec;
 	uint16 fwstatus;
 	uint16 fwcount;
-
 
 	/* Static asserts in _dhd_pno_get_for_batch() above guarantee the v1 and v2
 	 * net_info and subnet_info structures are compatible in size and SSID offset,

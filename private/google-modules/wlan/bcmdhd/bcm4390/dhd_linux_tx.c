@@ -718,6 +718,7 @@ BCMFASTPATH(dhd_start_xmit)(struct sk_buff *skb, struct net_device *net)
 	if (ifidx == DHD_BAD_IF) {
 		DHD_ERROR(("%s: bad ifidx %d\n", __FUNCTION__, ifidx));
 		dhd_tx_stop_queues(net);
+
 		DHD_BUS_BUSY_CLEAR_IN_TX(&dhd->pub);
 		dhd_os_busbusy_wake(&dhd->pub);
 		DHD_GENERAL_UNLOCK(&dhd->pub, flags);
@@ -761,7 +762,6 @@ BCMFASTPATH(dhd_start_xmit)(struct sk_buff *skb, struct net_device *net)
 		}
 	}
 #endif /* HOST_SFH_LLC */
-
 
 	/* re-align socket buffer if "skb->data" is odd address */
 	if (((unsigned long)(skb->data)) & 0x1) {
@@ -957,7 +957,11 @@ BCMFASTPATH(dhd_start_xmit)(struct sk_buff *skb, struct net_device *net)
 		}
 	}
 #endif /* DHDTCPACK_SUPPRESS */
-
+#ifdef DHD_ART
+	if (IS_ART_IFACE(net->name)) {
+		dhd->pub.art_counters.tx_packets++;
+	}
+#endif /* DHD_ART */
 	/*
 	 * If Load Balance is enabled queue the packet
 	 * else send directly from here.
@@ -1086,8 +1090,18 @@ dhd_txcomplete(dhd_pub_t *dhdp, void *txp, bool success)
 #endif /* PROP_TXSTATUS */
 	if (success) {
 		dhd->pub.tot_txcpl++;
+#ifdef DHD_ART
+		if (dhd_is_art_skb(txp)) {
+			dhdp->art_counters.tot_txcpl++;
+		}
+#endif /* DHD_ART */
 	} else {
 		dhd->pub.tx_errors++;
+#ifdef DHD_ART
+		if (dhd_is_art_skb(txp)) {
+			dhdp->art_counters.tx_errors++;
+		}
+#endif /* DHD_ART */
 	}
 }
 

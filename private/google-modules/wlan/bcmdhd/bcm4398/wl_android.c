@@ -1,7 +1,7 @@
 /*
  * Linux cfg80211 driver - Android related functions
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -491,7 +491,6 @@ typedef union {
 	wl_roam_prof_band_v4_t v4;
 } wl_roamprof_band_t;
 
-
 #ifdef WLWFDS
 #define CMD_ADD_WFDS_HASH	"ADD_WFDS_HASH"
 #define CMD_DEL_WFDS_HASH	"DEL_WFDS_HASH"
@@ -885,6 +884,8 @@ static int priv_cmd_errors = 0;
 #endif /* DHD_SEND_HANG_PRIVCMD_ERRORS */
 
 
+#define CMD_GET_RSSI_ROAM_THRESHOLD "GETRSSIROAMTHRESHOLD"
+
 /**
  * Extern function declarations (TODO: move them to dhd_linux.h)
  */
@@ -1205,7 +1206,29 @@ static char* wl_android_get_band_str(u16 band)
 	}
 }
 
-#ifdef WBTEXT
+static int wl_android_bandstr_to_band(char *band, u8 *fw_band)
+{
+	int err = BCME_OK;
+
+	if (strlen(band) != 2) {
+		return WLC_BAND_INVALID;
+	}
+
+	if (!strcasecmp(band, "2g")) {
+		*fw_band = WLC_BAND_2G;
+	} else if (!strcasecmp(band, "5g")) {
+		*fw_band = WLC_BAND_5G;
+#ifdef WL_6G_BAND
+	} else if (!strcasecmp(band, "6g")) {
+		*fw_band = WLC_BAND_6G;
+#endif /* WL_6G_BAND */
+	} else {
+		err = WLC_BAND_INVALID;
+	}
+
+	return err;
+}
+
 static int wl_android_bandstr_to_fwband(char *band, u8 *fw_band)
 {
 	int err = BCME_OK;
@@ -1226,7 +1249,6 @@ static int wl_android_bandstr_to_fwband(char *band, u8 *fw_band)
 
 	return err;
 }
-#endif /* WBTEXT */
 
 #ifdef WLWFDS
 static int wl_android_set_wfds_hash(
@@ -1546,6 +1568,13 @@ int wl_android_get_assoclist(struct net_device *dev, char *command, int total_le
 	if (error)
 		return -1;
 
+	if (assoc_maclist->count > htod32(MAX_NUM_OF_ASSOCLIST)) {
+		DHD_ERROR(("wl_android_get_assoclist: invalid assoc count(%d)\n",
+			assoc_maclist->count));
+		bytes_written = -1;
+		return bytes_written;
+	}
+
 	assoc_maclist->count = dtoh32(assoc_maclist->count);
 	bytes_written = snprintf(command, total_len, "%s listcount: %d Stations:",
 		CMD_ASSOC_CLIENTS, assoc_maclist->count);
@@ -1837,8 +1866,6 @@ static bool wl_android_check_wbtext_support(struct net_device *dev)
 }
 #endif /* WES_SUPPORT && WBTEXT */
 
-#ifdef CUSTOMER_HW4_PRIVATE_CMD
-#ifdef ROAM_API
 static bool
 wl_android_check_wbtext_policy(struct net_device *dev)
 {
@@ -1850,6 +1877,93 @@ wl_android_check_wbtext_policy(struct net_device *dev)
 	return FALSE;
 }
 
+static int
+wl_android_get_rssi_roam_threshold(struct net_device *dev, char *data, char *command, int total_len)
+{
+	int bytes_written, error;
+	int roam_threshold[2] = {0, 0};
+	int i;
+	wl_roamprof_band_t rp;
+	uint8 roam_prof_ver = 0, roam_prof_size = 0;
+	char band_str[BUFSZN];
+	uint8 fw_band = 0;
+
+	sscanf(data, "%"BCM_STR(BUFSZ)"s *", band_str);
+	if (WLC_BAND_INVALID == wl_android_bandstr_to_band(band_str, &fw_band)) {
+		WL_ERR(("Unsupported band : %d, Expected cmd format: "
+			"GETRSSIROAMTHRESHOLD <2g/5g/6g>\n", fw_band));
+		return BCME_ERROR;
+	}
+
+	if (wl_android_check_wbtext_policy(dev)) {
+		memset_s(&rp, sizeof(rp), 0, sizeof(rp));
+		error = wlc_wbtext_get_roam_prof(dev, &rp, fw_band, &roam_prof_ver,
+			&roam_prof_size);
+		if (error) {
+			WL_ERR(("Getting roam_profile failed with err=%d \n", error));
+			return -EINVAL;
+		}
+
+		switch (roam_prof_ver) {
+			case WL_ROAM_PROF_VER_1:
+			{
+				for (i = 0; i < WL_MAX_ROAM_PROF_BRACKETS; i++) {
+					if (rp.v2.roam_prof[i].channel_usage == 0) {
+						roam_threshold[0] = rp.v2.roam_prof[i].roam_trigger;
+						break;
+					}
+				}
+			}
+			break;
+			case WL_ROAM_PROF_VER_2:
+			{
+				for (i = 0; i < WL_MAX_ROAM_PROF_BRACKETS; i++) {
+					if (rp.v3.roam_prof[i].channel_usage == 0) {
+						roam_threshold[0] = rp.v3.roam_prof[i].roam_trigger;
+						break;
+					}
+				}
+			}
+			break;
+			case WL_ROAM_PROF_VER_3:
+			{
+				for (i = 0; i < WL_MAX_ROAM_PROF_BRACKETS; i++) {
+					if (rp.v4.roam_prof[i].channel_usage == 0) {
+						roam_threshold[0] = rp.v4.roam_prof[i].roam_trigger;
+						break;
+					}
+				}
+			}
+			break;
+			case WL_ROAM_PROF_VER_4:
+			{
+				for (i = 0; i < WL_MAX_ROAM_PROF_BRACKETS; i++) {
+					if (rp.v4.roam_prof[i].channel_usage == 0) {
+						roam_threshold[0] = rp.v4.roam_prof[i].roam_trigger;
+						break;
+					}
+				}
+			}
+			break;
+
+			default:
+				WL_ERR(("bad version = %d \n", roam_prof_ver));
+				return BCME_VERSION;
+		}
+		if (roam_threshold[0] == 0) {
+			WL_ERR(("rssi roam threshold was not set properly\n"));
+			return BCME_ERROR;
+		}
+	}
+
+	bytes_written = snprintf(command, total_len, "fw_band:%s roam_threshold:%d",
+			wl_android_get_band_str(fw_band), roam_threshold[0]);
+
+	return bytes_written;
+}
+
+#ifdef CUSTOMER_HW4_PRIVATE_CMD
+#ifdef ROAM_API
 static int
 wl_android_set_roam_trigger(struct net_device *dev, char* command)
 {
@@ -2494,7 +2608,6 @@ wl_android_set_roam_scan_freqs(struct net_device *dev, char *command)
 
 	return error;
 }
-
 
 int
 wl_android_add_roam_scan_freqs(struct net_device *dev, char *command, uint cmdlen)
@@ -3346,7 +3459,6 @@ wl_android_legacy_check_command(struct net_device *dev, char *command)
 {
 	int cnt = 0;
 
-
 	while (strlen(legacy_cmdlist[cnt]) > 0) {
 		if (strnicmp(command, legacy_cmdlist[cnt], strlen(legacy_cmdlist[cnt])) == 0) {
 			char cmd[WL_PRIV_CMD_LEN + 1];
@@ -4190,7 +4302,6 @@ wl_android_get_fcc_pwr_limit_2g(struct net_device *dev, char *command, int total
 	return bytes_written;
 }
 #endif /* FCC_PWR_LIMIT_2G */
-
 
 /* Additional format of sta_info
  * tx_pkts, tx_failures, tx_rate(kbps), rssi(main), rssi(aux), tx_pkts_retried,
@@ -5056,6 +5167,11 @@ wl_android_set_ap_mac_list(struct net_device *dev, int macmode, struct maclist *
 			DHD_ERROR(("wl_android_set_ap_mac_list: WLC_GET_ASSOCLIST error=%d\n",
 				ret));
 			return ret;
+		}
+		if (assoc_maclist->count > MAX_NUM_OF_ASSOCLIST) {
+			DHD_ERROR(("wl_android_set_ap_mac_list: invalid assoc count=%d\n",
+				assoc_maclist->count));
+			return BCME_ERROR;
 		}
 		/* do we have any STA associated?  */
 		if (assoc_maclist->count) {
@@ -7165,6 +7281,11 @@ wl_android_get_band_chanspecs(struct net_device *ndev, void *buf, s32 buflen,
 	}
 
 	list = (wl_uint32_list_t *)buf;
+	if (dtoh32(list->count) > WL_NUMCHANSPECS) {
+		WL_ERR(("exceeded max chanspecs (%u>%u)\n", dtoh32(list->count), WL_NUMCHANSPECS));
+		return BCME_ERROR;
+	}
+
 	/* Skip DFS and inavlid P2P channel. */
 	for (i = 0, j = 0; i < dtoh32(list->count); i++) {
 		if (!CHSPEC_IS20(list->element[i])) {
@@ -7879,7 +8000,6 @@ wl_android_get_roam_vsie_enab(struct net_device *dev, char *cmd, u32 cmd_len)
 
 	return bytes_written;
 }
-
 
 static int
 wl_android_set_bcn_rpt_vsie_enab(struct net_device *dev, const char *cmd, u32 cmd_len)
@@ -9196,7 +9316,6 @@ static int wl_android_get_ibss_peer_info(struct net_device *dev, char *command,
 
 		peer_info = (bss_peer_info_t *) ((char *)buf + BSS_PEER_LIST_INFO_FIXED_LEN);
 
-
 		for (i = 0; i < peer_list_info.count; i++) {
 
 			WL_DBG(("index:%d rssi:%d, tx:%u, rx:%u\n", i, peer_info->rssi,
@@ -9303,7 +9422,6 @@ int wl_android_set_ibss_routetable(struct net_device *dev, char *command)
 			goto exit;
 		}
 
-
 		str = bcmstrtok(&pcmd, " ", NULL);
 		if (!str || !bcm_ether_atoe(str, &ea)) {
 			WL_ERR(("Invalid ethernet string %s\n", str));
@@ -9334,7 +9452,6 @@ exit:
 	return err;
 
 }
-
 
 int
 wl_android_set_ibss_ampdu(struct net_device *dev, char *command, int total_len)
@@ -11412,7 +11529,6 @@ _wl_android_bcnrecv_start(struct bcm_cfg80211 *cfg, struct net_device *ndev, boo
 		goto exit;
 	}
 
-
 	/* Triggering an sendup_bcn iovar */
 	err = wldev_iovar_setint_no_wl(pdev, "sendup_bcn", 1);
 	if (unlikely(err)) {
@@ -11690,7 +11806,6 @@ wl_android_get_latency_crt_data(struct net_device *dev, char *command, int total
 	return bytes_written;
 }
 #endif	/* SUPPORT_LATENCY_CRITICAL_DATA */
-
 
 #ifdef WL_LATENCY_CONFIG
 static int
@@ -12146,7 +12261,6 @@ wl_android_get_nan_status(struct net_device *dev, char *command, int total_len)
 	return bytes_written;
 }
 #endif /* WL_NAN */
-
 
 #ifdef SUPPORT_NAN_RANGING_TEST_BW
 enum {
@@ -13438,7 +13552,6 @@ wl_android_get_bss_sta_info(struct net_device *dev, char *command,
 
 		sta_info = (bss_sta_info_t *) ((char *)buf + BSS_STA_LIST_INFO_FIXED_LEN);
 
-
 		for (i = 0; i < sta_list_info.count; i++) {
 			WL_DBG(("index:%d rssi:%d, tx:%u, rx:%u\n", i, sta_info->rssi,
 				sta_info->tx_rate, sta_info->rx_rate));
@@ -14554,7 +14667,12 @@ wl_handle_private_cmd(struct net_device *net, char *command, u32 cmd_len)
 			priv_cmd.total_len, FALSE);
 	}
 #endif /* WL_BSS_STA_INFO */
-	else {
+	else if (strnicmp(command, CMD_GET_RSSI_ROAM_THRESHOLD,
+		strlen(CMD_GET_RSSI_ROAM_THRESHOLD)) == 0) {
+		char *data = (command + strlen(CMD_GET_RSSI_ROAM_THRESHOLD) + 1);
+		bytes_written = wl_android_get_rssi_roam_threshold(net, data,
+				command, priv_cmd.total_len);
+	} else {
 		DHD_ERROR(("Unknown PRIVATE command %s - ignored\n", command));
 #ifdef CUSTOMER_HW4_DEBUG
 		bytes_written = BCME_UNSUPPORTED;
@@ -14748,7 +14866,6 @@ wl_genl_send_msg(
 		goto out;
 	}
 
-
 	if (attr_type == BCM_GENL_ATTR_STRING) {
 		/* Add a BCM_GENL_MSG attribute. Since it is specified as a string.
 		 * make sure it is null terminated
@@ -14875,7 +14992,6 @@ wl_genl_handle_msg(
 	return 0;
 }
 #endif /* WL_GENL */
-
 
 int wl_fatal_error(void * wl, int rc)
 {
@@ -15704,10 +15820,11 @@ int wl_cfg80211_wbtext_table_config(struct net_device *ndev, char *data,
 	size_t slen = strlen(data);
 	char *start_addr = NULL;
 	u8 ioctl_buf[WLC_IOCTL_SMLEN];
+	u32 alloc_len;
 
 	data[slen] = '\0';
-	btcfg = (wnm_bss_select_factor_cfg_t *)MALLOCZ(cfg->osh,
-		(sizeof(*btcfg) + sizeof(*btcfg) * WL_FACTOR_TABLE_MAX_LIMIT));
+	alloc_len = sizeof(*btcfg) + sizeof(*btcfg) * WL_FACTOR_TABLE_MAX_LIMIT;
+	btcfg = (wnm_bss_select_factor_cfg_t *)MALLOCZ(cfg->osh, alloc_len);
 	if (unlikely(!btcfg)) {
 		WL_ERR(("%s: failed to allocate memory\n", __func__));
 		err = -ENOMEM;
@@ -15745,8 +15862,16 @@ int wl_cfg80211_wbtext_table_config(struct net_device *ndev, char *data,
 			WL_ERR(("Getting wnm_bss_select_table failed with err=%d \n", err));
 			goto exit;
 		}
-		memcpy(btcfg, ioctl_buf, sizeof(*btcfg));
-		memcpy(btcfg, ioctl_buf, (btcfg->count+1) * sizeof(*btcfg));
+		err = memcpy_s(btcfg, sizeof(*btcfg), ioctl_buf, sizeof(*btcfg));
+		if (err) {
+			WL_ERR(("Failed to memcpy first btcfg err=%d\n", err));
+			goto exit;
+		}
+		err = memcpy_s(btcfg, alloc_len, ioctl_buf, (btcfg->count+1) * sizeof(*btcfg));
+		if (err) {
+			WL_ERR(("Failed to memcpy btcfg array err=%d\n", err));
+			goto exit;
+		}
 
 		bytes_written += snprintf(command + bytes_written, total_len - bytes_written,
 					"No of entries in table: %d\n", btcfg->count);
@@ -15795,8 +15920,7 @@ int wl_cfg80211_wbtext_table_config(struct net_device *ndev, char *data,
 	}
 exit:
 	if (btcfg) {
-		MFREE(cfg->osh, btcfg,
-			(sizeof(*btcfg) + sizeof(*btcfg) * WL_FACTOR_TABLE_MAX_LIMIT));
+		MFREE(cfg->osh, btcfg, alloc_len);
 	}
 	return err;
 }

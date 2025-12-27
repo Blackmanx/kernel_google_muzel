@@ -137,6 +137,7 @@ dhd_dbg_ring_set_buf(dhd_pub_t *dhdp, dhd_dbg_ring_t *ring, void *buf)
 
 	return BCME_OK;
 }
+
 void
 dhd_dbg_ring_deinit(dhd_pub_t *dhdp, dhd_dbg_ring_t *ring)
 {

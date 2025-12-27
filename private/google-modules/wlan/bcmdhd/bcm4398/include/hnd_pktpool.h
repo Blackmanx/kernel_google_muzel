@@ -1,7 +1,7 @@
 /*
  * HND generic packet pool operation primitives
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -89,7 +89,6 @@ typedef struct {
 	pktpool_cb_extn_t cb;
 	void *arg;
 } pktpool_cbextn_info_t;
-
 
 #ifdef BCMDBG_POOL
 /* pkt pool debug states */
@@ -222,7 +221,6 @@ bool pktpool_validate_freelist(pktpool_t *pktp);
 #define pktpool_max_pkt_bytes(pp)    (POOLPTR(pp)->max_pkt_bytes)
 #define pktpool_max_pkts(pp)  (POOLPTR(pp)->maxlen)
 
-
 /*
  * ----------------------------------------------------------------------------
  * A pool ID is assigned with a pkt pool during pool initialization. This is
@@ -324,7 +322,6 @@ extern uint32 hnd_pktpool_get_total_poolheap_count(void);
 #else /* BCMPKTPOOL */
 #define SHARED_POOL		((struct pktpool *)NULL)
 #endif /* BCMPKTPOOL */
-
 
 #ifdef __cplusplus
 	}

@@ -44,7 +44,6 @@
 #include <wl_bam.h>
 #endif  /* WL_BAM */
 
-
 #ifdef SUPPORT_AP_RADIO_PWRSAVE
 #define RADIO_PWRSAVE_PPS               10
 #define RADIO_PWRSAVE_QUIET_TIME        10
@@ -84,7 +83,6 @@ extern bool wl_cfg80211_check_vif_in_use(struct net_device *ndev);
 extern int wl_cfg80211_set_mgmt_vndr_ies(struct bcm_cfg80211 *cfg,
 	bcm_struct_cfgdev *cfgdev, s32 bssidx, s32 pktflag,
 	const u8 *vndr_ie, u32 vndr_ie_len);
-
 
 #ifdef WL_SUPPORT_ACS
 #define ACS_MSRMNT_DELAY 1000 /* dump_obss delay in ms */
@@ -238,7 +236,6 @@ extern s32 wl_cfg80211_set_ap_role(struct bcm_cfg80211 *cfg, struct net_device *
 extern int wl_cfg80211_channel_switch(struct wiphy *wiphy, struct net_device *dev,
 	struct cfg80211_csa_settings *params);
 #endif /* LINUX_VERSION_CODE >= KERNEL_VERSION(3, 12, 0) */
-
 
 extern bcm_struct_cfgdev *
 wl_cfg80211_add_virtual_iface(struct wiphy *wiphy,

@@ -1,7 +1,7 @@
 /*
  * HND Run Time Environment debug info area
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -37,7 +37,6 @@
 #include <hnd_trap.h>
 #include <hnd_cons.h>
 #endif
-
 
 /* We use explicit sizes here since this gets included from different
  * systems.  The sizes must be the size of the creating system
@@ -91,7 +90,6 @@ typedef struct hnd_debug_reloc {
 
 /* Total MMU relocation table size for v2 */
 #define HND_DEBUG_RELOC_PTR_SIZE	(RELOC_NUM_ENTRIES * sizeof(hnd_debug_reloc_entry_t))
-
 
 #define HND_DEBUG_VERSION_1	1u	/* Legacy, version 1 */
 #define HND_DEBUG_VERSION_2	2u	/* Version 2 contains the MMU information

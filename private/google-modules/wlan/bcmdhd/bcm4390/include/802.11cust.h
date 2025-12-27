@@ -31,10 +31,8 @@
 /* This marks the start of a packed structure section. */
 #include <packed_section_start.h>
 
-
 /* Action frame type for vendor specific action frames */
 #define	VS_AF_TYPE	221
-
 
 #ifdef IBSS_RMC
 /* customer's OUI */

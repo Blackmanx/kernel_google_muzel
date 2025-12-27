@@ -393,7 +393,6 @@ wl_cfgp2p_find_ndev(struct bcm_cfg80211 *cfg, s32 bssidx);
 extern s32
 wl_cfgp2p_find_type(struct bcm_cfg80211 *cfg, s32 bssidx, s32 *type);
 
-
 extern s32
 wl_cfgp2p_listen_complete(struct bcm_cfg80211 *cfg, bcm_struct_cfgdev *cfgdev,
 	const wl_event_msg_t *e, void *data);

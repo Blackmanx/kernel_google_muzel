@@ -21,7 +21,6 @@
  * <<Broadcom-WL-IPTag/Dual:>>
  */
 
-
 #ifndef MINI_OPT_H
 #define MINI_OPT_H
 
@@ -30,7 +29,6 @@ extern "C" {
 #endif
 
 /* ---- Include Files ---------------------------------------------------- */
-
 
 /* ---- Constants and Types ---------------------------------------------- */
 
@@ -65,10 +63,8 @@ typedef struct miniopt {
 void miniopt_init(miniopt_t *t, const char* name, const char* flags, bool longflags);
 int miniopt(miniopt_t *t, char **argv);
 
-
 /* ---- Variable Externs ------------------------------------------------- */
 /* ---- Function Prototypes ---------------------------------------------- */
-
 
 #ifdef __cplusplus
 	}

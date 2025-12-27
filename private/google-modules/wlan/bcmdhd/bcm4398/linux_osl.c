@@ -1,7 +1,7 @@
 /*
  * Linux OS Independent Layer
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -1642,7 +1642,6 @@ osl_readb(osl_t *osh, volatile uint8 *r)
 	return (uint8)((rreg)(ctx, (volatile void*)r, sizeof(uint8)));
 }
 
-
 uint16
 osl_readw(osl_t *osh, volatile uint16 *r)
 {
@@ -1669,7 +1668,6 @@ osl_writeb(osl_t *osh, volatile uint8 *r, uint8 v)
 
 	((wreg)(ctx, (volatile void*)r, v, sizeof(uint8)));
 }
-
 
 void
 osl_writew(osl_t *osh, volatile uint16 *r, uint16 v)
@@ -2280,7 +2278,6 @@ osl_dma_lock_init(osl_t *osh)
 	osh->dma_lock_bh = FALSE;
 }
 #endif /* USE_DMA_LOCK */
-
 
 #if defined(NIC_REG_ACCESS_LEGACY) || defined(NIC_REG_ACCESS_LEGACY_DBG)
 osl_pcie_window_t osl_reg_access_pcie_window;

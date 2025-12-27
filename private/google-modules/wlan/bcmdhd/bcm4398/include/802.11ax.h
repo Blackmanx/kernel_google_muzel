@@ -2,7 +2,7 @@
  * Basic types and constants relating to 802.11ax/HE STA
  * This is a portion of 802.11ax definition. The rest are in 802.11.h.
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -42,7 +42,6 @@
 #define HTC_HE_CTLID_MASK	0x0Fu	/* HTC HE CTLID mask  */
 #define HTC_HE_CTLID(htc)	(((htc) >> HTC_HE_CTLID_SHIFT) & HTC_HE_CTLID_MASK)
 
-
 #define HTC_HE_CTLID_TRS	0x0u	/* Triggered response scheduling */
 #define HTC_HE_CTLID_OMI	0x1u	/* Operating mode */
 #define HTC_HE_CTLID_HLA	0x2u	/* HE link adaptation */
@@ -50,7 +49,6 @@
 #define HTC_HE_CTLID_UPH	0x4u	/* UL power headroom */
 #define HTC_HE_CTLID_BQR	0x5u	/* Bandwidth query report */
 #define HTC_HE_CTLID_CAS	0x6u	/* Command and status */
-
 
 /* HTC-Control field definitions: (Table 9.9a HTC Control field) */
 #define HTC_HE_CTL_SIZE		30u	/* HTC Control field size */
@@ -94,13 +92,11 @@
 #define OMI_CHW_80MHZ			2
 #define OMI_CHW_160MHZ_80P80MHZ		3
 
-
 /* Table 9-18d ACI Bitmap subfield encoding */
 #define HE_BSR_ACI_MAP_BE		0u
 #define HE_BSR_ACI_MAP_BK		1u
 #define HE_BSR_ACI_MAP_VI		2u
 #define HE_BSR_ACI_MAP_VO		3u
-
 
 /* GI And LTF Type subfield encoding (Table 9-31d) */
 #define HE_LTF_1_GI_1_6us	(0u)
@@ -451,7 +447,6 @@ typedef uint8 he_phy_cap_t[HE_PHY_CAP_INFO_SIZE];
 */
 #define WLC_SSID_VAL_IN_SHORT_SSID	128u
 
-
 /* Defines for The Max HE MCS For n SS subfield (where n = 1, ..., 8) */
 #define HE_MCS_MAP_NSS_MAX	8u	/* Max number of streams possible */
 #define HE_MCS_NSS_SET_MASK	0xffffu /* Field is to be 16 bits long */
@@ -651,7 +646,6 @@ typedef BWL_PRE_PACKED_STRUCT struct he_op_ie {
 #define HE_6G_OP_BW_80              2u
 #define HE_6G_OP_BW_160_80P80       3u
 
-
 /* Regulatory Info subfield in the United States */
 #define HE_6G_OP_REG_INFO_INDOOR_AP_US  0u
 #define HE_6G_OP_REG_INFO_SP_AP_US      1u
@@ -675,7 +669,6 @@ typedef BWL_PRE_PACKED_STRUCT struct he_op_ie {
 #define HE_6G_CTL_DUP_BCN_SHIFT     0x02u
 #define HE_6G_OP_CTL_DUP_BCN(ctl) \
 	((ctl & HE_6G_CTL_DUP_BCN_MASK) >> HE_6G_CTL_DUP_BCN_SHIFT)
-
 
 /* HE 6G Operation info */
 typedef BWL_PRE_PACKED_STRUCT struct he_6g_op_info {
@@ -1051,7 +1044,6 @@ typedef BWL_PRE_PACKED_STRUCT struct he_bsscolor_change_ie {
 
 /* For HE MU SIG A : RX PLCP4 bit fields [8bit] */
 #define HE_MU_SIGA2_STBC_RX_MASK	0x40u
-
 
 /* This marks the end of a packed structure section. */
 #include <packed_section_end.h>

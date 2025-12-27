@@ -31,7 +31,6 @@
 /* This marks the start of a packed structure section. */
 #include <packed_section_start.h>
 
-
 /* IPV4 and IPV6 common */
 #define IP_VER_OFFSET		0x0	/* offset to version field */
 #define IP_VER_MASK		0xf0	/* version mask */

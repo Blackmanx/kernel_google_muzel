@@ -1,6 +1,6 @@
 # bcmdhd
 #
-# Copyright (C) 2024, Broadcom.
+# Copyright (C) 2025, Broadcom.
 #
 #      Unless you and Broadcom execute a separate written software license
 # agreement governing use of this software, this software is licensed to you
@@ -96,6 +96,12 @@ DHDCFLAGS += -DCONFIG_DHD_SET_RANDOM_MAC_VAL=$(CONFIG_DHD_SET_RANDOM_MAC_VAL)
 DHDCFLAGS += -DCONFIG_BCMDHD_PREALLOC_MEMDUMP=$(CONFIG_BCMDHD_PREALLOC_MEMDUMP)
 DHDCFLAGS += -DCONFIG_BCMDHD_OOB_HOST_WAKE=$(CONFIG_BCMDHD_OOB_HOST_WAKE)
 DHDCFLAGS += -DCONFIG_BCMDHD_GET_OOB_STATE=$(CONFIG_BCMDHD_GET_OOB_STATE)
+endif
+
+ifneq ($(CONFIG_DEBUG_KMEMLEAK),)
+  DHDCFLAGS += \
+    -DDHD_DUMP_RXPKTIDMAP \
+    -DDHD_PRINT_RXPKTS_TRACE
 endif
 
 DHDCFLAGS += -DBCMUTILS_ERR_CODES -DUSE_NEW_RSPEC_DEFS
@@ -318,8 +324,7 @@ DHDCFLAGS += -DWL_CH_SWITCH_BKPORT
 # Enable pktid logging
 DHDCFLAGS += -DDHD_MAP_PKTID_LOGGING
 # Skip coredump for certain health check traps
-# temporary enable it for the check
-#DHDCFLAGS += -DDHD_SKIP_COREDUMP_ON_HC
+DHDCFLAGS += -DDHD_SKIP_COREDUMP_ON_HC
 # CROSS AKM related back port changes
 DHDCFLAGS += -DWL_CROSS_AKM_BKPORT
 else

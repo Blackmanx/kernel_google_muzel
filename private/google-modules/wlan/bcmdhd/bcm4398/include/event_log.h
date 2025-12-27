@@ -1,7 +1,7 @@
 /*
  * EVENT_LOG system definitions
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -160,7 +160,6 @@ typedef struct event_log_block {
 /* Relative offset of extra_hdr_info field frpm pktlen field in log block */
 #define EVENT_LOG_BUF_EXTRA_HDR_INFO_REL_PKTLEN_OFFSET		\
 	(OFFSETOF(event_log_block_t, extra_hdr_info) -	OFFSETOF(event_log_block_t, pktlen))
-
 
 #define EVENT_LOG_BLOCK_HDRLEN		(sizeof(((event_log_block_t *) 0)->pktlen) \
 					+ sizeof(((event_log_block_t *) 0)->count) \
@@ -457,7 +456,6 @@ extern bool prsv_periodic_enab;
 #define _EVENT_LOGF(tag, fmt_num, fmt, ...) event_logn(15, tag, fmt_num, __VA_ARGS__)
 #endif /* EVENT_LOG_FIXED_ARGS_ONLY */
 
-
 /* Casting  low level macros */
 #define _EVENT_LOG_CAST0(tag, fmt_num, fmt)		\
 	event_log0(tag, fmt_num)
@@ -541,7 +539,6 @@ extern bool prsv_periodic_enab;
 			       7, 6, 5, 4, 3, 2, 1, 0)			\
 	(tag, (int) &fmtnum, __VA_ARGS__)
 
-
 #define EVENT_LOG_FAST(tag, ...)					\
 	do {								\
 		if (event_log_tag_sets != NULL) {			\
@@ -572,7 +569,6 @@ extern bool prsv_periodic_enab;
 	do {								\
 		_EVENT_LOG(_EVENT_LOG_CAST, tag, __VA_ARGS__);		\
 	} while (0)
-
 
 #define EVENT_LOG(tag, ...) EVENT_LOG_COMPACT(tag, __VA_ARGS__)
 
@@ -676,7 +672,6 @@ extern uint8 *event_log_next_logtrace(int set_num);
 extern uint32 event_log_logtrace_max_buf_count(int set_num);
 extern int event_log_set_type(int set_num, uint8 *type, int is_get);
 extern int event_log_flush_set(wl_el_set_flush_prsrv_t *flush, int is_set);
-
 
 extern void event_log0(int tag, int fmtNum);
 extern void event_log1(int tag, int fmtNum, uint32 t1);

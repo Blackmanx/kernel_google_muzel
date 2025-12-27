@@ -188,7 +188,6 @@
 #define SROM4_SWITCH_MASK	0xff00
 #define SROM4_SWITCH_SHIFT	8
 
-
 /* Per-path fields */
 #define	MAX_PATH_SROM		4
 #define	SROM4_PATH0		64
@@ -228,7 +227,6 @@
 #define	SROM4_BWDUPPO		200
 
 #define	SROM4_CRCREV		219
-
 
 /* SROM Rev 8: Make space for a 48word hardware header for PCIe rev >= 6.
  * This is acombined srom for both MIMO and SISO boards, usable in
@@ -297,7 +295,6 @@
 
 /* Measured power 1 & 2, 0-13 bits at offset 95, MSB 2 bits are unused for now. */
 #define SROM8_MPWR_1_AND_2	95
-
 
 /* Per-path offsets & fields */
 #define	SROM8_PATH0		96
@@ -410,7 +407,6 @@
 
 #define	SROM10_WORDS		230
 #define	SROM10_SIGNATURE	SROM4_SIGNATURE
-
 
 /* SROM REV 11 */
 #define SROM11_BREV			65
@@ -635,7 +631,6 @@
 #define	SROM11_WORDS				234
 #define	SROM11_SIGNATURE		0x0634
 
-
 /* SROM REV 12 */
 #define SROM12_SIGN                     64
 #define SROM12_WORDS			512
@@ -815,7 +810,6 @@
 #define SROM13_WORDS                    590
 #define SROM13_SIGNATURE                0x4d55
 #define SROM13_CRCREV                   589
-
 
 /* Per-path fields and offset */
 #define MAX_PATH_SROM_13                        4

@@ -30,7 +30,6 @@
 extern "C" {
 #endif /* __cplusplus */
 
-
 #define WL_RATESET_SZ_DSSS		4
 #define WL_RATESET_SZ_OFDM		8
 #define WL_RATESET_SZ_HT_MCS		8	/* 8 HT rates (mcs 0-7) */
@@ -90,7 +89,6 @@ typedef enum wl_tx_mode {
 	WL_NUM_TX_MODES
 } wl_tx_mode_t;
 
-
 /* Number of transmit chains */
 typedef enum wl_tx_chains {
 	WL_TX_CHAINS_1 = 1,
@@ -98,7 +96,6 @@ typedef enum wl_tx_chains {
 	WL_TX_CHAINS_3,
 	WL_TX_CHAINS_4
 } wl_tx_chains_t;
-
 
 /* Number of transmit streams */
 typedef enum wl_tx_nss {
@@ -218,7 +215,6 @@ typedef enum clm_rates {
 	WL_RATE_1X1_EHT13SS1          = 37,
 	WL_RATE_1X1_EHT14SS1          = 38,
 	WL_RATE_1X1_EHT15SS1          = 39,
-
 
 	/************
 	* 2 chains *
@@ -493,7 +489,6 @@ typedef enum clm_rates {
 	WL_RATE_2X2_TXBF_EHT12SS2     = 178,
 	WL_RATE_2X2_TXBF_EHT13SS2     = 179,
 
-
 	/************
 	* 3 chains *
 	************
@@ -698,7 +693,6 @@ typedef enum clm_rates {
 	WL_RATE_3X3_EHT12SS3          = 282,
 	WL_RATE_3X3_EHT13SS3          = 283,
 
-
 	/****************************
 	 * TX Beamforming, 3 chains *
 	 ****************************
@@ -873,7 +867,6 @@ typedef enum clm_rates {
 	WL_RATE_3X3_TXBF_EHT11SS3     = 369,
 	WL_RATE_3X3_TXBF_EHT12SS3     = 370,
 	WL_RATE_3X3_TXBF_EHT13SS3     = 371,
-
 
 	/************
 	* 4 chains *
@@ -1079,7 +1072,6 @@ typedef enum clm_rates {
 	WL_RATE_3X4_EHT12SS3          = 474,
 	WL_RATE_3X4_EHT13SS3          = 475,
 
-
 	/* 4 Streams */
 	WL_RATE_4X4_SDM_MCS24         = 476,
 	WL_RATE_4X4_SDM_MCS25         = 477,
@@ -1132,7 +1124,6 @@ typedef enum clm_rates {
 	WL_RATE_4X4_EHT11SS4          = 499,
 	WL_RATE_4X4_EHT12SS4          = 500,
 	WL_RATE_4X4_EHT13SS4          = 501,
-
 
 	/****************************
 	 * TX Beamforming, 4 chains *

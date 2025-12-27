@@ -50,7 +50,6 @@
 
 #endif /* ENABLE_CORECAPTURE */
 
-
 #ifdef BCMDBG
 #define	SI_MSG(args)	printf args
 #else
@@ -230,7 +229,6 @@ typedef struct si_info {
 	bool    rfldo3p3_war;		/**< singing cap war enable from nvram */
 	void    *nci_info;
 } si_info_t;
-
 
 #define	SI_INFO(sih)	((si_info_t *)(uintptr)sih)
 

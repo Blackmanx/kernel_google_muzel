@@ -2,7 +2,7 @@
  * Process CIS information from OTP for customer platform
  * (Handle the MAC address and module information)
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -45,7 +45,6 @@
 #include <pcie_core.h>
 #include <dhd_pcie.h>
 #endif /* DHD_USE_CISINFO_FROM_OTP */
-
 
 #ifdef DHD_USE_CISINFO_FROM_OTP
 typedef struct cis_tuple_addrs {
@@ -669,7 +668,6 @@ naming_info_t bcm4389_naming_table[] = {
 	{ {"usi_es21"}, {"_ES21"}, {""} },
 	{ {"usi_es31"}, {"_ES31"}, {""} },
 };
-
 
 /* select the NVRAM/FW tag naming table */
 naming_info_t *

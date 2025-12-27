@@ -5535,6 +5535,114 @@ wl_prepare_joinpref_tuples(uint8 **pref_buf, u32 akm, u32 pairwise_cipher, u32 m
 
 }
 
+static u8
+wl_find_multiakm_combo_tuples(u32 multi_akm_auth)
+{
+	u8 num_tuples = 0;
+
+	if (multi_akm_auth & WPA3_AUTH_SAE_PSK) {
+		/* WPA3 SAE */
+		num_tuples++;
+	}
+	if (multi_akm_auth & WPA2_AUTH_PSK) {
+		/* WPA2 PSK */
+		num_tuples++;
+	}
+	if (multi_akm_auth & WPA2_AUTH_PSK_SHA256) {
+		/* WPA2 PSK SHA256 */
+		num_tuples++;
+	}
+
+	return num_tuples;
+}
+
+#define WPA_AKM_SUITE 0x0050F202
+static void
+wl_update_join_pref_tuple(u32 multi_akm, uint8 **pref,
+	struct cfg80211_connect_params *sme, wlcfg_assoc_info_t *assoc_info)
+{
+	u32 sae_default_cipher_pairwise = WLAN_CIPHER_SUITE_CCMP;
+	u32 sae_default_cipher_group = WLAN_CIPHER_SUITE_CCMP;
+	bool matched = false;
+	int j;
+
+	WL_ERR(("n_ciphers_pairwise %d\n", sme->crypto.n_ciphers_pairwise));
+	/* Currently supplicant layer multi-AKM is support is restricted to
+	* SAE and WPA2PSK for seamless roaming
+	*/
+	if (multi_akm == (WPA3_AUTH_SAE_PSK | WPA2_AUTH_PSK) ||
+		multi_akm == (WPA3_AUTH_SAE_PSK | WPA2_AUTH_PSK_SHA256)) {
+		/* Set auto_wpa_enabled to avoid wpa ie plumb */
+		assoc_info->auto_wpa_enabled = TRUE;
+		/* Update seamless_psk for AKMs needing psk plumb */
+		assoc_info->seamless_psk = TRUE;
+
+		if (sme->crypto.cipher_group != sae_default_cipher_group) {
+			sae_default_cipher_group = sme->crypto.cipher_group;
+		}
+
+		for (j = 0; j < sme->crypto.n_ciphers_pairwise; j++) {
+			if (sme->crypto.ciphers_pairwise[j] ==
+				sae_default_cipher_pairwise) {
+				matched = true;
+				break;
+			}
+		}
+
+		if (!matched) {
+			sae_default_cipher_pairwise = sme->crypto.ciphers_pairwise[0];
+		}
+		WL_DBG(("MultiAKM SAE: cipher pairwise/group=%08x/%08x\n",
+				sae_default_cipher_pairwise, sae_default_cipher_group));
+
+		wl_prepare_joinpref_tuples(pref, WLAN_AKM_SUITE_SAE,
+			sae_default_cipher_pairwise, sae_default_cipher_group);
+
+		if (multi_akm & WPA2_AUTH_PSK) {
+			wl_prepare_joinpref_tuples(pref, WLAN_AKM_SUITE_PSK,
+				WLAN_CIPHER_SUITE_CCMP, WLAN_CIPHER_SUITE_CCMP);
+		}
+
+		if (multi_akm & WPA2_AUTH_PSK_SHA256) {
+			wl_prepare_joinpref_tuples(pref, WLAN_AKM_SUITE_PSK_SHA256,
+				WLAN_CIPHER_SUITE_CCMP, WLAN_CIPHER_SUITE_CCMP);
+		}
+	} else {
+		// mcast cipher will be chosen by fw
+		// The 1st tuple is lowest priority
+		if (multi_akm & WPA2_AUTH_PSK_SHA256) {
+			wl_prepare_joinpref_tuples(pref, WLAN_AKM_SUITE_PSK_SHA256,
+				WLAN_CIPHER_SUITE_CCMP, CRYPTO_ALGO_NONE);
+		}
+
+		if (multi_akm & WPA2_AUTH_PSK) {
+			if (sme->crypto.wpa_versions & NL80211_WPA_VERSION_1) {
+				// wpa tkip
+				if (sme->crypto.ciphers_pairwise[0] == WLAN_CIPHER_SUITE_TKIP) {
+					wl_prepare_joinpref_tuples(pref, WPA_AKM_SUITE,
+						WLAN_CIPHER_SUITE_TKIP, CRYPTO_ALGO_NONE);
+				} else {
+					// wpa ccmp
+					wl_prepare_joinpref_tuples(pref, WPA_AKM_SUITE,
+						WLAN_CIPHER_SUITE_CCMP, CRYPTO_ALGO_NONE);
+				}
+			} else if (sme->crypto.wpa_versions & NL80211_WPA_VERSION_2) {
+				// wpa2 tkip
+				if (sme->crypto.ciphers_pairwise[0] == WLAN_CIPHER_SUITE_TKIP) {
+					wl_prepare_joinpref_tuples(pref, WLAN_AKM_SUITE_PSK,
+						WLAN_CIPHER_SUITE_TKIP, CRYPTO_ALGO_NONE);
+				} else {
+					// wpa2 ccmp
+					wl_prepare_joinpref_tuples(pref, WLAN_AKM_SUITE_PSK,
+						WLAN_CIPHER_SUITE_CCMP, CRYPTO_ALGO_NONE);
+				}
+			}
+		}
+	}
+
+	return;
+}
+
 static s32
 wl_set_multi_akm(struct net_device *dev, struct bcm_cfg80211 *cfg,
 	struct cfg80211_connect_params *sme, wlcfg_assoc_info_t *assoc_info)
@@ -5552,26 +5660,12 @@ wl_set_multi_akm(struct net_device *dev, struct bcm_cfg80211 *cfg,
 	for (j = 0; j < sme->crypto.n_akm_suites; j++) {
 		multi_akm |= wl_rsn_akm_wpa_auth_lookup(sme->crypto.akm_suites[j]);
 	}
-
-	/* Currently supplicant layer multi-AKM is support is restricted to
-	* SAE and WPA2PSK for seamless roaming
-	*/
-	if (multi_akm == (WPA3_AUTH_SAE_PSK | WPA2_AUTH_PSK)) {
-		/* Set auto_wpa_enabled to avoid wpa ie plumb */
-		assoc_info->auto_wpa_enabled = TRUE;
-		/* Update seamless_psk for AKMs needing psk plumb */
-		assoc_info->seamless_psk = TRUE;
-	} else {
-		WL_ERR(("Invalid MultiAKM combination 0x%x\n", multi_akm));
-		return -EINVAL;
-	}
+	num_tuples = wl_find_multiakm_combo_tuples(multi_akm);
+	WL_ERR(("MultiAKM 0x%x num_tuples %d\n", multi_akm, num_tuples));
 
 	bzero(buf, sizeof(buf));
-	/* Increment the num_tuples value whenever new joinpref tuple is added */
-	num_tuples = 2;
 
 	if (num_tuples <= JOIN_PREF_MAX_WPA_TUPLES) {
-
 		/* Add WL_JOIN_PREF_RSSI for old firmware version */
 		*pref++ = WL_JOIN_PREF_RSSI;
 		*pref++ = JOIN_PREF_RSSI_LEN;
@@ -5590,13 +5684,7 @@ wl_set_multi_akm(struct net_device *dev, struct bcm_cfg80211 *cfg,
 		return -EINVAL;
 	}
 
-	/* Update tuples in akm-ucipher-mcipher format required for join_pref, the order of
-	* tuple defines the AKM preference, the first addition being the highest preference
-	*/
-	wl_prepare_joinpref_tuples(&pref, WLAN_AKM_SUITE_SAE,
-		WLAN_CIPHER_SUITE_CCMP, WLAN_CIPHER_SUITE_CCMP);
-	wl_prepare_joinpref_tuples(&pref, WLAN_AKM_SUITE_PSK,
-		WLAN_CIPHER_SUITE_CCMP, WLAN_CIPHER_SUITE_CCMP);
+	wl_update_join_pref_tuple(multi_akm, &pref, sme, assoc_info);
 
 #ifdef MFP
 	if ((err = wl_cfg80211_set_mfp(cfg, dev, sme)) < 0) {
@@ -9938,7 +10026,7 @@ exit:
 		!cfg->block_gon_req_tx_count &&
 #endif /* WL_CFG80211_GON_COLLISION */
 		wl_get_drv_status_all(cfg, WAITING_NEXT_ACT_FRM) &&
-		cfg->af_sent_channel == cfg->afx_hdl->my_listen_chan) {
+		CHSPEC_CHANNEL(cfg->af_sent_channel) == cfg->afx_hdl->my_listen_chan) {
 		s32 extar_listen_time;
 
 		extar_listen_time = af_params->dwell_time -
@@ -9949,7 +10037,7 @@ exit:
 			WL_DBG(("Wait more time! actual af time:%d,"
 				"calculated extar listen:%d\n",
 				af_params->dwell_time, extar_listen_time));
-			if (wl_cfgp2p_discover_listen(cfg, cfg->af_sent_channel,
+			if (wl_cfgp2p_discover_listen(cfg, CHSPEC_CHANNEL(cfg->af_sent_channel),
 				extar_listen_time + 100) == BCME_OK) {
 				wait_for_completion_timeout(&cfg->wait_next_af,
 					msecs_to_jiffies(extar_listen_time + 100 + 300));
@@ -24213,7 +24301,7 @@ wl_cfg80211_external_auth(struct wiphy *wiphy,
 		/* Send disassoc only the auth response status is OK */
 		if (!cfg->authresp_status) {
 			wl_cfg80211_disassoc(ndev, WLAN_REASON_UNSPECIFIED);
-			goto done;
+			/* fall through to release pause assoc */
 		}
 	}
 
@@ -24224,10 +24312,9 @@ wl_cfg80211_external_auth(struct wiphy *wiphy,
 	err = wldev_iovar_setbuf(ndev, "assoc_mgr_cmd", (void *)&cmd, sizeof(cmd),
 		cfg->ioctl_buf, WLC_IOCTL_SMLEN, &cfg->ioctl_buf_sync);
 	if (unlikely(err)) {
-		WL_ERR(("%s: Failed to pause assoc(%d)\n", __func__, err));
+		WL_ERR(("%s: Failed to release pause assoc(%d)\n", __func__, err));
 	}
 
-done:
 	return err;
 }
 #endif /* WL_CLIENT_SAE */

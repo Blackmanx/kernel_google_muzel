@@ -1,7 +1,7 @@
 /*
  * Extended Trap data component interface file.
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -786,6 +786,5 @@ extern bool _etd_enab;
 #endif /* WLETD */
 
 #endif /* !LANGUAGE_ASSEMBLY */
-
 
 #endif /* _ETD_H_ */

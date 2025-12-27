@@ -180,7 +180,6 @@ dhd_deferred_work_deinit(void *work)
 {
 	struct dhd_deferred_wq *deferred_work = work;
 
-
 	if (!deferred_work) {
 		DHD_ERROR(("%s: deferred work has been freed already\n",
 			__FUNCTION__));

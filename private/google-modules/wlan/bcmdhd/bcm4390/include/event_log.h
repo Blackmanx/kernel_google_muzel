@@ -226,7 +226,6 @@ typedef struct event_log_block_data_ext_start {
 #define EVENT_LOG_BUF_EXTRA_HDR_INFO_REL_PKTLEN_OFFSET		\
 	(OFFSETOF(event_log_block_t, extra_hdr_info) -	OFFSETOF(event_log_block_t, pktlen))
 
-
 #define EVENT_LOG_BLOCK_HDRLEN		(sizeof(((event_log_block_t *) 0)->pktlen) \
 					+ sizeof(((event_log_block_t *) 0)->count) \
 					+ sizeof(((event_log_block_t *) 0)->extra_hdr_info))
@@ -545,7 +544,6 @@ extern bool prsv_periodic_enab;
 #define _EVENT_LOGF(tag, fmt_num, fmt, ...) event_logn(15, tag, fmt_num, __VA_ARGS__)
 #endif /* EVENT_LOG_FIXED_ARGS_ONLY */
 
-
 /* Casting  low level macros */
 #define _EVENT_LOG_CAST0(tag, fmt_num, fmt)		\
 	event_log0(tag, fmt_num)
@@ -629,7 +627,6 @@ extern bool prsv_periodic_enab;
 			       7, 6, 5, 4, 3, 2, 1, 0)			\
 	(tag, (int) &fmtnum, __VA_ARGS__)
 
-
 #define EVENT_LOG_FAST(tag, ...)					\
 	do {								\
 		if (event_log_tag_sets != NULL) {			\
@@ -660,7 +657,6 @@ extern bool prsv_periodic_enab;
 	do {								\
 		_EVENT_LOG(_EVENT_LOG_CAST, tag, __VA_ARGS__);		\
 	} while (0)
-
 
 #define EVENT_LOG(tag, ...) EVENT_LOG_COMPACT(tag, __VA_ARGS__)
 
@@ -733,7 +729,6 @@ extern bool prsv_periodic_enab;
 
 extern uint8 *event_log_tag_sets;
 
-
 /**
  * @brief Convert a 64 bits nsec timestamp to a 32bit timestamp of 256ns per count
  *
@@ -746,7 +741,6 @@ event_log_nsec_to_log_ts(uint64 nsec_ts)
 {
 	return (uint32)(nsec_ts >> 8u);
 }
-
 
 /* Initialize event log top and tag_sets context on given buffers. */
 int event_log_init_context(event_log_top_t *top, uint8 *tag_sets, uint16 tag_sets_len,
@@ -795,7 +789,6 @@ extern uint8 *event_log_next_logtrace(int set_num);
 extern uint32 event_log_logtrace_max_buf_count(int set_num);
 extern int event_log_set_type(int set_num, uint8 *type, int is_get);
 extern int event_log_flush_set(wl_el_set_flush_prsrv_t *flush, int is_set);
-
 
 extern void event_log0(int tag, int fmtNum);
 extern void event_log1(int tag, int fmtNum, uint32 t1);

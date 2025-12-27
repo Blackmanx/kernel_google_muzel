@@ -964,7 +964,6 @@ fail:
 	return ret;
 }
 
-
 static int
 dhdpcie_pcie_clear_clk_req(dhd_pub_t *dhd)
 {

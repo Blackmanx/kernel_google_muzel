@@ -712,7 +712,11 @@ dhd_flowid_map_alloc(dhd_pub_t *dhdp, uint8 ifindex, uint8 prio, char *da)
 
 	/* P2P Connections are always 80Mhz */
 	if (DHD_IF_ROLE_P2PGC(dhdp, ifindex) ||
-	    DHD_IF_ROLE_P2PGO(dhdp, ifindex)) {
+	    DHD_IF_ROLE_P2PGO(dhdp, ifindex) ||
+#ifdef DHD_ART
+	    DHD_IF_ROLE_ART(dhdp, ifindex) ||
+#endif /* DHD_ART */
+	    FALSE) {
 		flowid = id16_map_alloc(dhdp->flowid_allocator);
 		return flowid;
 	}
@@ -1475,7 +1479,7 @@ dhd_update_interface_link_status(dhd_pub_t *dhdp, uint8 ifindex, uint8 status)
 	if (ifindex >= DHD_MAX_IFS)
 		return BCME_BADARG;
 
-	DHD_INFO(("%s: ifindex %d status %d\n", __FUNCTION__, ifindex, status));
+	DHD_PRINT(("%s: ifindex %d status %d\n", __FUNCTION__, ifindex, status));
 
 	DHD_FLOWID_LOCK(dhdp->flowid_lock, flags);
 	if_flow_lkup = (if_flow_lkup_t *)dhdp->if_flow_lkup;

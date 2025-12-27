@@ -1,7 +1,7 @@
 /*
  * Neighbor Awareness Networking
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -105,7 +105,6 @@ static void wl_cfgnan_remove_ranging_instance(struct bcm_cfg80211 *cfg,
 static void wl_cfgnan_periodic_nmi_rand_addr(struct work_struct *work);
 static uint8 wl_cfgnan_map_nan_prot_csid_to_host_csid(uint8 prot_csid);
 static uint8 wl_cfgnan_map_host_csid_to_nan_prot_csid(uint8 host_csid);
-
 
 typedef struct nan_csid_map {
 	uint16 fw_csid;
@@ -3007,7 +3006,6 @@ wl_cfgnan_build_execute_ioctl(struct net_device *ndev, struct bcm_cfg80211 *cfg,
 	wl_nan_iov_t *nan_iov_data = NULL;
 	uint8 resp_buf[NAN_IOCTL_BUF_SIZE];
 
-
 	nan_buf = MALLOCZ(cfg->osh, nan_buf_size);
 	if (!nan_buf) {
 		WL_ERR(("%s: memory allocation failed\n", __func__));
@@ -3885,6 +3883,8 @@ wl_cfgnan_disable_cleanup(struct bcm_cfg80211 *cfg)
 		if (delayed_work_pending(&rtt_status->proxd_timeout)) {
 			dhd_cancel_delayed_work_sync(&rtt_status->proxd_timeout);
 		}
+		rtt_status->rtt_sched = FALSE;
+		rtt_status->status = RTT_STOPPED;
 	}
 	/* Delete if any directed nan rtt session */
 	dhd_rtt_delete_nan_session(dhdp);
@@ -8673,7 +8673,6 @@ wl_cfgnan_handle_directed_rtt_report(struct bcm_cfg80211 *cfg,
 	uint32 status;
 	dhd_pub_t *dhd = (struct dhd_pub *)(cfg->pub);
 
-
 	ret = wl_cfgnan_cancel_ranging(bcmcfg_to_prmry_ndev(cfg), cfg,
 			&rng_inst->range_id, NAN_RNG_TERM_FLAG_IMMEDIATE, &status);
 	if (unlikely(ret) || unlikely(status)) {
@@ -9405,6 +9404,7 @@ wl_cfgnan_notify_nan_status(struct bcm_cfg80211 *cfg,
 		wl_nan_ev_disc_cache_timeout_t *cache_data =
 				(wl_nan_ev_disc_cache_timeout_t *)xtlv->data;
 		wl_nan_disc_expired_cache_entry_t *cache_entry = NULL;
+		nan_ranging_inst_t *rng_inst = NULL;
 		uint16 xtlv_len = xtlv->len;
 		uint8 entry_idx = 0;
 
@@ -9422,10 +9422,25 @@ wl_cfgnan_notify_nan_status(struct bcm_cfg80211 *cfg,
 				nan_event_data->pub_id = cache_entry->r_pub_id;
 				wl_cfgnan_event_disc_cache_timeout(cfg, nan_event_data);
 #ifdef RTT_SUPPORT
-				wl_cfgnan_ranging_clear_publish(cfg, &cache_entry->r_nmi_addr,
-					cache_entry->l_sub_id);
-#endif /* RTT_SUPPORT */
-				/* Invalidate local cache info */
+				rng_inst = wl_cfgnan_check_for_ranging(cfg,
+					&cache_entry->r_nmi_addr);
+				if (rng_inst &&
+					(rng_inst->range_type == RTT_TYPE_NAN_DIRECTED)) {
+					dhd_rtt_handle_nan_rtt_session_end(dhd,
+						&rng_inst->peer_addr);
+					if (dhd_rtt_nan_is_directed_setup_in_prog_with_peer(dhd,
+						&rng_inst->peer_addr)) {
+						dhd_rtt_nan_update_directed_setup_inprog(dhd,
+							NULL, FALSE);
+					} else {
+						dhd_rtt_nan_update_directed_sessions_cnt(dhd,
+							FALSE);
+					}
+				} else {
+					wl_cfgnan_ranging_clear_publish(cfg,
+						&cache_entry->r_nmi_addr, cache_entry->l_sub_id);
+				}
+#endif /* RTT_SUPPORT */				/* Invalidate local cache info */
 				wl_cfgnan_remove_disc_result(cfg, cache_entry->l_sub_id);
 				xtlv_len = xtlv_len - sizeof(*cache_entry);
 				entry_idx++;

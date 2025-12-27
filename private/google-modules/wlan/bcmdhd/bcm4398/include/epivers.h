@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -18,36 +18,40 @@
  *
  * <<Broadcom-WL-IPTag/Dual:>>
  *
+ * + epivers.py --key-comp-dir=../../../../components/dhd/src ../../../../build/dhd/android-u/gg_pixel23-gg/pcie@gg/source//include/epivers.h
+ *
+ * FILE-CSTYLED
+ *
  */
 
 #ifndef _epivers_h_
 #define _epivers_h_
 
-#define EPI_MAJOR_VERSION	103
+#define EPI_MAJOR_VERSION	103u
 
-#define EPI_MINOR_VERSION	101
+#define EPI_MINOR_VERSION	101u
 
-#define EPI_RC_NUMBER		26
+#define EPI_RC_NUMBER		26u
 
-#define EPI_INCREMENTAL_NUMBER	19
+#define EPI_INCREMENTAL_NUMBER	35u
 
-#define EPI_BUILD_NUMBER	0
+#define EPI_VERSION		(103, 101, 26, 35)
 
-#define EPI_VERSION		103, 101, 26, 19
+#define EPI_VERSION_NUM		0x67651a23u
 
-#define EPI_VERSION_NUM		0x67651a13
+#define EPI_UNIQUE_NUM		0x67651a23u
 
-#define EPI_VERSION_DEV		103.101.26
+#define EPI_VERSION_DEV		(103.101.26)
 
 /* Driver Version String, ASCII, 32 chars max */
-#if defined (WLTEST)
-#define EPI_VERSION_STR		"103.101.26.19 (wlan=r1083705 WLTEST)"
-#elif (defined (BCMDBG_ASSERT) && \
-	!defined (BCMDBG_ASSERT_DISABLED) && \
-	!defined (ASSERT_FP_DISABLE))
-#define EPI_VERSION_STR		"103.101.26.19 (wlan=r1083705 ASSRT)"
+#if defined(WLTEST)
+#define EPI_VERSION_STR		"103.101.26.35 (g07e1667 WLTEST)"
+#elif (defined(BCMDBG_ASSERT) && \
+	!defined(BCMDBG_ASSERT_DISABLED) && \
+	!defined(ASSERT_FP_DISABLE))
+#define EPI_VERSION_STR		"103.101.26.35 (g07e1667 ASSRT)"
 #else
-#define EPI_VERSION_STR		"103.101.26.19 (wlan=r1083705)"
+#define EPI_VERSION_STR		"103.101.26.35 (g07e1667)"
 #endif /* BCMINTERNAL */
 
 #endif /* _epivers_h_ */

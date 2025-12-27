@@ -2,7 +2,7 @@
  * Misc utility routines for accessing the SOC Interconnects
  * of Broadcom HNBU chips.
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -152,7 +152,6 @@ struct si_pub {
 
 	int16	gcirev;			/**< gci core rev */
 	int16	lhlrev;			/**< lhl core rev */
-
 
 	uint32	lpflags;		/**< low power flags */
 	uint32	enum_base;	/**< backplane address where the chipcommon core resides */
@@ -543,7 +542,6 @@ int si_devpath_pcie(const si_t *sih, char *path, int size);
 const char *si_getdevpathvar(const si_t *sih, const char *name);
 int si_getdevpathintvar(const si_t *sih, const char *name);
 char *si_coded_devpathvar(const si_t *sih, char *varname, int var_len, const char *name);
-
 
 /* === HW PR WARs === */
 extern uint8 si_pcieclkreq(const si_t *sih, uint32 mask, uint32 val);

@@ -2,7 +2,7 @@
 #define _DHD_BUZZZ_H_INCLUDED_
 
 /*
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -204,7 +204,6 @@ static inline void dhd_buzzz_fmt_init(void)
 	BUZZZ_FMT(DHD_BUS_RXCTL_ONE, "dhd_bus_rxctl prev resplen<%u> pktid<%u>")
 	BUZZZ_FMT(DHD_BUS_RXCTL_TWO, "dhd_bus_rxctl cur  resplen<%u> pktid<%u>")
 }
-
 
 #define BUZZZ_LOG(ID, N, ARG...)    dhd_buzzz_log ##N(BUZZZ_EVT__ ##ID, ##ARG)
 

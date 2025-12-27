@@ -21,7 +21,6 @@
  * <<Broadcom-WL-IPTag/Dual:>>
  */
 
-
 #ifndef __DHD_CFG80211__
 #define __DHD_CFG80211__
 

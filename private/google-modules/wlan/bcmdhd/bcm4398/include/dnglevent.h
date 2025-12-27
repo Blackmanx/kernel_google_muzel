@@ -3,7 +3,7 @@
  *
  * Dependencies: bcmeth.h
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -93,7 +93,6 @@ typedef BWL_PRE_PACKED_STRUCT struct bcm_dngl_arm_event {
 	uint32 value;
 } BWL_POST_PACKED_STRUCT bcm_dngl_arm_event_t;
 
-
 #define PROFILE_DATA_IND_INFO 0x1
 
 #define PROFILE_SUB_TYPE_ARM_STATS_INFO 0x1
@@ -113,7 +112,6 @@ typedef BWL_PRE_PACKED_STRUCT struct bcm_dngl_arm_stats {
 	uint16  seq_no;
 	uint8	value[];
 } BWL_POST_PACKED_STRUCT bcm_dngl_arm_stats_t;
-
 
 /* SOCRAM_IND type tags */
 typedef enum socram_ind_tag {

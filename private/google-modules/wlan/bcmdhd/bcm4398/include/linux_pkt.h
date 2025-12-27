@@ -1,7 +1,7 @@
 /*
  * Linux Packet (skb) interface
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -222,7 +222,6 @@ extern void osl_pkt_orphan_partial(struct sk_buff *skb);
 #define	PKTSETTOBR(osh, skb)		({BCM_REFERENCE(osh); BCM_REFERENCE(skb);})
 #define	PKTCLRTOBR(osh, skb)		({BCM_REFERENCE(osh); BCM_REFERENCE(skb);})
 #define	PKTISTOBR(skb)			({BCM_REFERENCE(skb); FALSE;})
-
 
 #ifdef BCMFA
 #ifdef BCMFA_HW_HASH

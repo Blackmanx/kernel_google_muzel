@@ -107,7 +107,6 @@ typedef struct {
 typedef struct pktq_log pktq_log_t;
 #endif /* PKTQ_LOG */
 
-
 /** multi-priority packet queue */
 struct pktq {
 	HND_PKTQ_MUTEX_DECL(mutex)

@@ -1,7 +1,7 @@
 /*
  * Fundamental constants relating to Neighbor Discovery Protocol
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -117,7 +117,6 @@ BWL_PRE_PACKED_STRUCT struct bcm_nd_msg {
 	struct	icmp6_hdr	icmph;
 	struct	ipv6_addr	target;
 } BWL_POST_PACKED_STRUCT;
-
 
 /* Neighibor Solicitation/Advertisement Optional Structure */
 BWL_PRE_PACKED_STRUCT struct nd_msg_opt {

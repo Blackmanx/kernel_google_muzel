@@ -1,7 +1,7 @@
 /*
  * Linux cfg80211 Vendor Extension Code
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -676,7 +676,6 @@ wl_cfgvendor_send_hotlist_event(struct wiphy *wiphy,
 	return 0;
 }
 
-
 static int
 wl_cfgvendor_gscan_get_capabilities(struct wiphy *wiphy,
 	struct wireless_dev *wdev, const void  *data, int len)
@@ -856,7 +855,6 @@ wl_cfgvendor_initiate_gscan(struct wiphy *wiphy,
 	} else {
 		return -EINVAL;
 	}
-
 
 }
 
@@ -2015,7 +2013,6 @@ wl_cfgvendor_latency_mode_config(struct wiphy *wiphy,
 #if defined(WL_AUTO_QOS)
 	dhd_pub_t *dhdp = wl_cfg80211_get_dhdp(wdev->netdev);
 #endif /* WL_AUTO_QOS */
-
 
 	nla_for_each_attr(iter, data, len, rem) {
 		type = nla_type(iter);
@@ -6079,7 +6076,6 @@ wl_cfgvendor_nan_dp_ind_event_data_filler(struct sk_buff *msg,
 	}
 #endif /* WL_NAN_INSTANT_MODE */
 
-
 fail:
 	return ret;
 }
@@ -7089,7 +7085,6 @@ wl_cfgvendor_nan_stop_handler(struct wiphy *wiphy,
 		goto exit;
 	}
 
-
 	if (nancfg->nan_init_state == false) {
 		WL_INFORM_MEM(("nan is not initialized/nmi doesnt exists\n"));
 		goto exit;
@@ -7130,6 +7125,9 @@ wl_cfgvendor_nan_stop_handler(struct wiphy *wiphy,
 	}
 exit:
 	mutex_unlock(&cfg->if_sync);
+	if (cmd_data) {
+		MFREE(cfg->osh, cmd_data, sizeof(*cmd_data));
+	}
 	NAN_DBG_EXIT();
 	return ret;
 }
@@ -10770,7 +10768,6 @@ wl_cfgvendor_set_p2p_rand_mac(struct wiphy *wiphy,
 				nla_data(data), ETHER_ADDR_LEN);
 		(void)memcpy_s(wdev->address, ETHER_ADDR_LEN, nla_data(data), ETHER_ADDR_LEN);
 
-
 		err = wl_cfgp2p_disable_discovery(cfg);
 		if (unlikely(err < 0)) {
 			WL_ERR(("P2P disable discovery failed, ret=%d\n", err));
@@ -10921,6 +10918,8 @@ wl_cfgvendor_tx_power_scenario(struct wiphy *wiphy,
 	int i = 0;
 	bool found = FALSE;
 #endif /* WL_SAR_TX_POWER_CONFIG */
+	struct net_device *primary_ndev;
+	primary_ndev = bcmcfg_to_prmry_ndev(cfg);
 
 	nla_for_each_attr(iter, data, len, rem) {
 		type = nla_type(iter);
@@ -10955,6 +10954,13 @@ wl_cfgvendor_tx_power_scenario(struct wiphy *wiphy,
 	if (!found)
 #endif /* WL_SAR_TX_POWER_CONFIG */
 	{
+#ifndef USE_DEFAULT_SAR_TX_PWR
+		WL_ERR(("sarconfig not found, trigger hang_event\n"));
+		wl_cfg80211_handle_hang_event(primary_ndev,
+				HANG_REASON_UNKNOWN, DUMP_TYPE_SAR_CONF_NOTFOUND);
+		err = -EINVAL;
+		goto exit;
+#else
 		/* Map Android TX power modes to Brcm power mode */
 		switch (wifi_tx_power_mode) {
 			case WIFI_POWER_SCENARIO_VOICE_CALL:
@@ -10994,6 +11000,7 @@ wl_cfgvendor_tx_power_scenario(struct wiphy *wiphy,
 				err = -EINVAL;
 				goto exit;
 		}
+#endif /* !USE_DEFAULT_SAR_TX_PWR */
 	}
 	WL_DBG_MEM(("SAR: sar_mode %d airplane_mode %d\n", sar_tx_power_val, airplane_mode));
 	err = wldev_iovar_setint(wdev_to_ndev(wdev), "fccpwrlimit2g", airplane_mode);
@@ -11281,7 +11288,6 @@ wl_cfgvendor_twt_setup(struct wiphy *wiphy,
 	val.desc.wake_dur_max = 0xFFFFFFFF;
 	val.desc.avg_pkt_num  = 0xFFFFFFFF;
 	val.desc.avg_pkt_size = 0xFFFFFFFF;
-
 
 	nla_for_each_attr(iter, data, len, rem_attr) {
 		type = nla_type(iter);
@@ -12742,7 +12748,6 @@ static int wl_cfgvendor_get_usable_channels_handler(struct bcm_cfg80211 *cfg,
 		WL_ERR(("get chan_info_list err(%d)\n", err));
 		goto exit;
 	}
-
 
 #ifdef WL_NAN_INSTANT_MODE
 	if ((u_info->iface_mode_mask & (1 << WIFI_INTERFACE_NAN)) &&

@@ -5,7 +5,7 @@
  * VHT - Very High Throughput
  * OPER_MODE - Operating Mode
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -431,7 +431,6 @@ typedef enum vht_cap_max_mpdu_len {
 #define VHT_MPDU_LIMIT_8K        7991
 #define VHT_MPDU_LIMIT_11K      11454
 
-
 /**
  * VHT Operation IE (sec 8.4.2.161)
  */
@@ -481,7 +480,6 @@ typedef enum vht_op_chan_width {
 	VHT_MCS_SS_SUPPORTED(3, mcsMap) ? 3 : \
 	VHT_MCS_SS_SUPPORTED(2, mcsMap) ? 2 : \
 	VHT_MCS_SS_SUPPORTED(1, mcsMap) ? 1 : 0
-
 
 /* This marks the end of a packed structure section. */
 #include <packed_section_end.h>

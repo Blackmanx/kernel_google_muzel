@@ -104,7 +104,6 @@
 #define SD3_Tuning_Info_Register 0x0EC
 #define SD3_WL_BT_reset_register 0x0F0
 
-
 /* preset value indices */
 #define SD3_PRESETVAL_INITIAL_IX	0
 #define SD3_PRESETVAL_DESPEED_IX	1
@@ -147,7 +146,6 @@
 #define CAP_64BIT_HOST_S	28
 
 #define SDIO_OCR_READ_FAIL	(2)
-
 
 #define CAP_ASYNCINT_SUP_M	BITFIELD_MASK(1)
 #define CAP_ASYNCINT_SUP_S	29

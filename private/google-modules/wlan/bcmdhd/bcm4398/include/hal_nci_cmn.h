@@ -2,7 +2,7 @@
  * Shared code between the legacy nci implementation which depended on the EROM and the
  * implementation which depends on vlsi_data.
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -41,7 +41,6 @@
 #define IDM_ERRSTATUS_SECOND_ERR	(1u << 27)	/* error addresses  un corrected error */
 #define IDM_ERRSTATUS_MISC_ERROR	(1u << 26)	/* MISC0 and MISC1 are valid */
 #define IDM_ERRSTATUS_ERROR_CODE_MASK	0xffu		/* Indicates the type of error */
-
 
 #define IDM_ERRCTLR_ENABLE		(1u << 0u)	/*  Global enable */
 #define IDM_ERRCTLR_BUS			(1u << 1u)	/*  Enable Bus error detection */

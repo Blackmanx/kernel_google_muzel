@@ -869,6 +869,10 @@ static int dhdpcie_pm_resume(struct device *dev)
 	DHD_GENERAL_LOCK(bus->dhd, flags);
 	DHD_BUS_BUSY_SET_RESUME_IN_PROGRESS(bus->dhd);
 	DHD_GENERAL_UNLOCK(bus->dhd, flags);
+#ifdef DHD_ENABLE_L1SS_FROM_PM_COMPLETE
+	DHD_PRINT(("%s: Set system_resume_in_progress\n", __FUNCTION__));
+	bus->system_resume_in_progress = TRUE;
+#endif /* DHD_ENABLE_L1SS_FROM_PM_COMPLETE */
 
 	if (bus->dhd->up)
 		ret = dhdpcie_set_suspend_resume(bus, FALSE);
@@ -899,6 +903,17 @@ static void dhdpcie_pm_complete(struct device *dev)
 #endif /* WL_TWT */
 
 	bus->chk_pm = FALSE;
+
+#ifdef DHD_ENABLE_L1SS_FROM_PM_COMPLETE
+	DHD_PRINT(("%s: Clear system_resume_in_progress\n", __FUNCTION__));
+	bus->system_resume_in_progress = FALSE;
+
+	/*
+	 * Re-enable L1ss in Resume path. Implementation defalts to NOP
+	 * If need override in the paltform file
+	 */
+	dhd_plat_l1ss_ctrl(1);
+#endif /* DHD_ENABLE_L1SS_FROM_PM_COMPLETE */
 
 	return;
 }
@@ -1395,8 +1410,13 @@ static int dhdpcie_resume_dev(struct pci_dev *dev)
 	 * Re-enable L1ss in Resume path. Implementation defalts to NOP
 	 * If need override in the paltform file
 	 */
+#ifdef DHD_ENABLE_L1SS_FROM_PM_COMPLETE
+	if (pch->bus->system_resume_in_progress == FALSE) {
+		dhd_plat_l1ss_ctrl(1);
+	}
+#else
 	dhd_plat_l1ss_ctrl(1);
-
+#endif /* DHD_ENABLE_L1SS_FROM_PM_COMPLETE */
 
 out:
 	return err;
@@ -1937,7 +1957,8 @@ dhdpcie_request_irq(dhdpcie_info_t *dhdpcie_info)
 		DHD_ERROR(("%s: PCI IRQ is already registered\n", __FUNCTION__));
 	}
 
-	dhdpcie_enable_irq_loop(bus);
+	if (dhdpcie_irq_disabled(bus))
+		dhdpcie_enable_irq(bus);
 
 	DHD_TRACE(("%s %s\n", __FUNCTION__, dhdpcie_info->pciname));
 
@@ -2625,16 +2646,6 @@ dhdpcie_enable_irq(dhd_bus_t *bus)
 	dev = bus->dev;
 	enable_irq(dev->irq);
 	return BCME_OK;
-}
-
-void
-dhdpcie_enable_irq_loop(dhd_bus_t *bus)
-{
-	/* Enable IRQ in a loop till host_irq_disable_count becomes 0 */
-	uint host_irq_disable_count = dhdpcie_irq_disabled(bus);
-	while (host_irq_disable_count--) {
-		dhdpcie_enable_irq(bus); /* Enable back interrupt!! */
-	}
 }
 
 int

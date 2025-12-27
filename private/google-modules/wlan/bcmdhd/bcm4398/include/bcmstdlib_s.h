@@ -1,7 +1,7 @@
 /*
  * Broadcom Secure Standard Library.
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -41,7 +41,6 @@ extern int memset_s(void *dest, size_t destsz, int c, size_t n);
 extern size_t strlcpy(char *dest, const char *src, size_t size);
 #endif /* !defined(FREEBSD) && !defined(MACOSX) && !defined(BCM_USE_PLATFORM_STRLCPY) */
 extern size_t strlcat_s(char *dest, const char *src, size_t size);
-
 
 /* Remap xxx_s() APIs to use compiler builtin functions for C standard library functions.
  * The intent is to identify buffer overflow at compile-time for the safe stdlib APIs when

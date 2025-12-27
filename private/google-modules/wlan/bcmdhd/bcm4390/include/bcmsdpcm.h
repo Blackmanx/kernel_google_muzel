@@ -93,7 +93,6 @@
 #define HMB_DATA_DSPROT_MASK	0xf00
 #endif /* DS_PROT */
 
-
 #define HMB_DATA_FCDATA_MASK	0xff000000	/* per prio flowcontrol data */
 #define HMB_DATA_FCDATA_SHIFT	24		/* per prio flowcontrol data */
 

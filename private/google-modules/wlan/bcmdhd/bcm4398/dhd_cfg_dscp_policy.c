@@ -12,7 +12,7 @@
  *
  * This file is used only if the DHD is built with the feature string "dscp_policy".
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -31,7 +31,6 @@
  *
  * <<Broadcom-WL-IPTag/Dual:>>
  */
-
 
 #include <typedefs.h>
 #include <linuxver.h>
@@ -106,7 +105,6 @@ dhd_dscp_policy_attach(struct bcm_cfg80211 *cfg)
 {
 	int ret_val;
 	dscp_policy_info_t *policy_info = NULL;
-
 
 	policy_info = (dscp_policy_info_t *) MALLOCZ(cfg->osh, sizeof(*policy_info));
 	if (policy_info == NULL) {
@@ -446,7 +444,6 @@ dhd_dscp_policy_flush(struct net_device *ndev)
 	if ((policy_info == NULL) || (policy_info->policy_entries == NULL)) {
 		goto done;
 	}
-
 
 	/* acquire the lock */
 	DHD_DSCP_POLICY_LOCK(policy_info->dscp_policy_lock, flags);
@@ -1071,7 +1068,6 @@ dhd_dscp_policy_send_af(struct bcm_cfg80211 *cfg, struct net_device *ndev,
 		af_params_iov_p = (u8 *)af_params;
 		af_params_iov_len = sizeof(*af_params);
 	}
-
 
 	ret_val = wldev_iovar_setbuf(ndev, "actframe", af_params_iov_p,
 	                             af_params_iov_len, smbuf, WLC_IOCTL_MAXLEN, NULL);

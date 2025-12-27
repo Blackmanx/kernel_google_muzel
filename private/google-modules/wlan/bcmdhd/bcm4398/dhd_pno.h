@@ -2,7 +2,7 @@
  * Header file of Broadcom Dongle Host Driver (DHD)
  * Prefered Network Offload code and Wi-Fi Location Service(WLS) code.
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -201,7 +201,6 @@ typedef enum dhd_pno_mode {
 } dhd_pno_mode_t;
 #endif /* GSCAN_SUPPORT || DHD_GET_VALID_CHANNELS */
 
-
 typedef struct dhd_pno_ssid {
 	bool		hidden;
 	int8		rssi_thresh;
@@ -309,7 +308,6 @@ typedef struct dhd_pno_gscan_channel_bucket {
 	uint16 bucket_max_multiple;
 	uint16 chan_list[GSCAN_MAX_CHANNELS_IN_BUCKET];
 } dhd_pno_gscan_channel_bucket_t;
-
 
 #define DHD_PNO_AUTH_CODE_OPEN  1 /*  Open   */
 #define DHD_PNO_AUTH_CODE_PSK   2 /* WPA_PSK or WPA2PSK */
@@ -528,7 +526,6 @@ extern int dhd_pno_set_for_ssid(dhd_pub_t *dhd, wlc_ssid_ext_t* ssid_list, int n
 extern int dhd_pno_set_for_batch(dhd_pub_t *dhd, struct dhd_pno_batch_params *batch_params);
 
 extern int dhd_pno_get_for_batch(dhd_pub_t *dhd, char *buf, int bufsize, int reason);
-
 
 extern int dhd_pno_stop_for_batch(dhd_pub_t *dhd);
 

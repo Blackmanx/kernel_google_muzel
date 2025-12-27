@@ -202,6 +202,9 @@ DHDCFLAGS += -DWAIT_FOR_DISCONNECT_MAX=20
 
 #static if
 DHDCFLAGS += -DWL_STATIC_IF
+# static NMI - commented temporarily will enable back after components change
+# is checked in.
+#DHDCFLAGS += -DWL_STATIC_NMI_IF
 
 # Wapi
 #DHDCFLAGS += -DBCMWAPI_WPI -DBCMWAPI_WAI
@@ -320,7 +323,7 @@ ifneq ($(CONFIG_BCMDHD_PCIE),)
     # Memory consumed by DHD
     DHDCFLAGS += -DDHD_MEM_STATS
     # Check trap in the case of ROT
-	DHDCFLAGS += -DCHECK_TRAP_ROT
+      DHDCFLAGS += -DCHECK_TRAP_ROT
 
     # Enable Host SFH LLC insertion in Tx pkts
 	DHDCFLAGS += -DHOST_SFH_LLC
@@ -441,8 +444,11 @@ endif
             # PCIE CPL TIMEOUT WAR
             # DHDCFLAGS += -DDHD_TREAT_D3ACKTO_AS_LINKDWN
 	endif
-	ifeq ($(BCMDHD),4383)
-            DHDCFLAGS += -DDHD_TREAT_D2H_CTO_AS_LINKDOWN
+	ifneq ($(filter y, $(CONFIG_SOC_LGA)),)
+	    ifeq ($(BCMDHD),4383)
+                DHDCFLAGS += -DDHD_TREAT_D2H_CTO_AS_LINKDOWN
+                DHDCFLAGS += -DDHD_ENABLE_L1SS_FROM_PM_COMPLETE
+	    endif
 	endif
 	# Skip xorcsum for high throughput case
 	DHDCFLAGS += -DDHD_SKIP_XORCSUM_HIGH_TPUT
@@ -496,6 +502,8 @@ DHDCFLAGS += -DWL_CFG80211_STA_EVENT
 #STBTPUT: Disabled for tput in STB platform
 ifeq ($(CONFIG_ARCH_BRCMSTB),)
   DHDCFLAGS += -DWL_CFG80211_MONITOR
+  # Active Radio tap
+  DHDCFLAGS += -DDHD_ART
 endif
 ifneq ($(CONFIG_CFG80211_FILS_BKPORT),)
     DHDCFLAGS += -DWL_FILS

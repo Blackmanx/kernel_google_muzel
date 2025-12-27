@@ -1,7 +1,7 @@
 /*
  * Platform Dependent file for usage of Preallocted Memory
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -147,7 +147,6 @@ static void *wlan_static_dhd_memdump_ram = NULL;
 #endif /* #ifdef CONFIG_BCMDHD_PREALLOC_MEMDUMP */
 static void *wlan_static_dhd_log_dump_buf = NULL;
 static void *wlan_static_dhd_log_dump_buf_ex = NULL;
-
 
 void dhd_exit_wlan_mem(void);
 

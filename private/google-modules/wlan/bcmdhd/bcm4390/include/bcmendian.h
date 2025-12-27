@@ -62,7 +62,6 @@
 	((uint64)((((uint64)(val) & 0x00000000ffffffffULL) << 32) | \
 	          (((uint64)(val) & 0xffffffff00000000ULL) >> 32)))
 
-
 /* Byte swapping macros
  *    Host <=> Network (Big Endian) for 16- and 32-bit values
  *    Host <=> Little-Endian for 16- and 32-bit values

@@ -3,7 +3,7 @@
  * Contents are wifi-specific, used by any kernel or app-level
  * software that might want wifi things as it grows.
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -882,7 +882,6 @@ static const uint8 wlcntver11t_to_wlcntvle10mcstt[WL_CNT_MCST_VAR_NUM] = {
 	IDX_IN_WL_CNT_VER_11_T(rxtoolate),
 	IDX_IN_WL_CNT_VER_11_T(bphy_badplcp)
 };
-
 
 /* Index conversion table from wl_cnt_ver_6_t to wl_cnt_v_le10_mcst_t */
 static const uint8 wlcntver6t_to_wlcntvle10mcstt[WL_CNT_MCST_VAR_NUM] = {

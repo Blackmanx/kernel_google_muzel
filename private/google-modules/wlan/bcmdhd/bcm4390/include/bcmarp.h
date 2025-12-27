@@ -32,7 +32,6 @@
 /* This marks the start of a packed structure section. */
 #include <packed_section_start.h>
 
-
 #define ARP_OPC_OFFSET		6		/* option code offset */
 #define ARP_SRC_ETH_OFFSET	8		/* src h/w address offset */
 #define ARP_SRC_IP_OFFSET	14		/* src IP address offset */

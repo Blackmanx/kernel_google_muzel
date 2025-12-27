@@ -1,7 +1,7 @@
 /*
  * IP Packet Parser Module.
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -725,7 +725,6 @@ dhd_tcpack_suppress(dhd_pub_t *dhdp, void *pkt)
 	bool ret = FALSE;
 	bool set_dotxinrx = TRUE;
 	unsigned long flags;
-
 
 	if (dhdp->tcpack_sup_mode == TCPACK_SUP_OFF)
 		goto exit;

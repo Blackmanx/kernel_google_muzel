@@ -29,7 +29,6 @@
 #include <vlsi_gci_all_regs.h>
 #endif  /* DONGLEBUILD || COEX_CPU_BUILD */
 
-
 #if !defined(_LANGUAGE_ASSEMBLY) && !defined(__ASSEMBLY__)
 
 /* Calculates the required pad size. This is mainly used in register structures */
@@ -616,6 +615,5 @@ typedef volatile struct {
 #define NCI_ERR_PWR_DOWN_MASK	(0x7fu << 16u)
 
 #endif /* !_LANGUAGE_ASSEMBLY && !__ASSEMBLY__ */
-
 
 #endif	/* _SBGCI_H */

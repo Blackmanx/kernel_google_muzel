@@ -119,7 +119,6 @@ void pcie_watchdog_reset(osl_t *osh, si_t *sih, uint32 wd_mask, uint32 wd_val)
 	si_setcoreidx(sih, origidx);
 }
 
-
 /* CRWLPCIEGEN2-117 pcie_pipe_Iddq should be controlled
  * by the L12 state from MAC to save power by putting the
  * SerDes analog in IDDQ mode

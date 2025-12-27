@@ -87,7 +87,6 @@ typedef struct {
 	uint32 rxbar;
 	uint32 rxbeaconbss;
 
-
 	uint32 txrts;
 	uint32	txucast;	/**< number of unicast tx expecting response other than cts/cwcts */
 	uint32	rxackucast;	/**< number of ucast ACKS received (good FCS) */

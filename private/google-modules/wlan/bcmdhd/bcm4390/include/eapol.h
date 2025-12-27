@@ -304,7 +304,6 @@ typedef BWL_PRE_PACKED_STRUCT struct {
 	uint8	key[EAPOL_WPA_MAX_KEY_SIZE];
 } BWL_POST_PACKED_STRUCT eapol_wpa2_key_mlo_igtk_encap_t;
 
-
 /* BIGTK encapsulation */
 #define EAPOL_RSN_BIPN_SIZE	6u
 #define EAPOL_WPA2_KEY_BIGTK_ENCAP_HDR_LEN	8u

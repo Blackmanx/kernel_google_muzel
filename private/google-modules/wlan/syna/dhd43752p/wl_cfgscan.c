@@ -2068,6 +2068,10 @@ wl_do_escan(struct bcm_cfg80211 *cfg, struct wiphy *wiphy, struct net_device *nd
 	}
 
 	err = wl_run_escan(cfg, ndev, request, WL_SCAN_ACTION_START);
+	if (unlikely(err)) {
+		WL_ERR(("escan failed (%d)\n", err));
+		goto exit;
+	}
 
 	if (passive_channel_skip) {
 		err = wldev_ioctl_set(ndev, WLC_SET_SCAN_PASSIVE_TIME,
@@ -4100,6 +4104,13 @@ wl_cfgscan_init_pno_escan(struct bcm_cfg80211 *cfg, struct net_device *ndev,
 	int err = 0;
 
 	mutex_lock(&cfg->scan_sync);
+
+	/* No scans in progress */
+	if (!cfg->sched_scan_req) {
+		err = BCME_ERROR;
+		WL_ERR(("No sched scan is in progress, err:%d\n", err));
+		goto exit;
+	}
 
 	if (wl_get_drv_status_all(cfg, SCANNING)) {
 		_wl_cfgscan_cancel_scan(cfg);

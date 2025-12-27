@@ -204,7 +204,6 @@ static inline void dhd_buzzz_fmt_init(void)
 	BUZZZ_FMT(DHD_BUS_RXCTL_TWO, "dhd_bus_rxctl cur  resplen<%u> pktid<%u>")
 }
 
-
 #define BUZZZ_LOG(ID, N, ARG...)    dhd_buzzz_log ##N(BUZZZ_EVT__ ##ID, ##ARG)
 
 #else  /* DHD_BUZZZ_LOG_ENABLED */

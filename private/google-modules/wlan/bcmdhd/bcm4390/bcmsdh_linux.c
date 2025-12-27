@@ -233,6 +233,7 @@ int bcmsdh_set_get_wake(bcmsdh_info_t *bcmsdh, int flag)
 	spin_unlock_irqrestore(&bcmsdh_osinfo->oob_irq_spinlock, flags);
 	return ret;
 }
+
 int bcmsdh_get_wake(bcmsdh_info_t *bcmsdh, int flag)
 {
 	bcmsdh_os_info_t *bcmsdh_osinfo = bcmsdh->os_cxt;

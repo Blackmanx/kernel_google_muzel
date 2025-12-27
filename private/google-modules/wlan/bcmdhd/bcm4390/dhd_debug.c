@@ -153,7 +153,6 @@ struct event_log_table fw_verbose_level_map[] = {
 /* reference tab table */
 uint ref_tag_tbl[EVENT_LOG_TAG_MAX + 1] = {0};
 
-
 typedef struct dhddbg_loglist_item {
 	dll_t list;
 	prcd_event_log_hdr_t prcd_log_hdr;
@@ -2330,7 +2329,6 @@ dhd_dbg_start_pkt_monitor(dhd_pub_t *dhdp, int ifidx)
 		return -EINVAL;
 	}
 
-
 	tx_pkt_state = dhdp->dbg->pkt_mon.tx_pkt_state[ifidx];
 	tx_status_state = dhdp->dbg->pkt_mon.tx_status_state[ifidx];
 	rx_pkt_state = dhdp->dbg->pkt_mon.rx_pkt_state[ifidx];
@@ -3115,7 +3113,6 @@ dhd_dbg_process_tx_status(dhd_pub_t *dhdp, int ifidx, void *pkt,
 		cnt = 0; \
 	} \
 }
-
 
 void print_roam_chan_list(char *prefix, uint chan_num, uint16 band_2g,
 	uint16 uni2a, uint8 uni3, uint8 *uni2c)
@@ -3929,6 +3926,12 @@ dhd_dbg_set_fwverbose(dhd_pub_t *dhdp, uint32 new_val)
 }
 
 #ifdef DHD_DEBUGABILITY_LOG_DUMP_RING
+/*
+ * Never use DHD_PRINT or DHD_ERROR(all variants of DHD_* print macros)
+ * in this function to avoid recursive calls.
+ *
+ * As an alternative use printk for logging errors if mandatory.
+ */
 void
 dhd_dbg_ring_write(int type, char *binary_data,
 		int binary_len, const char *fmt, ...)
@@ -3937,6 +3940,7 @@ dhd_dbg_ring_write(int type, char *binary_data,
 	va_list args;
 	struct dhd_dbg_ring_buf *ring_buf = NULL;
 	char tmp_buf[DHD_LOG_DUMP_MAX_TEMP_BUFFER_SIZE] = {0, };
+	dhd_pub_t *dhdp = NULL;
 
 #if defined(__linux__)
 	/* Do not print any contents to rings if called from ISR.
@@ -3948,6 +3952,19 @@ dhd_dbg_ring_write(int type, char *binary_data,
 #endif /* __linux__ */
 
 	ring_buf = &g_ring_buf;
+
+	if (!ring_buf) {
+		return;
+	}
+
+	if (ring_buf->dhd_pub) {
+		dhdp = (dhd_pub_t *)ring_buf->dhd_pub;
+		if (dhd_get_reboot_status(dhdp) >= 0) {
+			return;
+		}
+	} else {
+		return;
+	}
 
 	va_start(args, fmt);
 	len = vsnprintf(tmp_buf, DHD_LOG_DUMP_MAX_TEMP_BUFFER_SIZE, fmt, args);
@@ -3964,17 +3981,15 @@ dhd_dbg_ring_write(int type, char *binary_data,
 		tmp_buf[len] = '\0';
 	}
 
-	if (ring_buf->dhd_pub) {
-		dhd_pub_t *dhdp = (dhd_pub_t *)ring_buf->dhd_pub;
-		if (type == DRIVER_LOG_RING_ID || type == FW_VERBOSE_RING_ID ||
-				type == ROAM_STATS_RING_ID) {
-			if (DBG_RING_ACTIVE(dhdp, type)) {
-				dhd_os_push_push_ring_data(dhdp, type,
-						tmp_buf, strlen(tmp_buf));
-				return;
-			}
+	if (type == DRIVER_LOG_RING_ID || type == FW_VERBOSE_RING_ID ||
+			type == ROAM_STATS_RING_ID) {
+		if (DBG_RING_ACTIVE(dhdp, type)) {
+			dhd_os_push_push_ring_data(dhdp, type,
+					tmp_buf, strlen(tmp_buf));
+			return;
 		}
 	}
+
 	return;
 }
 

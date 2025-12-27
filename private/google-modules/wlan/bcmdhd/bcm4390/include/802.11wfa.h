@@ -186,7 +186,6 @@ typedef struct wme_param_ie wme_param_ie_t;
 #define WMM_OUI_SUBTYPE_PARAMETER	1
 #define WMM_PARAMETER_IE_LEN		24
 
-
 #define SAE_PK_MOD_LEN		32u
 BWL_PRE_PACKED_STRUCT struct dot11_sae_pk_element {
 	uint8 id;			/* IE ID, 221, DOT11_MNG_PROPR_ID */
@@ -448,7 +447,6 @@ typedef BWL_PRE_PACKED_STRUCT struct wfa_rsn_selection_ie {
 	uint8 data;		/* 0 = RSNE, 1 = RSNE Override , 2 = RSN Override 2 */
 } BWL_POST_PACKED_STRUCT wfa_rsn_selection_ie_t;
 #define WFA_RSN_SELECTION_IE_SIZE (sizeof(wfa_rsn_selection_ie_t))
-
 
 #define WFA_RSNOV_LINK_KDE_IE_DATA_OFFSET 7u
 typedef BWL_PRE_PACKED_STRUCT struct wfa_rsnov_link_kde_ie {

@@ -258,7 +258,7 @@ static int dhd_pcie_l1ss_ctrl(int enable, int ch_num);
 #define _pcie_pin_dbg_show(pin, str) PCIE_DUMMY()
 #endif /* PRINT_WAKEUP_GPIO_STATUS */
 #if defined(DHD_TREAT_D3ACKTO_AS_LINKDWN) || defined(DHD_TREAT_D2H_CTO_AS_LINKDOWN)
-#define _pcie_set_skip_config(ch, val) google_pcie_rc_set_link_down(ch)
+#define _pcie_set_skip_config(ch, val) google_pcie_rc_prepare_for_forced_poweroff(ch)
 #endif
 
 static void google_pcie_event_cb(enum google_pcie_callback_type type, void *priv)
@@ -1715,6 +1715,10 @@ device_initcall(dhd_wlan_init);
 #endif /* BCMDHD_MODULAR */
 
 #if !IS_ENABLED(CONFIG_PCI_EXYNOS_GS)
+/*
+ * Returns NULL if the device is not found. Callers must release a returned
+ * device with pci_dev_put().
+ */
 static struct pci_dev *
 dhd_get_pcidev(int ch_num)
 {
@@ -1737,7 +1741,7 @@ dhd_pcie_l1ss_ctrl(int enable, int ch_num)
 {
 	int ret;
 	int aspm_state = 0;
-	struct pci_dev *pci_dev = dhd_get_pcidev(ch_num);
+	struct pci_dev *pci_dev __free(pci_dev_put) = dhd_get_pcidev(ch_num);
 
 	if (!pci_dev) {
 		pr_err("Endpoint device for channel %d not found\n", ch_num);
@@ -1752,7 +1756,6 @@ dhd_pcie_l1ss_ctrl(int enable, int ch_num)
 	DHD_PRINT(("%s: Set aspm link state %x (support_l1ss = %d)\n",
 		__FUNCTION__, aspm_state, support_l1ss));
 	ret = pci_enable_link_state(pci_dev, aspm_state);
-	pci_dev_put(pci_dev);
 	return ret;
 }
 
@@ -1762,12 +1765,10 @@ dhd_pcie_poweron(int ch_num)
 	int ret;
 	u16 val;
 	static u8 speed;
-	struct pci_dev *pci_dev;
-
+	struct pci_dev *pci_dev __free(pci_dev_put) = NULL;
 	u16 ltr = 0x1003;	/* 3145728 ns */
 	u32 ltr_reg;
 	int pos;
-
 	/*
 	 * First poweron will happen at the controller's max-link-speed as
 	 * configured in device tree.  Once link is up, EP will be queried

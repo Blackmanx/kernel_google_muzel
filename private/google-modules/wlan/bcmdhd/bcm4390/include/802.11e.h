@@ -127,7 +127,6 @@ typedef BWL_PRE_PACKED_STRUCT struct tspec {
 #define DOT11E_STATUS_UNKNOWN_TS			38	/* UNKNOWN TS */
 #define DOT11E_STATUS_QSTA_REQ_TIMEOUT		39	/* STA ADDTS request timeout */
 
-
 /* This marks the end of a packed structure section. */
 #include <packed_section_end.h>
 

@@ -2,7 +2,7 @@
  * Shared code between the legacy nci implementation which depended on the EROM and the
  * implementation which depends on vlsi_data.
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -202,7 +202,6 @@ BCMPOSTTRAPFN(nci_error_helper)(void *osh, void *wrapper, bool is_master,
 			IDM_ERRSTATUS_UNCORRECTED_ERR|IDM_ERRSTATUS_SECOND_ERR|
 			IDM_ERRSTATUS_MISC_ERROR);
 
-
 	if (error_clr) {
 		uint32 int_status;
 		W_REG(osh, &idm_regs->idm_errstatus_ns, error_clr);
@@ -210,7 +209,6 @@ BCMPOSTTRAPFN(nci_error_helper)(void *osh, void *wrapper, bool is_master,
 		int_status = R_REG(osh, &idm_regs->idm_interrupt_status_ns);
 		W_REG(osh, &idm_regs->idm_interrupt_status_ns, int_status);
 	}
-
 
 	/* if its an internal timeout exit recovery mode */
 	if (internal_timeout) {
@@ -223,7 +221,6 @@ BCMPOSTTRAPFN(nci_error_helper)(void *osh, void *wrapper, bool is_master,
 	/* Enable back the error detection */
 	W_REG(osh, &idm_regs->idm_errctlr,
 		IDM_ERRCTLR_BUS | IDM_ERRCTLR_ENABLE | IDM_ERRCTLR_UE);
-
 
 end:
 	return ret;

@@ -76,7 +76,6 @@ typedef BWL_PRE_PACKED_STRUCT struct fils_indication_element {
 #define FI_INFO_SHRKEY_AUTH_WOPFS(fc)		(((fc) & FI_INFO_SHRKEY_AUTH_WOPFS_MASK) != 0)
 #define FI_INFO_SHRKEY_AUTH_WPFS(fc)		(((fc) & FI_INFO_SHRKEY_AUTH_WPFS_MASK) != 0)
 
-
 typedef struct ether_addr tbtt_bssid_t;
 
 /* As per D5.0 in 802.11ax Table 9 281 TBTT Information field contents . */
@@ -166,7 +165,6 @@ typedef BWL_PRE_PACKED_STRUCT struct tbtt_info_field {
 	uint8		bss_params;
 } BWL_POST_PACKED_STRUCT tbtt_info_field_t;
 #define TBTT_INFO_FIELD_HDR_LEN	(sizeof(tbtt_info_field_t))
-
 
 /* 11ai D11.0 9.4.2.171.1 Neighbor AP Information field */
 typedef BWL_PRE_PACKED_STRUCT struct neighbor_ap_info_field {
@@ -260,7 +258,6 @@ typedef BWL_PRE_PACKED_STRUCT struct fils_rnr_element {
 /* NBR_AP TBTT OFFSETfield(1) + BSSID(6)+BSS(1) + 20Mhz PSD(1) = 9BYTES */
 #define NBR_AP_TBTT_BSSID_BSS_PSD_LEN		9U
 
-
 /* NBR_AP TBTT OFFSETfield(1) + BSSID(6)+SHORTSSID (4) 11Bytes */
 #define NBR_AP_TBTT_BSSID_SHORT_SSID_LEN	11U
 
@@ -283,7 +280,6 @@ typedef BWL_PRE_PACKED_STRUCT struct fils_rnr_element {
  */
 /* Draft P802.11be Table 9-281 */
 #define NBR_AP_TBTT_BSSID_SHORT_SSID_BSS_PSD_MLD_LEN	16U
-
 
 /* FILS Nonce element */
 #define FILS_NONCE_LENGTH 16u
@@ -317,7 +313,6 @@ typedef BWL_PRE_PACKED_STRUCT struct fils_session_element {
 } BWL_POST_PACKED_STRUCT fils_session_element_t;
 
 #define FILS_SESSION_ELEM_LEN	(sizeof(fils_session_element_t))
-
 
 /* 9.4.2.179 FILS key confirmation element */
 #define FILS_KEY_CONFIRMATION_HEADER_LEN 3u

@@ -466,7 +466,6 @@ typedef volatile struct {
 #define CMD52_RW_FLAG_M		BITFIELD_MASK(1)  /* Bit  31       - R/W flag */
 #define CMD52_RW_FLAG_S		31
 
-
 #define CMD53_BYTE_BLK_CNT_M	BITFIELD_MASK(9) /* Bits [8:0]     - Byte/Block Count of CMD53 */
 #define CMD53_BYTE_BLK_CNT_S	0
 #define CMD53_REG_ADDR_M	BITFIELD_MASK(17) /* Bits [25:9]   - register address */
@@ -556,7 +555,6 @@ typedef volatile struct {
 #define RSP1_ADDR_ERR_S		30
 #define RSP1_OUT_OF_RANGE_M	BITFIELD_MASK(1)  /* Bit 31   - Cmd arg was out of range */
 #define RSP1_OUT_OF_RANGE_S	31
-
 
 #define RSP5_DATA_M		BITFIELD_MASK(8)  /* Bits [0:7]   - data */
 #define RSP5_DATA_S		0

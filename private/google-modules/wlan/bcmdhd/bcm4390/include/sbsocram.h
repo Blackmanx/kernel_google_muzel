@@ -188,5 +188,4 @@ typedef volatile struct sbsocramregs {
 #define   SOCRAM_BANKINFO_SZBASE          8192
 #define SOCRAM_BANKSIZE_SHIFT         13      /* SOCRAM_BANKINFO_SZBASE */
 
-
 #endif	/* _SBSOCRAM_H */

@@ -897,7 +897,6 @@ static const uint8 wlcntver11t_to_wlcntvle10mcstt[WL_CNT_MCST_VAR_NUM] = {
 	IDX_IN_WL_CNT_VER_11_T(bphy_badplcp)
 };
 
-
 /* Index conversion table from wl_cnt_ver_6_t to wl_cnt_v_le10_mcst_t */
 static const uint8 wlcntver6t_to_wlcntvle10mcstt[WL_CNT_MCST_VAR_NUM] = {
 	IDX_IN_WL_CNT_VER_6_T(txallfrm),

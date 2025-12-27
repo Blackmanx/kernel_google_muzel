@@ -3,7 +3,7 @@
  *
  * Dependencies: bcmeth.h
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -1349,6 +1349,7 @@ typedef enum {
 	CHANSW_SLOTTED_CMN_SYNC = 29, /* channel switch due to Common Sync Layer */
 	CHANSW_SLOTTED_BSS_CAL = 30,	/* channel switch due to Cal request from slotted bss */
 	CHANSW_PASN = 31,	/* channel switch due to PASN authentication */
+
 	CHANSW_MAX_NUMBER = 32	/* max channel switch reason */
 } wl_chansw_reason_t;
 

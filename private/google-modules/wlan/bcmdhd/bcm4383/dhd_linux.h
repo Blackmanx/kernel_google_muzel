@@ -222,10 +222,14 @@ typedef enum {
 #define HIST_BIN_SIZE	9
 
 #if defined(DHD_LB_TXP)
-/* Pkttag not compatible with PROP_TXSTATUS or WLFC */
+/*
+ * Do not use this pkttag, rather use dhd_pkttag_fd_t
+ * Pkttag not compatible with PROP_TXSTATUS or WLFC
+ */
 typedef struct dhd_tx_lb_pkttag_fr {
+	uint16 flowid;
+	uint16 ifidx;
 	struct net_device *net;
-	int ifidx;
 } dhd_tx_lb_pkttag_fr_t;
 
 #define DHD_LB_TX_PKTTAG_SET_NETDEV(tag, netdevp)	((tag)->net = netdevp)

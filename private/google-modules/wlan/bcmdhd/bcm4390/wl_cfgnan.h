@@ -275,7 +275,6 @@ typedef enum nan_range_role {
 	NAN_RANGING_ROLE_RESPONDER = 2
 } nan_range_role_t;
 
-
 typedef struct nan_svc_inst {
 	uint8  inst_id;      /* publisher/subscriber id */
 	uint8  inst_type;    /* publisher/subscriber */
@@ -803,7 +802,6 @@ typedef struct wl_nan_iov {
 	uint8 *nan_iov_buf;
 } wl_nan_iov_t;
 
-
 #ifdef WL_NAN_DISC_CACHE
 
 #ifndef CUSTOM_NAN_MAX_CACHE_DISC_RESULT
@@ -947,6 +945,7 @@ typedef struct wl_nancfg
 	uint64  rng_end_ts;
 	struct	delayed_work nan_pairing; /* WQ for pairing event timeout handling */
 	uint32	nan_pairing_timeout;
+	uint32  pending_txs_token; /* Pending txs followup token */
 } wl_nancfg_t;
 
 #define NAN_RTT_ENABLED(cfg) (wl_cfgnan_is_enabled(cfg) && \

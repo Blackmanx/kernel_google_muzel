@@ -39,7 +39,6 @@ typedef uint8 *bl_ptr_t;
 typedef uint32 bl_ptr_t;
 #endif /* TEST_BOOROM_BUILD */
 
-
 /* Memory layout
  * Addresses have to be uint32 instead of uint8* because the host and dongle
  * may have different pointer sizes.

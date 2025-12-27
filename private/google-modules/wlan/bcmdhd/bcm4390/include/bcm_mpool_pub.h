@@ -60,7 +60,6 @@
 
 #include <typedefs.h> /* needed for uint16 */
 
-
 /*
 **************************************************************************
 *
@@ -91,14 +90,12 @@ typedef struct bcm_mpm_mgr *bcm_mpm_mgr_h;
 struct bcm_mp_pool;
 typedef struct bcm_mp_pool *bcm_mp_pool_h;
 
-
 /*
  * To make instrumentation more readable, every memory
  * pool must have a readable name. Pool names are up to
  * 8 bytes including '\0' termination. (7 printable characters.)
  */
 #define BCM_MP_NAMELEN 8
-
 
 /*
  * Type definition for pool statistics.
@@ -111,7 +108,6 @@ typedef struct bcm_mp_stats {
 	uint16 high_water;          /* Max number of allocated objects. */
 	uint16 failed_alloc;        /* Failed allocations. */
 } bcm_mp_stats_t;
-
 
 /*
 **************************************************************************
@@ -134,7 +130,6 @@ typedef struct bcm_mp_stats {
  *    BCME_NOMEM  Initialization failed due to no memory. Object must not be used.
  */
 int bcm_mpm_init(struct osl_info *osh, int max_pools, bcm_mpm_mgr_h *mgrp);
-
 
 /*
  * bcm_mpm_deinit() - de-initialize the whole memory pool system.
@@ -180,7 +175,6 @@ int bcm_mpm_create_prealloc_pool(bcm_mpm_mgr_h mgr,
                                  const char *poolname,
                                  bcm_mp_pool_h *newp);
 
-
 /*
  * bcm_mpm_delete_prealloc_pool() - Delete a memory pool. This should only be called after
  *                                  all memory objects have been freed back to the pool.
@@ -219,7 +213,6 @@ int bcm_mpm_create_heap_pool(bcm_mpm_mgr_h mgr, unsigned int obj_sz,
                              const char *poolname,
                              bcm_mp_pool_h *newp);
 
-
 /*
  * bcm_mpm_delete_heap_pool() - Delete a memory pool. This should only be called after
  *                              all memory objects have been freed back to the pool.
@@ -234,7 +227,6 @@ int bcm_mpm_create_heap_pool(bcm_mpm_mgr_h mgr, unsigned int obj_sz,
  *
  */
 int bcm_mpm_delete_heap_pool(bcm_mpm_mgr_h mgr, bcm_mp_pool_h *poolp);
-
 
 /*
  * bcm_mpm_stats() - Return stats for all pools
@@ -252,7 +244,6 @@ int bcm_mpm_delete_heap_pool(bcm_mpm_mgr_h mgr, bcm_mp_pool_h *poolp);
  */
 int bcm_mpm_stats(bcm_mpm_mgr_h mgr, bcm_mp_stats_t *stats, int *nentries);
 
-
 /*
  * bcm_mpm_dump() - Display statistics on all pools
  *
@@ -266,7 +257,6 @@ int bcm_mpm_stats(bcm_mpm_mgr_h mgr, bcm_mp_stats_t *stats, int *nentries);
  *
  */
 int bcm_mpm_dump(bcm_mpm_mgr_h mgr, struct bcmstrbuf *b);
-
 
 /*
  * bcm_mpm_get_obj_size() - The size of memory objects may need to be padded to
@@ -289,7 +279,6 @@ int bcm_mpm_dump(bcm_mpm_mgr_h mgr, struct bcmstrbuf *b);
  */
 int bcm_mpm_get_obj_size(bcm_mpm_mgr_h mgr, unsigned int obj_sz, unsigned int *padded_obj_sz);
 
-
 /*
 ***************************************************************************
 *
@@ -297,7 +286,6 @@ int bcm_mpm_get_obj_size(bcm_mpm_mgr_h mgr, unsigned int obj_sz, unsigned int *p
 *
 ***************************************************************************
 */
-
 
 /*
  * bcm_mp_alloc() - Allocate a memory pool object.
@@ -339,7 +327,6 @@ int bcm_mp_free(bcm_mp_pool_h pool, void *objp);
  */
 void bcm_mp_stats(bcm_mp_pool_h pool, bcm_mp_stats_t *stats);
 
-
 /*
  * bcm_mp_dump() - Dump a pool
  *
@@ -353,6 +340,5 @@ void bcm_mp_stats(bcm_mp_pool_h pool, bcm_mp_stats_t *stats);
  *
  */
 int bcm_mp_dump(bcm_mp_pool_h pool, struct bcmstrbuf *b);
-
 
 #endif /* _BCM_MPOOL_PUB_H */

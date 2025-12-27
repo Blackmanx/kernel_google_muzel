@@ -33,7 +33,6 @@
 /* This marks the start of a packed structure section. */
 #include <packed_section_start.h>
 
-
 /* WiFi P2P OUI values */
 #define P2P_VER			WFA_OUI_TYPE_P2P	/* P2P version: 9=WiFi P2P v1.0 */
 
@@ -95,7 +94,6 @@ typedef struct wifi_p2p_ie wifi_p2p_ie_t;
 
 #define P2P_SE_VS_ID_SERVICES	0x1b /* BRCM proprietary subel: L2 Services */
 
-
 /* WiFi P2P IE subelement: P2P Capability (capabilities info) */
 BWL_PRE_PACKED_STRUCT struct wifi_p2p_info_se_s {
 	uint8	eltId;		/* SE ID: P2P_SEID_P2P_INFO */
@@ -121,7 +119,6 @@ typedef struct wifi_p2p_info_se_s wifi_p2p_info_se_t;
 #define P2P_CAPSE_GRP_X_CONNECT		0x10 /* Cross Connection */
 #define P2P_CAPSE_GRP_PERSISTENT	0x20 /* Persistent Reconnect */
 #define P2P_CAPSE_GRP_FORMATION		0x40 /* Group Formation */
-
 
 /* WiFi P2P IE subelement: Group Owner Intent */
 BWL_PRE_PACKED_STRUCT struct wifi_p2p_intent_se_s {
@@ -242,7 +239,6 @@ BWL_PRE_PACKED_STRUCT struct wifi_p2p_channel_se_s {
 	uint8	channel;	/* Channel */
 } BWL_POST_PACKED_STRUCT;
 typedef struct wifi_p2p_channel_se_s wifi_p2p_channel_se_t;
-
 
 /* Channel Entry structure within the Channel List SE */
 BWL_PRE_PACKED_STRUCT struct wifi_p2p_chanlist_entry_s {
@@ -389,7 +385,6 @@ BWL_PRE_PACKED_STRUCT struct wifi_p2p_serv_inst_data_se_s {
 } BWL_POST_PACKED_STRUCT;
 typedef struct wifi_p2p_serv_inst_data_se_s wifi_p2p_serv_inst_data_se_t;
 
-
 /* WiFi P2P IE subelement: Connection capability */
 BWL_PRE_PACKED_STRUCT struct wifi_p2p_conn_cap_data_se_s {
 	uint8	eltId;			/* SE ID: P2P_SEID_CONNECT_CAP */
@@ -399,7 +394,6 @@ BWL_PRE_PACKED_STRUCT struct wifi_p2p_conn_cap_data_se_s {
 					*/
 } BWL_POST_PACKED_STRUCT;
 typedef struct wifi_p2p_conn_cap_data_se_s wifi_p2p_conn_cap_data_se_t;
-
 
 /* WiFi P2P IE subelement: Advertisement ID */
 BWL_PRE_PACKED_STRUCT struct wifi_p2p_advt_id_se_s {
@@ -412,7 +406,6 @@ BWL_PRE_PACKED_STRUCT struct wifi_p2p_advt_id_se_s {
 } BWL_POST_PACKED_STRUCT;
 typedef struct wifi_p2p_advt_id_se_s wifi_p2p_advt_id_se_t;
 
-
 /* WiFi P2P IE subelement: Advertise Service Hash */
 BWL_PRE_PACKED_STRUCT struct wifi_p2p_adv_serv_info_s {
 	uint8	advt_id[4];			/* SE Advertise ID for the service */
@@ -421,7 +414,6 @@ BWL_PRE_PACKED_STRUCT struct wifi_p2p_adv_serv_info_s {
 	uint8	serv_name[1];			/* service name field */
 } BWL_POST_PACKED_STRUCT;
 typedef struct wifi_p2p_adv_serv_info_s wifi_p2p_adv_serv_info_t;
-
 
 /* WiFi P2P IE subelement: Advertise Service Hash */
 BWL_PRE_PACKED_STRUCT struct wifi_p2p_advt_serv_se_s {
@@ -437,7 +429,6 @@ BWL_PRE_PACKED_STRUCT struct wifi_p2p_advt_serv_se_s {
 } BWL_POST_PACKED_STRUCT;
 typedef struct wifi_p2p_advt_serv_se_s wifi_p2p_advt_serv_se_t;
 
-
 /* WiFi P2P IE subelement: Session ID */
 BWL_PRE_PACKED_STRUCT struct wifi_p2p_ssn_id_se_s {
 	uint8	eltId;			/* SE ID: P2P_SEID_SESSION_ID */
@@ -448,7 +439,6 @@ BWL_PRE_PACKED_STRUCT struct wifi_p2p_ssn_id_se_s {
 	uint8	ssn_mac[6];		/* P2P device address of the seeker - session mac */
 } BWL_POST_PACKED_STRUCT;
 typedef struct wifi_p2p_ssn_id_se_s wifi_p2p_ssn_id_se_t;
-
 
 #define P2P_ADVT_SERV_SE_FIXED_LEN	3	/* Includes only the element ID and len */
 #define P2P_ADVT_SERV_INFO_FIXED_LEN	7	/* Per ADV Service Instance advt_id +
@@ -476,7 +466,6 @@ typedef struct wifi_p2p_action_frame wifi_p2p_action_frame_t;
 #define P2P_AF_PRESENCE_REQ		1	/* P2P Presence Request */
 #define P2P_AF_PRESENCE_RSP		2	/* P2P Presence Response */
 #define P2P_AF_GO_DISC_REQ		3	/* GO Discoverability Request */
-
 
 /* WiFi P2P Public Action Frame */
 BWL_PRE_PACKED_STRUCT struct wifi_p2p_pub_act_frame {

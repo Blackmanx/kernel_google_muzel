@@ -1,7 +1,7 @@
 /*
  * Linux OS Independent Layer
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -779,9 +779,7 @@ extern void osl_reg_unmap(void *va);
 #define	OR_SM(r, v)		(*(r) |= (v))
 #define	BZERO_SM(r, len)	bzero((r), (len))
 
-
 #endif	/* BINOSL */
-
 
 #define OSL_RAND()		osl_rand()
 extern uint32 osl_rand(void);

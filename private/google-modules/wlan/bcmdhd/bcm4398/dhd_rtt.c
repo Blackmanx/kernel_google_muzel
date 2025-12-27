@@ -1,7 +1,7 @@
 /*
  * Broadcom Dongle Host Driver (DHD), RTT
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -95,7 +95,6 @@ static DEFINE_SPINLOCK(noti_list_lock);
 		}\
 	} while (0)
 
-
 #define TIMESPEC64_TO_US(ts)  (((ts).tv_sec * USEC_PER_SEC) + \
 							(ts).tv_nsec / NSEC_PER_USEC)
 
@@ -161,7 +160,6 @@ struct rtt_noti_callback {
 	dhd_rtt_compl_noti_fn noti_fn;
 };
 
-
 /* bitmask indicating which command groups; */
 typedef enum {
 	FTM_SUBCMD_FLAG_METHOD	= 0x01,	/* FTM method command */
@@ -183,7 +181,6 @@ typedef struct ftm_subcmd_info {
 	bcm_xtlv_unpack_cbfn_t *handler;  /* cmd response handler (optional) */
 	ftm_subcmd_flag_t	cmdflag; /* CMD flag (optional)  */
 } ftm_subcmd_info_t;
-
 
 typedef struct ftm_config_options_info {
 	uint32 flags;				/* wl_proxd_flags_t/wl_proxd_session_flags_t */
@@ -217,7 +214,6 @@ typedef struct ftm_strmap_entry {
 	int32		id;
 	char		*text;
 } ftm_strmap_entry_t;
-
 
 typedef struct ftm_status_map_host_entry {
 	wl_proxd_status_t proxd_status;
@@ -615,7 +611,6 @@ ftm_map_id_to_str(int32 id, const ftm_strmap_entry_t *p_table, uint32 num_entrie
 	return "invalid";
 }
 
-
 #if defined(WL_CFG80211) && defined(RTT_DEBUG)
 /* define entry, e.g. { WL_PROXD_CMD_xxx, "WL_PROXD_CMD_xxx" } */
 #define DEF_STRMAP_ENTRY(id) { (id), #id }
@@ -655,7 +650,6 @@ ftm_cmdid_to_str(uint16 cmdid)
 	return ftm_map_id_to_str((int32) cmdid, &ftm_cmdid_map[0], ARRAYSIZE(ftm_cmdid_map));
 }
 #endif /* WL_CFG80211 && RTT_DEBUG */
-
 
 /*
 * convert BCME_xxx error codes into related error strings
@@ -710,7 +704,6 @@ ftm_session_state_value_to_logstr(wl_proxd_session_state_t state)
 		ARRAYSIZE(ftm_session_state_value_loginfo));
 }
 
-
 #ifdef WL_CFG80211
 /*
 * send 'proxd' iovar for all ftm get-related commands
@@ -752,7 +745,6 @@ rtt_do_get_ioctl(dhd_pub_t *dhd, wl_proxd_iov_t *p_proxd_iov, uint16 proxd_iovsi
 exit:
 	return status;
 }
-
 
 static wl_proxd_iov_t *
 rtt_alloc_getset_buf(dhd_pub_t *dhd, wl_proxd_method_t method, wl_proxd_session_id_t session_id,
@@ -799,7 +791,6 @@ rtt_alloc_getset_buf(dhd_pub_t *dhd, wl_proxd_method_t method, wl_proxd_session_
 
 	return p_proxd_iov;
 }
-
 
 static int
 dhd_rtt_common_get_handler(dhd_pub_t *dhd, ftm_subcmd_info_t *p_subcmd_info,
@@ -1656,7 +1647,6 @@ exit:
 	return setup_in_prog;
 }
 
-
 void
 dhd_rtt_nan_update_directed_setup_inprog(dhd_pub_t *dhd,
 	nan_ranging_inst_t *rng_inst, bool inprog)
@@ -2468,7 +2458,6 @@ dhd_rtt_get_geofence_current_target(dhd_pub_t *dhd)
 	return cur_target;
 }
 
-
 /* returns geofence target from list for the peer */
 rtt_geofence_target_info_t*
 dhd_rtt_get_geofence_target(dhd_pub_t *dhd, struct ether_addr* peer_addr, int8 *index)
@@ -2527,7 +2516,6 @@ dhd_rtt_add_geofence_target(dhd_pub_t *dhd, rtt_geofence_target_info_t *target)
 		err = BCME_OK;
 		goto exit;
 	}
-
 
 	geofence_target_cnt = rtt_status->geofence_cfg.geofence_target_cnt;
 	if (geofence_target_cnt >= RTT_MAX_GEOFENCE_TARGET_CNT) {
@@ -2877,7 +2865,6 @@ dhd_rtt_invalid_states(struct net_device *ndev, struct ether_addr *peer_addr)
 
 	UNUSED_PARAMETER(cfg);
 	UNUSED_PARAMETER(invalid_reason);
-
 
 	/* Make sure peer addr is not NULL in caller */
 	ASSERT(peer_addr);
@@ -3815,7 +3802,6 @@ dhd_rtt_start_ranging(dhd_pub_t *dhd, rtt_config_params_t *config)
 			"err=%d\n", ret));
 		goto done;	/* abort */
 	}
-
 
 	/* allocate a temp buffer for parsing cmd-args */
 	ranging_sids_size = OFFSETOF(wl_proxd_session_id_list_t, ids) +
@@ -5494,7 +5480,6 @@ dhd_rtt_event_handler(dhd_pub_t *dhd, wl_event_msg_t *event, void *event_data)
 	NULL_CHECK(rtt_status, "rtt_status is NULL", ret);
 	mutex_lock(&rtt_status->rtt_mutex);
 
-
 	if (RTT_IS_STOPPED(rtt_status)) {
 		/* Ignore the Proxd event */
 		DHD_RTT((" event handler rtt is stopped \n"));
@@ -5695,7 +5680,6 @@ dhd_rtt_event_handler(dhd_pub_t *dhd, wl_event_msg_t *event, void *event_data)
 			}
 		}
 		break;
-
 
 	default:
 		DHD_RTT_ERR(("WLC_E_PROXD: not supported EVENT Type:%d\n", event_type));

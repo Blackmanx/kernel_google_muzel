@@ -2,7 +2,7 @@
  * Dongle BUS interface Abstraction layer
  *   target serial buses like USB, SDIO, SPI, etc.
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -443,7 +443,6 @@ extern void *dbus_get_fw_nvfile(int devid, int chiprev, uint8 **fw, int *fwlen, 
   uint16 boardtype, uint16 boardrev);
 extern void dbus_release_fw_nvfile(void *firmware);
 #endif  /* #if defined(BCM_REQUEST_FW) */
-
 
 #if defined(EHCI_FASTPATH_TX) || defined(EHCI_FASTPATH_RX)
 /*

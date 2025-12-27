@@ -1,7 +1,7 @@
 /*
  * BCMSDH Function Driver for the native SDIO/MMC driver in the Linux Kernel
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -109,7 +109,6 @@ extern bool check_client_intr(sdioh_info_t *sd);
 /* Core interrupt enable/disable of device interrupts */
 extern void sdioh_sdmmc_devintr_on(sdioh_info_t *sd);
 extern void sdioh_sdmmc_devintr_off(sdioh_info_t *sd);
-
 
 /**************************************************************
  * Internal interfaces: bcmsdh_sdmmc.c references to per-port code

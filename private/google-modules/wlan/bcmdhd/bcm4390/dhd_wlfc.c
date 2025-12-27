@@ -44,7 +44,6 @@
 #include <dhd_ip.h>
 #endif /* DHDTCPACK_SUPPRESS */
 
-
 /*
  * wlfc naming and lock rules:
  *
@@ -1755,7 +1754,6 @@ _dhd_wlfc_cleanup_txq(dhd_pub_t *dhd, f_processpkt_t fn, void *arg)
 	}
 	dhd_os_sdunlock_txq(dhd);
 
-
 	while ((pkt = head)) {
 		head = PKTLINK(pkt);
 		PKTSETLINK(pkt, NULL);
@@ -1958,7 +1956,6 @@ _dhd_wlfc_mac_entry_update(athost_wl_status_info_t *ctx, wlfc_mac_descriptor_t *
 	}
 	return rc;
 } /* _dhd_wlfc_mac_entry_update */
-
 
 #ifdef LIMIT_BORROW
 
@@ -2403,7 +2400,6 @@ _dhd_wlfc_compressed_txstatus_update(dhd_pub_t *dhd, uint8 *pkt_info, uint8 len,
 			uint32 old_t;
 			uint32 delta;
 			old_t = ((wlfc_hanger_t *)(wlfc->hanger))->items[hslot].push_time;
-
 
 			wlfc->stats.latency_sample_count++;
 			if (new_t > old_t)

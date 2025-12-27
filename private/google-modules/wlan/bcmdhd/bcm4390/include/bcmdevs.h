@@ -378,7 +378,6 @@
 #define PAPD_CALREF_DB_5G 0xFF00
 #define PAPD_CALREF_DB_5G_SHIFT 8
 
-
 /* board specific GPIO assignment, gpio 0-3 are also customer-configurable led */
 #define	BOARD_GPIO_BTC3W_IN	0x850	/* bit 4 is RF_ACTIVE, bit 6 is STATUS, bit 11 is PRI */
 #define	BOARD_GPIO_BTC3W_OUT	0x020	/* bit 5 is TX_CONF */

@@ -262,6 +262,7 @@ wl_cfgvif_del_if(struct bcm_cfg80211 *cfg, struct net_device *primary_ndev,
 	if ((cfg->vif_count == 0) && primary_ndev &&
 		!(primary_ndev->flags & IFF_UP) &&
 		!(IS_CFG80211_STATIC_IF_ACTIVE(cfg)) &&
+		!(IS_CFG80211_NMI_IF_ACTIVE(cfg)) &&
 #ifdef WL_NAN
 		(wl_cfgnan_is_enabled(cfg) == FALSE) &&
 #endif /* WL_NAN */
@@ -578,6 +579,9 @@ wl_cfg80211_get_sec_iface(struct bcm_cfg80211 *cfg)
 {
 	dhd_pub_t *dhd = (dhd_pub_t *)(cfg->pub);
 	struct net_device *p2p_ndev = NULL;
+#ifdef DHD_ART
+	struct net_device *monitor_dev = NULL;
+#endif /* DHD_ART */
 
 	p2p_ndev = wl_to_p2p_bss_ndev(cfg,
 		P2PAPI_BSSCFG_CONNECTION1);
@@ -603,6 +607,13 @@ wl_cfg80211_get_sec_iface(struct bcm_cfg80211 *cfg)
 			return WL_IF_TYPE_P2P_GC;
 		}
 	}
+
+#ifdef DHD_ART
+	monitor_dev = dhd_get_monitor_ndev(dhd);
+	if (monitor_dev && (monitor_dev->flags & IFF_UP)) {
+		return WL_IF_TYPE_ART;
+	}
+#endif /* DHD_ART */
 
 #ifdef WL_NAN
 	if (wl_cfgnan_is_nan_active(bcmcfg_to_prmry_ndev(cfg)) ||
@@ -662,7 +673,7 @@ wl_cfg80211_data_if_mgmt(struct bcm_cfg80211 *cfg,
 		case WL_IF_POLICY_FCFS: {
 			WL_INFORM_MEM(("Found active iface = %s, can't support new iface = %s\n",
 				wl_iftype_to_str(sec_wl_if_type), wl_iftype_to_str(new_wl_iftype)));
-			ret = BCME_ERROR;
+			ret = BCME_NORESOURCE;
 			break;
 		}
 		case WL_IF_POLICY_LP: {
@@ -824,6 +835,7 @@ wl_cfg80211_disc_if_mgmt(struct bcm_cfg80211 *cfg,
 			*disable_p2p = true;
 			break;
 		}
+		case WL_IF_TYPE_ART:
 		case WL_IF_TYPE_STA:
 		case WL_IF_TYPE_AP: {
 			*disable_nan = true;
@@ -934,6 +946,13 @@ wl_cfg80211_handle_if_role_conflict(struct bcm_cfg80211 *cfg,
 	s32 ret = BCME_OK;
 
 	WL_DBG_MEM(("Incoming iface = %s\n", wl_iftype_to_str(new_wl_iftype)));
+
+#ifdef DHD_ART
+	if ((new_wl_iftype == WL_IF_TYPE_ART) && (wl_cfg80211_is_dualsta_active(cfg))) {
+		WL_ERR(("Avoiding ART since dual STA is active\n"));
+		return BCME_ERROR;
+	}
+#endif /* DHD_ART */
 
 	if (!is_discovery_iface(new_wl_iftype)) {
 		/* Incoming data interface request */
@@ -1250,7 +1269,7 @@ wl_cfg80211_del_virtual_iface(struct wiphy *wiphy, bcm_struct_cfgdev *cfgdev)
 	ndev = wdev_to_ndev(wdev);
 #ifdef WL_STATIC_IF
 	/* interface delete is invalid for static interface */
-	if (IS_CFG80211_STATIC_IF(cfg, wdev_to_ndev(wdev))) {
+	if (IS_CFG80211_STATIC_IF(cfg, ndev) || (ndev && IS_NMI_IFACE(ndev->name))) {
 		WL_ERR(("Invalid request to delete static interface %s\n", wdev->netdev->name));
 		return -EINVAL;
 	}
@@ -1431,7 +1450,7 @@ wl_cfg80211_change_virtual_iface(struct wiphy *wiphy, struct net_device *ndev,
 	netinfo = wl_get_netinfo_by_wdev(cfg, ndev->ieee80211_ptr);
 	if (!netinfo) {
 #ifdef WL_STATIC_IF
-		if (IS_CFG80211_STATIC_IF(cfg, ndev)) {
+		if (IS_CFG80211_STATIC_IF(cfg, ndev) || IS_NMI_IFACE(ndev->name)) {
 			/* Incase of static interfaces, the netinfo will be
 			 * allocated only when FW interface is initialized. So
 			 * store the value and use it during initialization.
@@ -1645,11 +1664,17 @@ wl_cfg80211_cleanup_virtual_ifaces(struct bcm_cfg80211 *cfg, bool rtnl_lock_reqd
 			/* Ensure interfaces are down before deleting */
 #ifdef WL_STATIC_IF
 			/* Avoiding cleaning static ifaces */
-			if (!IS_CFG80211_STATIC_IF(cfg, iter->ndev))
+			if (!IS_CFG80211_STATIC_IF(cfg, iter->ndev) ||
+				!IS_NMI_IFACE(iter->ndev->name))
 #endif /* WL_STATIC_IF */
 			{
 				WL_INFORM(("Cleaning up iface:%s \n", iter->ndev->name));
-				dev_close(iter->ndev);
+				if (iter->ndev->flags & IFF_UP) {
+					WL_ERR(("interface in UP state, force dev_close\n"));
+					dev_close(iter->ndev);
+				} else {
+					WL_DBG_MEM(("interface in down state\n"));
+				}
 #if defined(WLAN_ACCEL_BOOT)
 				/* Trigger force reg_on to ensure clean up of virtual interface
 				* states in FW for any residual interface states, casued due to
@@ -9592,3 +9617,141 @@ wl_cfgvif_update_assoc_fail_status(struct bcm_cfg80211 *cfg, struct net_device *
 	return 0;
 }
 #endif /* (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0)) */
+
+s32
+wl_cfgvif_to_fw_iftype(wl_iftype_t iftype)
+{
+	s32 ret = BCME_ERROR;
+
+	switch (iftype) {
+		case WL_IF_TYPE_AP:
+			ret = WL_INTERFACE_TYPE_AP;
+			break;
+		case WL_IF_TYPE_STA:
+			ret = WL_INTERFACE_TYPE_STA;
+			break;
+		case WL_IF_TYPE_NAN_NMI:
+			ret = WL_INTERFACE_TYPE_NAN_NMI;
+			break;
+		case WL_IF_TYPE_NAN:
+			ret = WL_INTERFACE_TYPE_NAN;
+			break;
+		case WL_IF_TYPE_P2P_DISC:
+			ret = WL_INTERFACE_TYPE_P2P_DISC;
+			break;
+		case WL_IF_TYPE_P2P_GO:
+			ret = WL_INTERFACE_TYPE_P2P_GO;
+			break;
+		case WL_IF_TYPE_P2P_GC:
+			ret = WL_INTERFACE_TYPE_P2P_GC;
+			break;
+#ifdef DHD_ART
+		case WL_IF_TYPE_ART:
+			ret = WL_INTERFACE_TYPE_ART;
+			break;
+#endif /* DHD_ART */
+
+		default:
+			WL_ERR(("Unsupported type:%d \n", iftype));
+			ret = -EINVAL;
+			break;
+	}
+	return ret;
+}
+
+s32
+wl_cfgvif_interface_ops(struct bcm_cfg80211 *cfg,
+	struct net_device *ndev, s32 bsscfg_idx,
+	wl_iftype_t cfg_iftype, s32 del, u8 *addr)
+{
+	s32 ret;
+	struct wl_interface_create_v2 iface;
+	wl_interface_create_v3_t iface_v3;
+	struct wl_interface_info_v1 *info;
+	wl_interface_info_v2_t *info_v2;
+	uint32 ifflags = 0;
+	bool use_iface_info_v2 = false;
+	u8 ioctl_buf[WLC_IOCTL_SMLEN];
+	s32 iftype;
+
+	if (del) {
+		ret = wldev_iovar_setbuf_bsscfg(ndev, "interface_remove", NULL,
+			0, ioctl_buf, sizeof(ioctl_buf), bsscfg_idx, NULL);
+		if (unlikely(ret)) {
+			WL_ERR(("Interface remove failed!! ret %d\n", ret));
+		}
+		return ret;
+	}
+
+	/* Interface create */
+	bzero(&iface, sizeof(iface));
+	/*
+	 * flags field is still used along with iftype inorder to support the old version of the
+	 * FW work with the latest app changes.
+	 */
+
+	iftype = wl_cfgvif_to_fw_iftype(cfg_iftype);
+	if (iftype < 0) {
+		return -ENOTSUPP;
+	}
+
+	if (addr) {
+		ifflags |= WL_INTERFACE_MAC_USE;
+		WL_INFORM_MEM(("use macaddr:" MACDBG " for i/f create\n",
+			MAC2STRDBG(addr)));
+	}
+
+	/* Pass ver = 0 for fetching the interface_create iovar version */
+	ret = wldev_iovar_getbuf(ndev, "interface_create",
+		&iface, sizeof(struct wl_interface_create_v2),
+		ioctl_buf, sizeof(ioctl_buf), NULL);
+	if (ret == BCME_UNSUPPORTED) {
+		WL_ERR(("interface_create iovar not supported\n"));
+		return ret;
+	} else if ((ret == 0) && *((uint32 *)ioctl_buf) == WL_INTERFACE_CREATE_VER_3) {
+		WL_DBG(("interface_create version 3. flags:0x%x \n", ifflags));
+		use_iface_info_v2 = true;
+		bzero(&iface_v3, sizeof(wl_interface_create_v3_t));
+		iface_v3.ver = WL_INTERFACE_CREATE_VER_3;
+		iface_v3.iftype = iftype;
+		iface_v3.flags = ifflags;
+		if (addr) {
+			memcpy(&iface_v3.mac_addr.octet, addr, ETH_ALEN);
+		}
+		ret = wldev_iovar_getbuf(ndev, "interface_create",
+			&iface_v3, sizeof(wl_interface_create_v3_t),
+			ioctl_buf, sizeof(ioctl_buf), NULL);
+	} else {
+		/* On any other error, attempt with iovar version 2 */
+		WL_DBG(("interface_create version 2. get_ver:%d ifflags:0x%x\n", ret, ifflags));
+		iface.ver = WL_INTERFACE_CREATE_VER_2;
+		iface.iftype = iftype;
+		iface.flags = ifflags;
+		if (addr) {
+			memcpy(&iface.mac_addr.octet, addr, ETH_ALEN);
+		}
+		ret = wldev_iovar_getbuf(ndev, "interface_create",
+			&iface, sizeof(struct wl_interface_create_v2),
+			ioctl_buf, sizeof(ioctl_buf), NULL);
+	}
+
+	if (unlikely(ret)) {
+		WL_ERR(("Interface create failed!! iftype:%d flags:0x%x ret %d\n",
+			iftype, ifflags, ret));
+		return ret;
+	}
+
+	/* success case */
+	if (use_iface_info_v2 == true) {
+		info_v2 = (wl_interface_info_v2_t *)ioctl_buf;
+		ret = info_v2->bsscfgidx;
+	} else {
+		/* Use v1 struct */
+		info = (struct wl_interface_info_v1 *)ioctl_buf;
+		ret = info->bsscfgidx;
+	}
+
+	WL_INFORM_MEM(("wl interface create success!! bssidx:%d iftype:%d\n",
+		ret, iftype));
+	return ret;
+}

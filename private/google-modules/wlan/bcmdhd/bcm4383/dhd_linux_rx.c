@@ -173,6 +173,8 @@
 #endif
 
 #include <net/ndisc.h>
+#include <net/ieee80211_radiotap.h>
+#include <linux/ieee80211.h>
 
 /* wl event forwarding */
 #ifdef WL_EVENT_ENAB
@@ -185,6 +187,13 @@ module_param(wl_event_enable, uint, 0660);
 /* RX frame thread priority */
 int dhd_rxf_prio = CUSTOM_RXF_PRIO_SETTING;
 module_param(dhd_rxf_prio, int, 0);
+
+/* For debug, define this define in the Makefile */
+#ifdef DHD_MON_DBG
+#define DHD_MON_TRACE DHD_ERROR
+#else
+#define DHD_MON_TRACE DHD_TRACE
+#endif /* DHD_MON_DBG */
 
 /* Request scheduling of the bus rx frame */
 static void dhd_os_rxflock(dhd_pub_t *pub);
@@ -1258,6 +1267,104 @@ dhd_sched_rxf(dhd_pub_t *dhdp, void *skb)
 #endif /* RXF_DEQUEUE_ON_BUSY */
 }
 
+#define MIN_80211_PKTLEN	14u
+s32
+dhd_validate_monitor_packet_sanity(struct sk_buff *skb, dhd_pub_t *dhdp)
+{
+	u8 *pkt;
+	u16 len;
+	struct ieee80211_radiotap_header *radhdr;
+	u16 min_rad_hdr_len = sizeof(struct ieee80211_radiotap_header);
+#ifdef DHD_ART
+	struct ieee80211_hdr_3addr *mac_hdr;
+	u16 frame_ctl;
+	struct net_device *primary_ndev = dhd_linux_get_primary_netdev(dhdp);
+	struct bcm_cfg80211 *cfg = NULL;
+#endif /* DHD_ART */
+
+#ifdef DHD_ART
+	cfg = wl_get_cfg(primary_ndev);
+	if (!cfg) {
+		DHD_ERROR(("cfg is NULL\n"));
+		return BCME_ERROR;
+	}
+#endif /* DHD_ART */
+
+	if (skb == NULL) {
+		DHD_ERROR(("skb is NULL\n"));
+		return BCME_ERROR;
+	}
+
+	len = skb->len;
+	if (len < (min_rad_hdr_len)) {
+		DHD_MON_TRACE(("too less skb_len:%d\n", len));
+#ifdef DHD_ART
+		if (dhdp && skb->dev && (skb->dev->name[0] != '\0') &&
+			IS_ART_IFACE(skb->dev->name)) {
+			dhdp->art_counters.skb_len_too_less++;
+			dhdp->art_counters.rx_errors++;
+		}
+#endif /* DHD_ART */
+		return BCME_ERROR;
+	}
+
+	pkt = skb->data;
+	radhdr = (struct ieee80211_radiotap_header *)pkt;
+	if (len < (radhdr->it_len + MIN_80211_PKTLEN)) {
+		DHD_MON_TRACE(("too less skb_len:%d, radhdr->it_len:%d\n",
+			len, radhdr->it_len));
+#ifdef DHD_MON_DBG
+		prhex("radiotap_hdr", (u8 *)pkt, min_rad_hdr_len);
+#endif /* DHD_MON_DBG */
+#ifdef DHD_ART
+		if (dhdp && skb->dev && (skb->dev->name[0] != '\0') &&
+			IS_ART_IFACE(skb->dev->name)) {
+			dhdp->art_counters.rx_errors++;
+			dhdp->art_counters.skb_len_too_less++;
+		}
+#endif /* DHD_ART */
+		return BCME_ERROR;
+	}
+
+	if (dhdp->op_mode & DHD_FLAG_MONITOR_MODE) {
+		/* basic header sanity check is good enough */
+		return BCME_OK;
+	}
+
+#ifdef DHD_ART
+	DHD_MON_TRACE(("%s: Enter skb_data:%px skb_len:%d radtap_len:%d\n",
+			__FUNCTION__, skb->data, len, radhdr->it_len));
+	mac_hdr = (struct ieee80211_hdr_3addr *)(pkt + radhdr->it_len);
+	frame_ctl = le16_to_cpu(mac_hdr->frame_control);
+
+	if (ieee80211_is_ctl(frame_ctl)) {
+		DHD_MON_TRACE(("Control frame. allow it\n"));
+#ifdef DHD_MON_DBG
+		prhex("ctl_frame", (u8 *)mac_hdr,
+				MIN(MIN_80211_PKTLEN, (skb->len - radhdr->it_len)));
+#endif /* DHD_MON_DBG */
+		return BCME_OK;
+	}
+
+#ifdef DHD_MON_DBG
+	prhex("mac_hdr", (u8 *)mac_hdr, (u32)sizeof(struct ieee80211_hdr_3addr));
+#endif /* DHD_MON_DBG */
+	/* look for packets of interest by app space based on bssid */
+	if (memcmp(mac_hdr->addr3, cfg->art_bssid, ETH_ALEN) == 0) {
+		DHD_MON_TRACE(("bssid mached. allow packet skb->len:%d\n", len));
+		return BCME_OK;
+	}
+
+	/* unknown packets - drop */
+	DHD_MON_TRACE(("bssid mismatch. drop packet. skb->len:%d\n", len));
+	DHD_MON_TRACE(("mac_addr3:" MACF " art_bssid:" MACF "\n",
+		ETHERP_TO_MACF(mac_hdr->addr3), ETHERP_TO_MACF(cfg->art_bssid)));
+	return BCME_ERROR;
+#else
+	return BCME_OK;
+#endif /* DHD_ART */
+}
+
 #ifdef WL_MONITOR
 void
 dhd_rx_mon_pkt(dhd_pub_t *dhdp, host_rxbuf_cmpl_t *msg, void *pkt, int ifidx)
@@ -1285,6 +1392,10 @@ dhd_rx_mon_pkt(dhd_pub_t *dhdp, host_rxbuf_cmpl_t *msg, void *pkt, int ifidx)
 		else {
 			PKTFREE(dhdp->osh, pkt, FALSE);
 			dev_kfree_skb(dhd->monitor_skb);
+#ifdef DHD_ART
+			dhdp->art_counters.rx_no_monitor_dev_errors++;
+			dhdp->art_counters.rx_errors++;
+#endif /* DHD_ART */
 			return;
 		}
 
@@ -1307,16 +1418,36 @@ dhd_rx_mon_pkt(dhd_pub_t *dhdp, host_rxbuf_cmpl_t *msg, void *pkt, int ifidx)
 		switch (amsdu_flag) {
 		case BCMPCIE_PKT_FLAGS_MONITOR_NO_AMSDU:
 		default:
-			if (!dhd->monitor_skb) {
-				dhd->monitor_skb = PKTTONATIVE(dhdp->osh, pkt);
-				if (dhd->monitor_skb == NULL)
-					return;
+			DHD_MON_TRACE(("%s MONITOR RX NON-AMSDU\n", __FUNCTION__));
+			if (dhd->monitor_skb) {
+				DHD_MON_TRACE(("%s free monitor_skb for new pkt\n",
+						__FUNCTION__));
+				dev_kfree_skb(dhd->monitor_skb);
+				dhd->monitor_skb = NULL;
+				dhd->monitor_len = 0;
 			}
+
+			dhd->monitor_skb = PKTTONATIVE(dhdp->osh, pkt);
+			if (dhd->monitor_skb == NULL) {
+				return;
+			}
+
+			if (dhd_validate_monitor_packet_sanity(dhd->monitor_skb, dhdp) != BCME_OK) {
+				DHD_MON_TRACE(("dropping the packet\n"));
+				PKTFREE(dhdp->osh, pkt, FALSE);
+				dhd->monitor_skb = NULL;
+				return;
+			}
+
 			if (dhd->monitor_type[ifidx] && dhd->monitor_dev)
 				dhd->monitor_skb->dev = dhd->monitor_dev;
 			else {
 				PKTFREE(dhdp->osh, pkt, FALSE);
 				dhd->monitor_skb = NULL;
+#ifdef DHD_ART
+				dhdp->art_counters.rx_no_monitor_dev_errors++;
+				dhdp->art_counters.rx_errors++;
+#endif /* DHD_ART */
 				return;
 			}
 			dhd->monitor_skb->protocol =
@@ -1325,48 +1456,138 @@ dhd_rx_mon_pkt(dhd_pub_t *dhdp, host_rxbuf_cmpl_t *msg, void *pkt, int ifidx)
 			break;
 
 		case BCMPCIE_PKT_FLAGS_MONITOR_FIRST_PKT:
-			if (!dhd->monitor_skb) {
-				dhd->monitor_skb = dev_alloc_skb(MAX_MON_PKT_SIZE);
-				if (dhd->monitor_skb == NULL)
-					return;
+			DHD_MON_TRACE(("%s MONITOR RX FIRST PKT\n", __FUNCTION__));
+			if (dhd->monitor_skb) {
+				DHD_MON_TRACE(("%s free monitor_skb for new pkt\n",
+					__FUNCTION__));
+				dev_kfree_skb(dhd->monitor_skb);
+				dhd->monitor_skb = NULL;
 				dhd->monitor_len = 0;
 			}
+
+			dhd->monitor_skb = dev_alloc_skb(MAX_MON_PKT_SIZE);
+			if (dhd->monitor_skb == NULL) {
+				return;
+			}
+			dhd->monitor_len = 0;
+
 			if (dhd->monitor_type[ifidx] && dhd->monitor_dev)
 				dhd->monitor_skb->dev = dhd->monitor_dev;
 			else {
 				PKTFREE(dhdp->osh, pkt, FALSE);
 				dev_kfree_skb(dhd->monitor_skb);
+#ifdef DHD_ART
+				dhdp->art_counters.rx_no_monitor_dev_errors++;
+				dhdp->art_counters.rx_errors++;
+#endif /* DHD_ART */
 				return;
 			}
-			memcpy(PKTDATA(dhdp->osh, dhd->monitor_skb),
-			PKTDATA(dhdp->osh, pkt), PKTLEN(dhdp->osh, pkt));
+
+			if (memcpy_s(PKTDATA(dhdp->osh, dhd->monitor_skb),
+					MAX_MON_PKT_SIZE,
+				PKTDATA(dhdp->osh, pkt), PKTLEN(dhdp->osh, pkt)) != BCME_OK) {
+				DHD_ERROR(("data copy failed. drop the packet. len:%d\n",
+					PKTLEN(dhdp->osh, pkt)));
+				dev_kfree_skb(dhd->monitor_skb);
+				PKTFREE(dhdp->osh, pkt, FALSE);
+				dhd->monitor_skb = NULL;
+				dhd->monitor_len = 0;
+#ifdef DHD_ART
+				dhdp->art_counters.rx_memcpy_errors++;
+				dhdp->art_counters.rx_errors++;
+#endif /* DHD_ART */
+				return;
+			}
+
 			dhd->monitor_len = PKTLEN(dhdp->osh, pkt);
 			PKTFREE(dhdp->osh, pkt, FALSE);
 			return;
 
 		case BCMPCIE_PKT_FLAGS_MONITOR_INTER_PKT:
-			memcpy(PKTDATA(dhdp->osh, dhd->monitor_skb) + dhd->monitor_len,
-			PKTDATA(dhdp->osh, pkt), PKTLEN(dhdp->osh, pkt));
+			DHD_MON_TRACE(("%s MONITOR RX INTER_PKT\n", __FUNCTION__));
+			if (dhd->monitor_len == 0) {
+				/* First packet dropped and hence no mem allocated. */
+				DHD_MON_TRACE(("%s: packet not found, drop payload\n",
+						__FUNCTION__));
+				PKTFREE(dhdp->osh, pkt, FALSE);
+#ifdef DHD_ART
+				dhdp->art_counters.rx_first_pkt_dropped++;
+				dhdp->art_counters.rx_errors++;
+#endif /* DHD_ART */
+				return;
+			}
+
+			if (memcpy_s(PKTDATA(dhdp->osh, dhd->monitor_skb) + dhd->monitor_len,
+					(MAX_MON_PKT_SIZE - dhd->monitor_len),
+				PKTDATA(dhdp->osh, pkt), PKTLEN(dhdp->osh, pkt)) != BCME_OK) {
+				DHD_ERROR(("data copy failed. drop the packet. len:%d\n",
+					PKTLEN(dhdp->osh, pkt)));
+				dev_kfree_skb(dhd->monitor_skb);
+				PKTFREE(dhdp->osh, pkt, FALSE);
+				dhd->monitor_skb = NULL;
+				dhd->monitor_len = 0;
+#ifdef DHD_ART
+				dhdp->art_counters.rx_memcpy_errors++;
+				dhdp->art_counters.rx_errors++;
+#endif /* DHD_ART */
+				return;
+			}
+
 			dhd->monitor_len += PKTLEN(dhdp->osh, pkt);
 			PKTFREE(dhdp->osh, pkt, FALSE);
 			return;
 
 		case BCMPCIE_PKT_FLAGS_MONITOR_LAST_PKT:
-			memcpy(PKTDATA(dhdp->osh, dhd->monitor_skb) + dhd->monitor_len,
-			PKTDATA(dhdp->osh, pkt), PKTLEN(dhdp->osh, pkt));
+			DHD_MON_TRACE(("%s MONITOR RX LAST_PKT\n", __FUNCTION__));
+
+			if ((dhd->monitor_len == 0) || !(dhd->monitor_skb)) {
+				/* First/prev packet dropped and hence no mem allocated. */
+				DHD_MON_TRACE(("%s: packet not found, drop the payload\n",
+						__FUNCTION__));
+				PKTFREE(dhdp->osh, pkt, FALSE);
+#ifdef DHD_ART
+				dhdp->art_counters.rx_first_or_prev_pkt_dropped++;
+				dhdp->art_counters.rx_errors++;
+#endif /* DHD_ART */
+				return;
+			}
+
+			if ((PKTLEN(dhdp->osh, pkt) + dhd->monitor_len) >= MAX_MON_PKT_SIZE) {
+				DHD_MON_TRACE(("dhd_rx_mon_pkt: Invalid packet length %d "
+					"exceeds the max skb length %d\n",
+					dhd->monitor_len, MAX_MON_PKT_SIZE));
+				dev_kfree_skb(dhd->monitor_skb);
+				PKTFREE(dhdp->osh, pkt, FALSE);
+				dhd->monitor_skb = NULL;
+				dhd->monitor_len = 0;
+				return;
+			}
+
+			if (memcpy_s(PKTDATA(dhdp->osh, dhd->monitor_skb) + dhd->monitor_len,
+					(MAX_MON_PKT_SIZE - dhd->monitor_len),
+				PKTDATA(dhdp->osh, pkt), PKTLEN(dhdp->osh, pkt)) != BCME_OK) {
+				DHD_ERROR(("last packet data copy failed. drop the packet\n"));
+				dev_kfree_skb(dhd->monitor_skb);
+				PKTFREE(dhdp->osh, pkt, FALSE);
+				dhd->monitor_skb = NULL;
+				dhd->monitor_len = 0;
+				return;
+			}
+
 			dhd->monitor_len += PKTLEN(dhdp->osh, pkt);
 			PKTFREE(dhdp->osh, pkt, FALSE);
 			if (dhd->monitor_len < MAX_MON_PKT_SIZE) {
 				skb_put(dhd->monitor_skb, dhd->monitor_len);
-			} else {
-				DHD_ERROR(("dhd_rx_mon_pkt: Invalid packet length %d "
-					"exceeds the max skb length %d\n",
-					dhd->monitor_len, MAX_MON_PKT_SIZE));
+			}
+
+			if (dhd_validate_monitor_packet_sanity(dhd->monitor_skb, dhdp) != BCME_OK) {
+				DHD_MON_TRACE(("dropping the packet\n"));
 				dev_kfree_skb(dhd->monitor_skb);
 				dhd->monitor_skb = NULL;
 				dhd->monitor_len = 0;
 				return;
 			}
+
 			dhd->monitor_skb->protocol =
 				eth_type_trans(dhd->monitor_skb, dhd->monitor_skb->dev);
 			dhd->monitor_len = 0;
@@ -1380,6 +1601,9 @@ dhd_rx_mon_pkt(dhd_pub_t *dhdp, host_rxbuf_cmpl_t *msg, void *pkt, int ifidx)
 		DHD_INFO(("%s: insufficient headroom\n",
 			dhd_ifname(&dhd->pub, ifidx)));
 
+#ifdef DHD_ART
+		dhdp->art_counters.rx_skb_headroom_lt_etherheader++;
+#endif /* DHD_ART */
 		skb2 = skb_realloc_headroom(dhd->monitor_skb, ETHER_HDR_LEN);
 
 		dev_kfree_skb(dhd->monitor_skb);
@@ -1387,11 +1611,18 @@ dhd_rx_mon_pkt(dhd_pub_t *dhdp, host_rxbuf_cmpl_t *msg, void *pkt, int ifidx)
 		if (dhd->monitor_skb == NULL) {
 			DHD_ERROR(("%s: skb_realloc_headroom failed\n",
 				dhd_ifname(&dhd->pub, ifidx)));
+#ifdef DHD_ART
+			dhdp->art_counters.rx_skb_realloc_headroom_errors++;
+			dhdp->art_counters.rx_errors++;
+#endif /* DHD_ART */
 			return;
 		}
 	}
 	PKTPUSH(dhd->pub.osh, dhd->monitor_skb, ETHER_HDR_LEN);
 
+#ifdef DHD_ART
+	dhdp->art_counters.rx_packets++;
+#endif /* DHD_ART */
 	/* WL here makes sure data is 4-byte aligned? */
 	if (in_interrupt()) {
 		bcm_object_trace_opr(skb, BCM_OBJDBG_REMOVE,
@@ -1406,7 +1637,6 @@ dhd_rx_mon_pkt(dhd_pub_t *dhdp, host_rxbuf_cmpl_t *msg, void *pkt, int ifidx)
 		 */
 		bcm_object_trace_opr(dhd->monitor_skb, BCM_OBJDBG_REMOVE,
 			__FUNCTION__, __LINE__);
-
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 18, 0))
 		netif_rx(dhd->monitor_skb);
 #else

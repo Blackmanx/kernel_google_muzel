@@ -1,7 +1,7 @@
 /*
  * Linux cfg80211 driver - Dongle Host Driver (DHD) related
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -20,7 +20,6 @@
  *
  * <<Broadcom-WL-IPTag/Dual:>>
  */
-
 
 #ifndef __DHD_CFG80211__
 #define __DHD_CFG80211__

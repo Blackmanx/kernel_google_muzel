@@ -44,7 +44,6 @@
 /* This marks the start of a packed structure section. */
 #include <packed_section_start.h>
 
-
 #define DOT11_TU_TO_US			1024	/* 802.11 Time Unit is 1024 microseconds */
 #define DOT11_SEC_TO_TU			977u	/* 1000000 / DOT11_TU_TO_US = ~977 TU */
 
@@ -2214,7 +2213,6 @@ typedef struct dot11_qos_char_ie dot11_qos_char_ie_t;
 						 * length (fixed fields)
 						 */
 
-
 /** SCS Descriptor element */
 BWL_PRE_PACKED_STRUCT struct dot11_scs_descr_ie {
 	uint8  id;				/* DOT11_MNG_SCS_DESCR_ID (185) */
@@ -2503,7 +2501,6 @@ BWL_PRE_PACKED_STRUCT struct short_ssid_list_ie {
 
 typedef struct short_ssid_list_ie short_ssid_list_ie_t;
 #define SHORT_SSID_LIST_IE_FIXED_LEN	3	/* SHORT SSID LIST IE LENGTH */
-
 
 /** IEEE 802.11 Annex E */
 typedef enum {

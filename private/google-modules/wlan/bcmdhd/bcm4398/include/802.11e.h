@@ -1,7 +1,7 @@
 /*
  * 802.11e protocol header file
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -126,7 +126,6 @@ typedef BWL_PRE_PACKED_STRUCT struct tspec {
 #define DOT11E_STATUS_END_TS				37	/* END TS */
 #define DOT11E_STATUS_UNKNOWN_TS			38	/* UNKNOWN TS */
 #define DOT11E_STATUS_QSTA_REQ_TIMEOUT		39	/* STA ADDTS request timeout */
-
 
 /* This marks the end of a packed structure section. */
 #include <packed_section_end.h>

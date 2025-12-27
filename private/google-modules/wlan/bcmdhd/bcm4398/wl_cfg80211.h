@@ -1,7 +1,7 @@
 /*
  * Linux cfg80211 driver
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -664,7 +664,6 @@ do {										\
 		}								\
 } while (0)
 
-
 #ifdef WL_SCAN
 #undef WL_SCAN
 #endif
@@ -1074,7 +1073,6 @@ typedef enum wl_iftype {
 	WL_IF_TYPE_STA = 0,
 	WL_IF_TYPE_AP = 1,
 
-
 	WL_IF_TYPE_NAN_NMI = 3,
 	WL_IF_TYPE_NAN = 4,
 	WL_IF_TYPE_P2P_GO = 5,
@@ -1105,7 +1103,6 @@ enum wl_mode {
 	WL_MODE_BSS = 0,
 	WL_MODE_IBSS = 1,
 	WL_MODE_AP = 2,
-
 
 	WL_MODE_NAN = 4,
 	WL_MODE_MAX
@@ -2100,6 +2097,12 @@ typedef enum {
 	HAL_STARTED		= 3
 } hal_state;
 
+/* cfg state hang recovery structure */
+typedef struct cfg_hang_recovery {
+	struct net_device *recovery_ndev;
+	u32 recovery_state;
+} cfg_hang_recovery_t;
+
 /* private data of cfg80211 interface */
 struct bcm_cfg80211 {
 	struct wireless_dev *wdev;	/* representing cfg cfg80211 device */
@@ -2218,7 +2221,7 @@ struct bcm_cfg80211 {
 	bool disable_roam_event;
 	struct delayed_work pm_enable_work;
 	struct delayed_work recovery_work;
-	u32 recovery_state;
+	cfg_hang_recovery_t cfg_recovery;
 
 #ifdef OEM_ANDROID
 	struct workqueue_struct *event_workq;   /* workqueue for event */
@@ -2458,13 +2461,15 @@ typedef struct wl_multink_config {
 */
 #define WL_DS_SKIP_THRESHOLD_USECS  (75000 * 1000)
 
-enum wl_state_type {
+enum wl_recovery_state_type {
 	WL_STATE_IDLE,
 	WL_STATE_SCANNING,
 	WL_STATE_CONNECTING,
 	WL_STATE_LISTEN,
 	WL_STATE_AUTHORIZING, /* Assocated to authorized */
-	WL_STATE_ROAMING
+	WL_STATE_ROAMING,
+	WL_STATE_SCANNING_SKIP_DUMP,
+	WL_STATE_CONNECTING_SKIP_DUMP
 };
 
 #define WL_STATIC_IFIDX	(DHD_MAX_IFS + DHD_MAX_STATIC_IFS - 1)
@@ -3173,7 +3178,6 @@ wl_iftype_to_str(int wl_iftype)
 		case (WL_IF_TYPE_AP):
 			return "WL_IF_TYPE_AP";
 
-
 		case (WL_IF_TYPE_NAN_NMI):
 			return "WL_IF_TYPE_NAN_NMI";
 		case (WL_IF_TYPE_NAN):
@@ -3855,13 +3859,13 @@ extern s32 wl_update_prof(struct bcm_cfg80211 *cfg, struct net_device *ndev,
 extern s32 wl_handle_auth_event(struct bcm_cfg80211 *cfg, struct net_device *ndev,
 	const wl_event_msg_t *e, void *data);
 #endif /* WL_CLIENT_SAE */
+
 #ifdef WL_CFGVENDOR_SEND_ALERT_EVENT
 extern int wl_cfg80211_alert(struct net_device *dev);
 #endif /* WL_CFGVENDOR_SEND_ALERT_EVENT */
 extern void
 wl_cfg80211_set_okc_pmkinfo(struct bcm_cfg80211 *cfg, struct net_device *dev,
 	wsec_pmk_t *pmk, bool validate_sec);
-
 
 #ifdef AUTH_ASSOC_STATUS_EXT
 typedef enum auth_assoc_status_ext {
@@ -4015,4 +4019,5 @@ extern wl_mlo_link_t *wl_cfg80211_get_ml_linkinfo_by_linkid(struct bcm_cfg80211 
 extern void wl_cfg80211_get_bss_sta_info(struct bcm_cfg80211 *cfg, struct net_device *dev,
 	struct ether_addr *mac_ea, struct station_info *sinfo);
 #endif /* WL_BSS_STA_INFO */
+extern s32 wl_validate_bss_length(uint32 version, uint32 tot_len, uint32 ie_length);
 #endif /* _wl_cfg80211_h_ */

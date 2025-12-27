@@ -4,7 +4,7 @@
  * Provides type definitions and function prototypes used to link the
  * DHD OS, bus, and protocol modules.
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -23,7 +23,6 @@
  *
  * <<Broadcom-WL-IPTag/Dual:>>
  */
-
 
 /****************
  * Common types *
@@ -690,7 +689,14 @@ enum dhd_dongledump_type {
 	DUMP_TYPE_NO_DB7_ACK			= 35,
 	DUMP_TYPE_DONGLE_TRAP_DURING_WIFI_ONOFF	= 36,
 	DUMP_TYPE_ESCAN_SYNCID_MISMATCH		= 37,
-	DUMP_TYPE_COREDUMP_BY_USER		= 38
+	DUMP_TYPE_COREDUMP_BY_USER		= 38,
+	DUMP_TYPE_WL_BP_DOWN			= 39,
+	DUMP_TYPE_COMMON_BP_DOWN		= 40,
+	DUMP_TYPE_COEXCPU_BP_DOWN		= 41,
+	DUMP_TYPE_STA_ASSOC_TIMEOUT		= 42,
+	DUMP_TYPE_STA_4WAY_HS_TIMEOUT		= 43,
+	DUMP_TYPE_STA_ROAM_TIMEOUT		= 44,
+	DUMP_TYPE_SAR_CONF_NOTFOUND		= 45
 };
 
 enum dhd_hang_reason {
@@ -1090,8 +1096,6 @@ typedef struct dhd_if_tx_status_latency {
 	uint64 cum_tx_status_latency;
 } dhd_if_tx_status_latency_t;
 #endif /* TX_STATUS_LATENCY_STATS */
-
-
 
 /* Bit in dhd_pub_t::gdb_proxy_stop_count set when firmware is stopped by GDB */
 #define GDB_PROXY_STOP_MASK 1
@@ -1847,7 +1851,6 @@ typedef struct dhd_pub {
 	int debug_dump_subcmd;
 	uint64 debug_dump_time_sec;
 	bool hscb_enable;
-
 
 	uint64 logset_prsrv_mask;
 #ifdef DHD_PKT_LOGGING
@@ -2738,10 +2741,11 @@ extern void dhd_os_dhdiovar_lock(dhd_pub_t *pub);
 extern void dhd_os_dhdiovar_unlock(dhd_pub_t *pub);
 void dhd_os_logdump_lock(dhd_pub_t *pub);
 void dhd_os_logdump_unlock(dhd_pub_t *pub);
-extern int dhd_os_proto_block(dhd_pub_t * pub);
-extern int dhd_os_proto_unblock(dhd_pub_t * pub);
-extern int dhd_os_ioctl_resp_wait(dhd_pub_t * pub, uint * condition);
-extern int dhd_os_ioctl_resp_wake(dhd_pub_t * pub);
+extern int dhd_os_proto_block(dhd_pub_t *pub);
+extern int dhd_os_proto_unblock(dhd_pub_t *pub);
+extern bool dhd_os_proto_is_blocked(dhd_pub_t *pub);
+extern int dhd_os_ioctl_resp_wait(dhd_pub_t *pub, uint *condition);
+extern int dhd_os_ioctl_resp_wake(dhd_pub_t *pub);
 extern unsigned int dhd_os_get_ioctl_resp_timeout(void);
 extern void dhd_os_set_ioctl_resp_timeout(unsigned int timeout_msec);
 extern void dhd_os_ioctl_resp_lock(dhd_pub_t * pub);
@@ -2855,7 +2859,6 @@ extern void dhd_set_cpucore(dhd_pub_t *dhd, int set);
 #ifdef DHD_DETECT_CONSECUTIVE_MFG_HANG
 #define MAX_CONSECUTIVE_MFG_HANG_COUNT 2
 #endif /* DHD_DETECT_CONSECUTIVE_MFG_HANG */
-
 
 #if defined(DHD_FW_COREDUMP)
 #if defined(linux) || defined(LINUX)
@@ -3308,6 +3311,13 @@ extern int wl_iw_send_priv_event(struct net_device *dev, char *flag);
 #ifdef DHD_PCIE_NATIVE_RUNTIMEPM
 extern void dhd_flush_rx_tx_wq(dhd_pub_t *dhdp);
 #endif /* DHD_PCIE_NATIVE_RUNTIMEPM */
+
+#ifdef __linux__
+bool dhd_check_del_in_progress(dhd_pub_t *dhdp, uint8 ifindex);
+#else
+static INLINE bool dhd_check_del_in_progress(dhd_pub_t *dhdp, uint8 ifindex)
+{ return FALSE; }
+#endif
 
 /*
  * Insmod parameters for debug/test
@@ -3957,7 +3967,6 @@ extern void dhd_os_general_spin_unlock(dhd_pub_t *pub, unsigned long flags);
 #define DHD_PKT_LOG_UNLOCK(lock, flags)   osl_spin_unlock(lock, (flags))
 #endif /* DHD_PKT_LOGGING */
 
-
 #if defined(__linux__)
 #define DHD_LINUX_GENERAL_LOCK(dhdp, flags)	DHD_GENERAL_LOCK(dhdp, flags)
 #define DHD_LINUX_GENERAL_UNLOCK(dhdp, flags)	DHD_GENERAL_UNLOCK(dhdp, flags)
@@ -4407,6 +4416,9 @@ static INLINE void dhd_pktid_logging_dump(dhd_pub_t *dhdp) { }
 #endif /* __linux__ */
 #endif /* DHD_MAP_PKTID_LOGGING */
 
+#ifdef DHD_DUMP_RXPKTIDMAP
+void dhd_dump_rxpktidmap(dhd_pub_t *dhd);
+#endif /* DHD_DUMP_RXPKTIDMAP */
 #ifdef DHD_PCIE_RUNTIMEPM
 #define DEFAULT_DHD_RUNTIME_MS 100
 #ifndef CUSTOM_DHD_RUNTIME_MS
@@ -4673,7 +4685,6 @@ typedef struct dhd_gdb_proxy_probe_data {
 }
 #endif /* GDB_PROXY */
 
-
 #ifdef DHD_EFI
 extern void dhd_insert_random_mac_addr(dhd_pub_t *dhd, char *nvram_mem, uint *len);
 #endif /* DHD_EFI */
@@ -4909,7 +4920,6 @@ static INLINE int dhd_check_shinfo_nrfrags(dhd_pub_t *dhdp, void *pktbuf, dmaadd
 int dhd_ether_to_8023_hdr(osl_t *osh, struct ether_header *eh, void *p);
 int dhd_8023_llc_to_ether_hdr(osl_t *osh, struct ether_header *eh8023, void *p);
 #endif
-
 
 #ifdef CUSTOMER_HW4_DEBUG
 bool dhd_validate_chipid(dhd_pub_t *dhdp);

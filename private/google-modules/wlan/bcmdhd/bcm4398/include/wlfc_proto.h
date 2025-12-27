@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -371,7 +371,6 @@ typedef enum {
 #define WLFC_PKTFLAG_CLR_PKTREQUESTED(x)	(x) &= \
 	~(WLFC_PKTFLAG_PKT_REQUESTED << WL_TXSTATUS_FLAGS_SHIFT)
 
-
 #define WLFC_MAX_PENDING_DATALEN	120
 
 /* host is free to discard the packet */
@@ -497,7 +496,6 @@ typedef enum {
 #define WLFC_PCIEDEV_LLR_PRIO_MAP	2
 
 void wlc_wlfc_set_pkttime(void* pkt, uint16 time);
-
 
 /* reason for disabling APP, when none are set, APP will be enabled */
 typedef enum {

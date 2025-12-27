@@ -872,9 +872,7 @@ extern void osl_reg_unmap(void *va);
 #define	OR_SM(r, v)		(*(r) |= (v))
 #define	BZERO_SM(r, len)	bzero((r), (len))
 
-
 #endif	/* BINOSL */
-
 
 #define OSL_RAND()		osl_rand()
 extern uint32 osl_rand(void);

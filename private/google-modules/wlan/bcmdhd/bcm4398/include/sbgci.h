@@ -1,7 +1,7 @@
 /*
  * SiliconBackplane GCI core hardware definitions
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -28,7 +28,6 @@
 #include <hal_core_config.h>
 #include <vlsi_gci_all_regs.h>
 #endif  /* DONGLEBUILD || COEX_CPU_BUILD */
-
 
 #if !defined(_LANGUAGE_ASSEMBLY) && !defined(__ASSEMBLY__)
 
@@ -616,6 +615,5 @@ typedef volatile struct {
 #define NCI_ERR_PWR_DOWN_MASK	(0x7fu << 16u)
 
 #endif /* !_LANGUAGE_ASSEMBLY && !__ASSEMBLY__ */
-
 
 #endif	/* _SBGCI_H */

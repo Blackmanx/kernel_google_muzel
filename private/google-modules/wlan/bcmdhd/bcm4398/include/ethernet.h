@@ -1,7 +1,7 @@
 /*
  * From FreeBSD 2.2.7: Fundamental constants relating to ethernet.
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -30,7 +30,6 @@
 
 /* This marks the start of a packed structure section. */
 #include <packed_section_start.h>
-
 
 /*
  * The number of bytes in an ethernet (MAC) address.
@@ -151,7 +150,6 @@ BWL_PRE_PACKED_STRUCT struct	ether_addr {
  */
 #define ETHER_ISMULTI(ea) (((const uint8 *)(ea))[0] & 1)
 
-
 /* compare two ethernet addresses - assumes the pointers can be referenced as shorts */
 #if defined(DONGLEBUILD) && defined(__ARM_ARCH_7A__) && !defined(BCMFUZZ)
 #define eacmp(a, b)		(((*(const uint32 *)(a)) ^ (*(const uint32 *)(b))) || \
@@ -227,7 +225,6 @@ do { \
 	((uint16 *)(d))[6] = ((const uint16 *)(s))[6]; \
 } while (0)
 
-
 /* Dongles use bcmutils functions instead of macros.
  * Possibly slower but saves over 800 bytes off THUMB dongle image.
  */
@@ -247,7 +244,6 @@ extern int ether_isnulladdr(const void *ea);
 #else
 #define ETHER_ISNULLADDR(ea)	ether_isnulladdr(ea)
 #endif /* __ARM_ARCH_7A__ */
-
 
 #define ETHER_ISNULLDEST(da)	((((const uint16 *)(da))[0] |           \
 				  ((const uint16 *)(da))[1] |           \

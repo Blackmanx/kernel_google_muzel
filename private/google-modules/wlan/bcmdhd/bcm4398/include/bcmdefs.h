@@ -1,7 +1,7 @@
 /*
  * Misc system wide definitions
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -225,7 +225,6 @@ extern bool bcm_postattach_part_reclaimed;
 #define BCMCOEXCPUPREATTACHFN(_fn)	BCMPREATTACHFN(_fn)
 #endif /* COEX_CPU_REINIT && !COEX_CPU_REINIT_DISABLED */
 
-
 #define BCMINITDATA(_data)	_data
 #define BCMINITFN(_fn)		_fn
 #ifndef CONST
@@ -407,7 +406,6 @@ extern bool bcm_postattach_part_reclaimed;
 #define CHIPTYPE(bus)	(bus)
 #endif
 
-
 /* Allows size optimization for SPROM support */
 #if defined(BCMSPROMBUS)
 #define SPROMBUS	(BCMSPROMBUS)
@@ -569,14 +567,12 @@ typedef struct  {
 #define MAX_DMA_SEGS 4
 #endif
 
-
 typedef struct {
 	void *oshdmah; /* Opaque handle for OSL to store its information */
 	uint origsize; /* Size of the virtual packet */
 	uint nsegs;
 	hnddma_seg_t segs[MAX_DMA_SEGS];
 } hnddma_seg_map_t;
-
 
 /* packet headroom necessary to accommodate the largest header in the system, (i.e TXOFF).
  * By doing, we avoid the need  to allocate an extra buffer for the header when bridging to WL.
@@ -967,7 +963,6 @@ extern bool _tx_histogram_enabled;
 #define BCMPOST_TRAP_RAM_RODATA(data)	BCMPOST_TRAP_RODATA(data)
 #endif
 
-
 /* Similar to RO data on trap, we want code that's used after a trap to be placed in a special area
  * as this means we can use all of the rest of the .text for post trap dumps. Functions with
  * the BCMPOSTTRAPFN macro applied will either be in ROM or this protected area.
@@ -993,16 +988,13 @@ extern bool _tx_histogram_enabled;
 #define BCMPOSTTRAPRAMFN(fn)	BCMPOSTTRAPFN(fn)
 #endif /* ROMBUILD */
 
-
 typedef struct bcm_rng * bcm_rng_handle_t;
-
 
 /* Explicitly locate initialized data and uninitialized data (bss) in memory regions that
  * are NOT write-protected by the BUS-MPU.
  */
 #define BCM_BMPU_RW_DATA(_data)	__attribute__ ((__section__ (".data_bmpu_rw." #_data))) _data
 #define BCM_BMPU_RW_BSS(_data)	__attribute__ ((__section__ (".bss_bmpu_rw." #_data))) _data
-
 
 /* Use BCM_FUNC_PTR() to tag function pointers for ASLR code implementation. It will perform
  * run-time relocation of a function pointer by translating it from a physical to virtual address.
@@ -1038,7 +1030,6 @@ void* BCM_ASLR_CODE_FNPTR_RELOCATOR(void *func_ptr);
 #define BCM_MMU_PAGE_TABLE_DATA(_data) \
 	__attribute__ ((__section__ (".mmu_pagetable." #_data))) _data
 
-
 /* Some phy initialization code/data can't be reclaimed in dualband mode */
 #if defined(DBAND)
 #define WLBANDINITDATA(_data)	_data
@@ -1047,7 +1038,6 @@ void* BCM_ASLR_CODE_FNPTR_RELOCATOR(void *func_ptr);
 #define WLBANDINITDATA(_data)	BCMINITDATA(_data)
 #define WLBANDINITFN(_fn)	BCMINITFN(_fn)
 #endif
-
 
 /* Tag struct members to make it explicitly clear that they are physical addresses. These are
  * typically used in data structs shared by the firmware and host code (or off-line utilities). The

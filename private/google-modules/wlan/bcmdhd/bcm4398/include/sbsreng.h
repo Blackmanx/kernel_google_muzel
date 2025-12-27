@@ -1,7 +1,7 @@
 /*
  * Header file for save-restore HW
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -69,7 +69,6 @@ typedef volatile struct srregs srregs_t;
 
 #define SR_ENG_REG_ADDR(regbase, regname) \
 	(volatile uint32 *)((uintptr)(regbase) + SR_ENG_REG_OFF(regname))
-
 
 /* For some sr_eng revs (e.g. 12) a register may have changed just its name, so to avoid invalid
  * accesses, map the register's address to the changed name.

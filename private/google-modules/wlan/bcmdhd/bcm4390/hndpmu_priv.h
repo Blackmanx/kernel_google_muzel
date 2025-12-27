@@ -274,7 +274,6 @@ enum xtaltab0_960 {
 	XTALTAB0_960_59970K
 };
 
-
 /* Indices into array pmu1_xtaltab0_960[]. Keep array and these defines synchronized. */
 #define PMU1_XTALTAB0_960_12000K	0
 #define PMU1_XTALTAB0_960_13000K	1

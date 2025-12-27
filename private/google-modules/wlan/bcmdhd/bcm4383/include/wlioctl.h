@@ -325,7 +325,8 @@ typedef enum bsscfg_type {
 	BSSCFG_TYPE_PROXD = 6,
 	BSSCFG_TYPE_NAN = 7,
 	BSSCFG_TYPE_MESH = 8,
-	BSSCFG_TYPE_AIBSS = 9
+	BSSCFG_TYPE_AIBSS = 9,
+	BSSCFG_TYPE_ART = 10
 } bsscfg_type_t;
 
 /* bsscfg subtype */
@@ -341,7 +342,8 @@ typedef enum bsscfg_subtype {
 	BSSCFG_SUBTYPE_AWDL = 9, /* SLOTTED_BSS_TYPE */
 	BSSCFG_SUBTYPE_NAN_MGMT = 10,
 	BSSCFG_SUBTYPE_NAN_DATA = 11,
-	BSSCFG_SUBTYPE_NAN_MGMT_DATA = 12
+	BSSCFG_SUBTYPE_NAN_MGMT_DATA = 12,
+	BSSCFG_SUBTYPE_ART = 13
 } bsscfg_subtype_t;
 
 typedef struct wlc_bsscfg_info {
@@ -16484,6 +16486,8 @@ typedef enum wl_interface_type {
 	WL_INTERFACE_TYPE_P2P_DISC = 6,
 	WL_INTERFACE_TYPE_IBSS = 7,
 	WL_INTERFACE_TYPE_MESH = 8,
+	WL_INTERFACE_TYPE_NAN_NMI = 9,
+	WL_INTERFACE_TYPE_ART = 10,
 	WL_INTERFACE_TYPE_MAX
 } wl_interface_type_t;
 
@@ -24553,6 +24557,8 @@ typedef enum wlc_sta_pm_sc_ofld_exit_reason {
 	STA_PM_SC_OFLD_EXIT_MLO			= 22u,	/* Exit due to high priority MLO link */
 	STA_PM_SC_OFLD_EXIT_TDLS		= 23u,	/* Exit due to TDLS active */
 	STA_PM_SC_OFLD_EXIT_EMLSR_ML_MODE_CHANGE = 24u,	/* Exit due to EMLSR ML mode change */
+	STA_PM_SC_OFLD_EXIT_AP_RCFG_IN_PROG	 = 25u,	/* Exit due to AP reconfig in progress */
+	STA_PM_SC_OFLD_EXIT_ART			= 26u,	/* Exit due to Active radiotap Connection */
 	STA_PM_SC_OFLD_EXIT_MAX			= 255u	/* Max, uint8 for now */
 } wlc_sta_pm_sc_ofld_exit_reason_t;
 
@@ -27027,4 +27033,23 @@ typedef struct wl_mrsno_rsnoe_v1 {
 	uint16 length;
 	uint8 data[];
 } wl_mrsno_rsnoe_v1_t;
+
+/* ART structures */
+#define WL_ART_CONFIG_VER_1		1u
+
+/* ART Config Input structure */
+typedef struct wl_art_cmd_config_v1 {
+	uint16 version;
+	uint16 length;
+	struct ether_addr mac_addr;	/* BSSID configuration */
+	uint16 chanspec; 		/* Channel configuration */
+} wl_art_cmd_config_v1_t;
+
+/* ART Top level command IDs */
+ enum {
+	WL_ART_CMD_ENAB = 0,
+	WL_ART_CMD_TXACTIVE = 1,
+	WL_ART_CMD_CONFIG = 2,
+	WL_ART_CMD_LAST
+ };
 #endif /* _wlioctl_h_ */

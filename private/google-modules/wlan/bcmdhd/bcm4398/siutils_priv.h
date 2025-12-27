@@ -1,7 +1,7 @@
 /*
  * Include file private to the SOC Interconnect support files.
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -49,7 +49,6 @@
 #define	SI_PRINT(args)	printf args
 
 #endif /* ENABLE_CORECAPTURE */
-
 
 #ifdef BCMDBG
 #define	SI_MSG(args)	printf args
@@ -231,7 +230,6 @@ typedef struct si_info {
 	bool    rfldo3p3_war;		/**< singing cap war enable from nvram */
 	void    *nci_info;
 } si_info_t;
-
 
 #define	SI_INFO(sih)	((si_info_t *)(uintptr)sih)
 

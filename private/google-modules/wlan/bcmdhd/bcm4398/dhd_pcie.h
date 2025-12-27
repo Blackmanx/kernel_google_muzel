@@ -1,7 +1,7 @@
 /*
  * Linux DHD Bus Module for PCIE
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -20,7 +20,6 @@
  *
  * <<Broadcom-WL-IPTag/Dual:>>
  */
-
 
 #ifndef dhd_pcie_h
 #define dhd_pcie_h
@@ -137,7 +136,6 @@ typedef struct ring_sh_info {
 /* Minimum of 250us should be elapsed to add new entry */
 #define MIN_MMIO_TRACE_TIME 250
 #define DHD_RING_IDX 0x00FF0000
-
 
 typedef struct _dhd_mmio_trace_t {
 	uint64  timestamp;

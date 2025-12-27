@@ -2,8 +2,8 @@
   "copyrights": [
     {
       "files": [
-        "components/bcmutils/include/verhoeff_chksum.h",
-        "components/bcmutils/src/verhoeff_chksum.c"
+        "bcmutils/include/verhoeff_chksum.h",
+        "bcmutils/src/verhoeff_chksum.c"
       ],
       "copyright": [
         [

@@ -4,7 +4,7 @@
  *
  * Definitions subject to change without notice.
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -59,7 +59,6 @@
 
 #define H2D_EPOCH_MODULO		253 /* sequence number wrap */
 #define H2D_EPOCH_INIT_VAL		(H2D_EPOCH_MODULO + 1)
-
 
 /* Txpost base workitem size w/o any extended tags */
 #define H2DRING_TXPOST_BASE_ITEMSIZE	48u
@@ -1082,7 +1081,6 @@ typedef union rxbuf_complete_item {
 	unsigned char		check[D2HRING_RXCMPLT_ITEMSIZE];
 } rxbuf_complete_item_t;
 
-
 typedef struct host_txbuf_post_v1 {
 	/** common message header */
 	cmn_msg_hdr_t   cmn_hdr;
@@ -1316,7 +1314,6 @@ typedef struct ret_buf_ptr {
 	uint32 high_addr;
 } ret_buf_t;
 
-
 #ifdef PCIE_API_REV1
 
 /* ioctl specific hdr */
@@ -1346,7 +1343,6 @@ typedef struct ioctl_req_hdr {
 } ioctl_req_hdr_t;
 
 #endif /* PCIE_API_REV1 */
-
 
 /** Complete msgbuf hdr for ioctl from host to dongle */
 typedef struct ioct_reqst_hdr {
@@ -1544,7 +1540,6 @@ typedef struct tx_idle_flowring_resume_response {
 	uint32			rsvd[2];
 	dma_done_t		marker;
 } tx_idle_flowring_resume_response_t;
-
 
 /* HP2P RLLW Extended TxStatus info when host enables the same */
 #define D2H_TXSTATUS_EXT_PKT_WITH_OVRRD	0x8000 /**< set when pkt had override bit on */

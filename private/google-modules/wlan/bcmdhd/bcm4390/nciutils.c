@@ -983,7 +983,6 @@ BCMATTACHFN(nci_find_numcores)(si_t *sih)
 	uint32 num_oobr_cores = 0u;
 	uint32 num_nonoobr_cores = 0u;
 
-
 	/* No of Non-OOBR Cores */
 	num_nonoobr_cores = NCI_NONOOBR_CORES(nci->cc_erom2base);
 	if (num_nonoobr_cores <= 0u) {
@@ -1036,7 +1035,6 @@ fail:
 }
 
 #define NCI_MAX_APB_COUNT 10u
-
 
 static void
 BCMATTACHFN(nci_update_shared_pmni_iface)(nci_info_t *nci)
@@ -1124,7 +1122,6 @@ BCMATTACHFN(nci_scan)(si_t *sih)
 	uint8 iface_idx;
 	uint32 core_idx;
 	int err = 0;
-
 
 	/* If scan was finished already */
 	if (nci->scan_done) {
@@ -1434,7 +1431,6 @@ BCMATTACHFN(nci_cores_to_ai_cores)(si_t *sih)
 				axi_wrapper[sii->axi_num_wrappers].wrapper_type =
 					(desc->master) ? AI_MASTER_WRAPPER : AI_SLAVE_WRAPPER;
 				axi_wrapper[sii->axi_num_wrappers].wrapper_addr = desc->node_ptr;
-
 
 				SI_VMSG(("%s WRAPPER: %d, mfg:%x, cid:%x, rev:%x, addr:%x\n",
 					desc->master?"MASTER":"SLAVE", sii->axi_num_wrappers,
@@ -2539,7 +2535,6 @@ BCMPOSTTRAPFN(nci_get_core_baaddr)(const si_t *sih, uint32 *size, int32 baidx)
 
 	return addr;
 }
-
 
 /*
  * Returns APB/AXI SP address,

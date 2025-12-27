@@ -31,7 +31,6 @@
 /* This marks the start of a packed structure section. */
 #include <packed_section_start.h>
 
-
 /* UDP header */
 #define UDP_DEST_PORT_OFFSET	2	/* UDP dest port offset */
 #define UDP_LEN_OFFSET		4	/* UDP length offset */

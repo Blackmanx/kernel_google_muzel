@@ -451,7 +451,6 @@ extern void *dbus_get_fw_nvfile(int devid, int chiprev, uint8 **fw, int *fwlen, 
 extern void dbus_release_fw_nvfile(void *firmware);
 #endif  /* #if defined(BCM_REQUEST_FW) */
 
-
 #if defined(EHCI_FASTPATH_TX) || defined(EHCI_FASTPATH_RX)
 /*
  * Include file for the ECHI fastpath optimized USB

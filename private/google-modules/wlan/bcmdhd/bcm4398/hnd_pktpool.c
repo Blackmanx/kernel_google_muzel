@@ -1,7 +1,7 @@
 /*
  * HND generic packet pool operation primitives
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -166,7 +166,6 @@ uint32 g_rxlfrag_non_rxfrag_queued = 0;
 #endif /* RXLFRAGPOOL_SORT_RXFRAG_DBG */
 
 /** accessor functions required when ROMming this file, forced into RAM */
-
 
 pktpool_t *
 BCMPOSTTRAPRAMFN(get_pktpools_registry)(int id)
@@ -747,7 +746,6 @@ BCMPOSTTRAPFASTPATH(pktpool_deq)(pktpool_t *pktp)
 	PKTSETQCALLER(p, pktp, CALL_SITE);
 	return p;
 }
-
 
 static void
 BCMPOSTTRAPFASTPATH(pktpool_enq)(pktpool_t *pktp, void *p)

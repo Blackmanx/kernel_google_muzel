@@ -984,6 +984,9 @@ typedef enum dhd_mdata_linked_ring_idx {
 #define HANG_INFO_BASE64_BUFFER_SIZE 640
 #endif
 
+#ifdef DHD_ART
+void dhd_fill_art_info(dhd_pub_t *dhd, void *pktbuf, void *txdesc, uint32 item_len);
+#endif
 #ifdef DHD_DUMP_PCIE_RINGS
 static
 int dhd_ring_write(dhd_pub_t *dhd, msgbuf_ring_t *ring, void *file,
@@ -1121,7 +1124,6 @@ extern void dhd_rx_mon_pkt(dhd_pub_t *dhdp, host_rxbuf_cmpl_t *msg, void *pkt, i
 extern void dhd_80211_mon_pkt(dhd_pub_t *dhdp, host_rxbuf_cmpl_t *msg, void *pkt, int ifidx);
 #endif /* DBG_PKT_MON */
 #endif /* WL_MONITOR */
-
 /* Configure a soft doorbell per D2H ring */
 static void dhd_msgbuf_ring_config_d2h_soft_doorbell(dhd_pub_t *dhd);
 static void dhd_prot_process_d2h_ring_config_complete(dhd_pub_t *dhd, void *msg);
@@ -1511,6 +1513,10 @@ dhd_prot_get_h2d_txpost_size_for_prealloc(dhd_pub_t *dhd)
 #if defined(TX_CSO)
 	size += TXPOST_EXT_TAG_LEN_CSO;
 #endif /* TX_CSO */
+#if defined(DHD_ART)
+	size += TXPOST_EXT_TAG_LEN_ART;
+#endif /* DHD_ART */
+
 
 	/* MUST: size of the workitem must be multiples of 8x */
 	size = ROUNDUP(size, 8);
@@ -1542,6 +1548,11 @@ dhd_prot_get_h2d_txpost_size(dhd_pub_t *dhd)
 
 	if (dhd->dongle_txpost_ext_enabled) {
 
+#if defined(DHD_ART)
+		if (ART_ACTIVE(dhd)) {
+			size += TXPOST_EXT_TAG_LEN_ART;
+		}
+#endif /* DHD_ART */
 #if defined(TX_CSO)
 		if (TXCSO_ACTIVE(dhd)) {
 			size += TXPOST_EXT_TAG_LEN_CSO;
@@ -4803,6 +4814,9 @@ dhd_prot_init(dhd_pub_t *dhd)
 	prot->device_ipc_version = dhd->bus->api.fw_rev;
 	prot->host_ipc_version = PCIE_SHARED_VERSION;
 
+#ifdef DHD_ART
+	dhd->host_art_enabled = TRUE;
+#endif /* DHD_ART */
 	/* For now enable CSO in host here,
 	 * later on it can be moved to sysfs
 	 */
@@ -5022,6 +5036,10 @@ dhd_prot_init(dhd_pub_t *dhd)
 					__FUNCTION__, ret));
 			}
 		}
+
+		/* ensure the ring data is visible to other cores before setting flag */
+		OSL_SMP_WMB();
+		atomic_set(&dhd->edl_attached, 1);
 #endif /* EWP_EDL */
 
 #ifdef BTLOG
@@ -8461,12 +8479,13 @@ BCMFASTPATH(dhd_prot_process_msgbuf_rxcpl)(dhd_pub_t *dhd, int ringtype, uint32 
 				 * in the below block, use msg-cmn_hdr.if_id directly
 				 * instead of assigning ifidx with msg-cmn_hdr.if_id
 				 */
-				if (dhd_monitor_enabled(dhd, msg->cmn_hdr.if_id)) {
+
+				if (dhd_monitor_enabled(dhd, 0)) {
 					if (msg->flags & BCMPCIE_PKT_FLAGS_FRAME_802_11) {
 						dhd_rx_mon_pkt(dhd, msg, pkt, msg->cmn_hdr.if_id);
 						continue;
 					} else {
-						DHD_ERROR(("Received non 802.11 packet, "
+						DHD_TRACE(("Received non 802.11 packet, "
 							"when monitor mode is enabled\n"));
 					}
 #ifdef DBG_PKT_MON
@@ -8583,11 +8602,7 @@ BCMFASTPATH(dhd_prot_process_msgbuf_rxcpl)(dhd_pub_t *dhd, int ringtype, uint32 
 	}
 
 	/* Call lb_dispatch only if packets are queued */
-	if (n &&
-#ifdef WL_MONITOR
-	!(dhd_monitor_enabled(dhd, ifidx)) &&
-#endif /* WL_MONITOR */
-	TRUE) {
+	if (n) {
 		DHD_LB_DISPATCH_RX_PROCESS(dhd);
 	}
 
@@ -9341,7 +9356,9 @@ BCMFASTPATH(dhd_prot_txstatus_process_each_aggr_item)(dhd_pub_t *dhd, msgbuf_rin
 	msgbuf_ring_t *flow_ring;
 #endif /* AGG_H2D_DB */
 	flow_ring_node_t *flow_ring_node;
+	flow_info_t *flow_info;
 	uint16 flowid;
+	uint8 role;
 
 	flowid = txstatus->compl_aggr_hdr.ring_id;
 	if (DHD_FLOW_RING_INV_ID(dhd, flowid)) {
@@ -9404,9 +9421,10 @@ BCMFASTPATH(dhd_prot_txstatus_process_each_aggr_item)(dhd_pub_t *dhd, msgbuf_rin
 	}
 
 	DMA_UNMAP(dhd->osh, pa, (uint) len, DMA_TX, 0, dmah);
-
+	flow_info = &flow_ring_node->flow_info;
+	role = dhd_flow_rings_ifindex2role(dhd, flow_info->ifindex);
 #ifdef HOST_SFH_LLC
-	if (dhd->host_sfhllc_supported) {
+	if ((role != WLC_E_IF_ROLE_ART) && dhd->host_sfhllc_supported) {
 		struct ether_header eth;
 		if (!memcpy_s(&eth, sizeof(eth),
 			PKTDATA(dhd->osh, pkt), sizeof(eth))) {
@@ -9746,6 +9764,7 @@ BCMFASTPATH(dhd_prot_txstatus_process)(dhd_pub_t *dhd, void *msg)
 
 	flow_ring_node_t *flow_ring_node;
 	uint16 flowid;
+	uint8 role;
 
 
 	txstatus = (host_txbuf_cmpl_t *)msg;
@@ -9880,9 +9899,9 @@ BCMFASTPATH(dhd_prot_txstatus_process)(dhd_pub_t *dhd, void *msg)
 	flow_info->cum_tx_status_latency += tx_status_latency;
 #endif /* TX_STATUS_LATENCY_STATS */
 	flow_info->num_tx_status++;
-
+	role = dhd_flow_rings_ifindex2role(dhd, flow_info->ifindex);
 #ifdef HOST_SFH_LLC
-	if (dhd->host_sfhllc_supported) {
+	if ((role != WLC_E_IF_ROLE_ART) && (dhd->host_sfhllc_supported)) {
 		struct ether_header eth;
 		if ((PKTLEN(dhd->osh, pkt) >= sizeof(eth)) &&
 			!memcpy_s(&eth, sizeof(eth),
@@ -9926,7 +9945,9 @@ BCMFASTPATH(dhd_prot_txstatus_process)(dhd_pub_t *dhd, void *msg)
 
 #if DHD_DBG_SHOW_METADATA
 	if (dhd->prot->metadata_dbg &&
-			dhd->prot->tx_metadata_offset && txstatus->metadata_len) {
+			dhd->prot->tx_metadata_offset &&
+			txstatus->metadata_len &&
+			(role != WLC_E_IF_ROLE_ART)) {
 		uchar *ptr;
 		/* The Ethernet header of TX frame was copied and removed.
 		 * Here, move the data pointer forward by Ethernet header size.
@@ -10292,6 +10313,7 @@ BCMFASTPATH(dhd_prot_txdata)(dhd_pub_t *dhd, void *PKTBUF, uint8 ifidx)
 	msgbuf_ring_t *ring;
 	flow_ring_table_t *flow_ring_table;
 	flow_ring_node_t *flow_ring_node;
+	flow_info_t *flow_info;
 #if defined(BCMINTERNAL) && defined(__linux__)
 	void *pkt_to_free = NULL;
 #endif /* BCMINTERNAL && LINUX */
@@ -10303,8 +10325,10 @@ BCMFASTPATH(dhd_prot_txdata)(dhd_pub_t *dhd, void *PKTBUF, uint8 ifidx)
 #endif /* DHD_PCIE_PKTID */
 	uint8 dhd_udr = FALSE;
 	uint8 dhd_igmp = FALSE;
+	uint8 role;
 	bool host_sfh_llc_reqd = dhd->host_sfhllc_supported;
 	bool llc_inserted = FALSE;
+	bool art_pkt = FALSE;
 
 #if defined(DHD_MESH)
 	struct ether_header *eh = NULL;
@@ -10345,9 +10369,13 @@ BCMFASTPATH(dhd_prot_txdata)(dhd_pub_t *dhd, void *PKTBUF, uint8 ifidx)
 	flowid = DHD_PKT_GET_FLOWID(PKTBUF);
 	flow_ring_table = (flow_ring_table_t *)dhd->flow_ring_table;
 	flow_ring_node = (flow_ring_node_t *)&flow_ring_table[flowid];
+	flow_info = &flow_ring_node->flow_info;
 
 	ring = (msgbuf_ring_t *)flow_ring_node->prot_info;
-
+	role = dhd_flow_rings_ifindex2role(dhd, flow_info->ifindex);
+	if (role == WLC_E_IF_ROLE_ART) {
+		art_pkt = TRUE;
+	}
 	/*
 	 * JIRA SW4349-436:
 	 * Copying the TX Buffer to an SKB that lives in the DMA Zone
@@ -10427,14 +10455,16 @@ BCMFASTPATH(dhd_prot_txdata)(dhd_pub_t *dhd, void *PKTBUF, uint8 ifidx)
 		dhd_rxcso_test_inject_bad_txcsum(dhd, PKTBUF, dhd->rxcso_test_badcsum_type);
 #endif /* RX_CSO_TEST */
 
+	if (!art_pkt) {
+		if (memcpy_s(txdesc->txhdr, sizeof(txdesc->txhdr), pktdata, ETHER_HDR_LEN)) {
+			DHD_ERROR(("%s memcpy_s failed for txhdr\n", __FUNCTION__));
+			ASSERT(0);
+		}
+	}
+
 	/* Ethernet header - contains ethertype field
 	* Copy before we cache flush packet using DMA_MAP
 	*/
-	if (memcpy_s(txdesc->txhdr, sizeof(txdesc->txhdr), pktdata, ETHER_HDR_LEN)) {
-		DHD_ERROR(("%s memcpy_s failed for txhdr\n", __FUNCTION__));
-		ASSERT(0);
-	}
-
 	if (dhd->dongle_txpost_ext_enabled) {
 #ifdef TX_CSO
 		if (TXCSO_ACTIVE(dhd)) {
@@ -10447,8 +10477,35 @@ BCMFASTPATH(dhd_prot_txdata)(dhd_pub_t *dhd, void *PKTBUF, uint8 ifidx)
 		BCM_REFERENCE(eh);
 
 #endif /* defined(DHD_MESH) */
+#ifdef DHD_ART
+		if (art_pkt) {
+			dhd_fill_art_info(dhd, PKTBUF, txdesc, ring->item_len);
+		}
+#endif /* DHD_ART */
 	}
 
+#ifdef DHD_ART
+	if (art_pkt) {
+		pktdata = PKTPULL(dhd->osh, PKTBUF, TXPOST_EXT_ART_HDR_LEN);
+		pktlen  = PKTLEN(dhd->osh, PKTBUF);
+	} else
+#endif /* DHD_ART */
+#ifdef DHD_LLC
+		if (dhd_llc_hdr_insert_enabled(dhd, ifidx)) {
+			if (dhd_ether_to_generic_llc_hdr(dhd, ifidx, (struct ether_header *)pktdata,
+				PKTBUF) == BCME_OK) {
+				llc_inserted = TRUE;
+				/* in work item change ether type to len by
+				 * re-copying the ether header
+				 */
+				(void)memcpy_s(txdesc->txhdr, ETHER_HDR_LEN,
+						PKTDATA(dhd->osh, PKTBUF),
+						ETHER_HDR_LEN);
+			} else {
+				goto err_rollback_idx;
+			}
+		} else
+#endif /* DHD_LLC */
 #ifdef HOST_SFH_LLC
 	if (host_sfh_llc_reqd) {
 		if (dhd_ether_to_8023_hdr(dhd->osh, (struct ether_header *)pktdata,
@@ -10558,7 +10615,7 @@ BCMFASTPATH(dhd_prot_txdata)(dhd_pub_t *dhd, void *PKTBUF, uint8 ifidx)
 	txdesc->data_buf_addr.high_addr = htol32(PHYSADDRHI(pa));
 	txdesc->data_buf_addr.low_addr  = htol32(PHYSADDRLO(pa));
 
-	if (!host_sfh_llc_reqd)	{
+	if (!host_sfh_llc_reqd && !art_pkt)	{
 		/* Move data pointer to keep ether header in local PKTBUF for later reference */
 		PKTPUSH(dhd->osh, PKTBUF, ETHER_HDR_LEN);
 	}
@@ -10617,6 +10674,11 @@ BCMFASTPATH(dhd_prot_txdata)(dhd_pub_t *dhd, void *PKTBUF, uint8 ifidx)
 		txdesc->ext_flags |= BCMPCIE_PKT_FLAGS_FRAME_UDR;
 	}
 #endif /* DHD_SBN */
+#ifdef DHD_ART
+	if (art_pkt) {
+		txdesc->ext_flags |= BCMPCIE_PKT_FLAGS_ART;
+	}
+#endif /* DHD_ART */
 
 	/* Handle Tx metadata */
 	headroom = (uint16)PKTHEADROOM(dhd->osh, PKTBUF);
@@ -10624,8 +10686,8 @@ BCMFASTPATH(dhd_prot_txdata)(dhd_pub_t *dhd, void *PKTBUF, uint8 ifidx)
 		DHD_ERROR(("No headroom for Metadata tx %d %d\n",
 		prot->tx_metadata_offset, headroom));
 
-	if (prot->tx_metadata_offset && (headroom >= prot->tx_metadata_offset)) {
-		DHD_TRACE(("Metadata in tx %d\n", prot->tx_metadata_offset));
+	if ((prot->tx_metadata_offset) && (!art_pkt) &&
+		(headroom >= prot->tx_metadata_offset)) {
 
 		/* Adjust the data pointer to account for meta data in DMA_MAP */
 		PKTPUSH(dhd->osh, PKTBUF, prot->tx_metadata_offset);
@@ -10719,7 +10781,6 @@ BCMFASTPATH(dhd_prot_txdata)(dhd_pub_t *dhd, void *PKTBUF, uint8 ifidx)
 	/* update ring's WR index and ring doorbell to dongle */
 	dhd_prot_ring_write_complete(dhd, ring, txdesc, 1);
 #endif /* TXP_FLUSH_NITEMS */
-
 #ifdef TX_STATUS_LATENCY_STATS
 	/* set the time when pkt is queued to flowring */
 	DHD_PKT_SET_QTIME(PKTBUF, OSL_SYSUPTIME_US());
@@ -12787,21 +12848,9 @@ BCMFASTPATH(dhd_prot_alloc_ring_space)(dhd_pub_t *dhd, msgbuf_ring_t *ring,
 	uint16 nitems, uint16 *alloced, bool exactly_nitems)
 {
 	void *ret_buf;
-	sh_addr_t base_addr;
 
 	if (nitems == 0) {
 		DHD_ERROR(("%s: nitems is 0 - ring(%s)\n", __FUNCTION__, ring->name));
-		return NULL;
-	}
-	/* sanity check */
-	if (!DHD_VIRT_ADDR_VALID(ring)) {
-		DHD_ERROR(("%s() ring virtual address is invalid\n", __FUNCTION__));
-		return NULL;
-	}
-	/* compare the saved physical address in ring sanity for memory corruption */
-	dhd_base_addr_htolpa(&base_addr, ring->dma_buf.pa);
-	if (memcmp(&base_addr, &ring->base_addr, sizeof(sh_addr_t)) != 0) {
-		DHD_ERROR(("%s() ring base_addr and dma_buf.pa did not match\n", __FUNCTION__));
 		return NULL;
 	}
 
@@ -12977,9 +13026,10 @@ dhd_fillup_ioct_reqst(dhd_pub_t *dhd, uint16 len, uint cmd, void *buf, int ifidx
 	if (!ISALIGNED(ioct_buf, DMA_ALIGN_LEN))
 		DHD_ERROR(("host ioct address unaligned !!!!! \n"));
 
-	DHD_CTL(("submitted IOCTL request request_id %d, cmd %d, output_buf_len %d, tx_id %d\n",
+	DHD_CTL(("submitted IOCTL request request_id %d, cmd %d, output_buf_len %d, "
+		"tx_id %d ioct_rqst->cmn_hdr.if_id: %d\n",
 		ioct_rqst->cmn_hdr.request_id, cmd, ioct_rqst->output_buf_len,
-		ioct_rqst->trans_id));
+		ioct_rqst->trans_id, ioct_rqst->cmn_hdr.if_id));
 
 #if defined(BCMINTERNAL) && defined(DHD_DBG_DUMP)
 	dhd_prot_ioctl_trace(dhd, ioct_rqst, buf, len);
@@ -14658,10 +14708,10 @@ dhd_prot_flow_ring_create(dhd_pub_t *dhd, flow_ring_node_t *flow_ring_node)
 	uint16 max_flowrings = dhd->bus->max_tx_flowrings;
 	uint16 h2d_txpost_size;
 	int ret = 0;
-#if defined(DHD_MESH)
 	if_flow_lkup_t *if_flow_lkup = NULL;
 	uint8 ifindex;
 	uint8 role;
+#if defined(DHD_MESH)
 	bool mesh_over_nan = FALSE;
 #endif /* defined(DHD_MESH) */
 	driver_state_t driver_state;
@@ -14739,11 +14789,16 @@ dhd_prot_flow_ring_create(dhd_pub_t *dhd, flow_ring_node_t *flow_ring_node)
 	flow_create_rqst->len_item = htol16(h2d_txpost_size);
 	flow_create_rqst->if_flags = 0;
 
-#if defined(DHD_MESH)
 	if_flow_lkup = (if_flow_lkup_t *) (dhd->if_flow_lkup);
 	ifindex = flow_ring_node->flow_info.ifindex;
 	role = if_flow_lkup[ifindex].role;
-
+	BCM_REFERENCE(role);
+#if defined(DHD_ART)
+	if (role == WLC_E_IF_ROLE_ART) {
+		flow_create_rqst->if_flags |= BCMPCIE_FLOW_RING_INTF_ART;
+	}
+#endif /* DHD_ART */
+#if defined(DHD_MESH)
 	if (role == WLC_E_IF_ROLE_NAN) {
 		mesh_over_nan = (if_flow_lkup[ifindex].flags & WLC_E_IF_FLAGS_MESH_USE);
 	}
@@ -14792,9 +14847,11 @@ dhd_prot_flow_ring_create(dhd_pub_t *dhd, flow_ring_node_t *flow_ring_node)
 		flow_create_rqst->priority_ifrmmask = (1 << IFRM_DEV_0);
 
 	DHD_PRINT(("%s: Send Flow Create Req flow ID %d for peer " MACDBG
-		" prio %d ifindex %d items %d\n", __FUNCTION__, flow_ring_node->flowid,
+		" prio %d ifindex %d items %d if_flags: 0x%x\n",
+		__FUNCTION__, flow_ring_node->flowid,
 		MAC2STRDBG(flow_ring_node->flow_info.da), flow_ring_node->flow_info.tid,
-		flow_ring_node->flow_info.ifindex, flow_ring->max_items));
+		flow_ring_node->flow_info.ifindex,
+		flow_ring->max_items, flow_create_rqst->if_flags));
 
 	/* Update the flow_ring's WRITE index */
 	if (IDMA_ACTIVE(dhd) || dhd->dma_h2d_ring_upd_support) {
@@ -18443,6 +18500,13 @@ dhd_bus_flow_ring_status_trace(dhd_pub_t *dhd, dhd_frs_trace_t *frs_trace)
 				dhd_prot_dma_indx_get(dhd, D2H_DMA_INDX_WR_UPD, ring->idx);
 		}
 	}
+
+	if (atomic_read(&dhd->edl_attached) == 0) {
+		return;
+	}
+	/* ensure ring->idx is read after setting edl_attached */
+	OSL_SMP_RMB();
+
 	if (prot->d2hring_edl != NULL) {
 		ring = prot->d2hring_edl;
 		if (ring->inited) {
@@ -18491,3 +18555,38 @@ dhd_bus_flow_ring_status_dpc_trace(dhd_pub_t *dhd)
 	dhd->bus->frs_dpc_count++;
 }
 #endif /* DHD_FLOW_RING_STATUS_TRACE */
+
+#ifdef DHD_ART
+void
+dhd_fill_art_info(dhd_pub_t *dhd, void *pktbuf, void *txdesc, uint32 item_len)
+{
+	txpost_wi_art_info_t *art_info;
+	uint16 offset_len = H2DRING_TXPOST_BASE_ITEMSIZE; /* workitem base size */
+
+	if (!ART_ACTIVE(dhd)) {
+		return;
+	}
+
+#if defined(TX_CSO)
+	if (TXCSO_ACTIVE(dhd)) {
+		if (item_len >= (offset_len + TXPOST_EXT_TAG_LEN_CSO)) {
+			txpost_wi_cso_info_t *cso_info =
+				(txpost_wi_cso_info_t *) (((uint8 *)txdesc) + offset_len);
+			cso_info->ext_tag = TXPOST_EXT_TAG_TYPE_CSO;
+		}
+		offset_len += TXPOST_EXT_TAG_LEN_CSO;
+	}
+#endif /* defined(TX_CSO) */
+
+	if (item_len >= (offset_len + TXPOST_EXT_TAG_LEN_ART)) {
+		void *pktdata = PKTDATA(dhd->osh, pktbuf);
+		art_info = (txpost_wi_art_info_t *) (((uint8 *)txdesc) + offset_len);
+		art_info->ext_tag = TXPOST_EXT_TAG_TYPE_ART;
+		memcpy_s(art_info->art_hdr, TXPOST_EXT_ART_HDR_LEN,
+			pktdata, TXPOST_EXT_ART_HDR_LEN);
+	} else {
+		DHD_ERROR(("%s invalid item_len: %d < %d+%d \n",
+			__FUNCTION__, item_len, offset_len, TXPOST_EXT_TAG_LEN_ART));
+	}
+}
+#endif /* DHD_ART */

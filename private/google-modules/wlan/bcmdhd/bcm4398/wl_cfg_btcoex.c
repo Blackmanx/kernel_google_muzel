@@ -1,7 +1,7 @@
 /*
  * Linux cfg80211 driver - Dongle Host Driver (DHD) related
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -298,7 +298,6 @@ wl_cfg80211_bt_setflag(struct net_device *dev, bool set)
 	char buf_flag7_default[8]   = { 7, 00, 00, 00, 0x0, 0x00, 0x00, 0x00};
 #endif
 
-
 #if defined(BT_DHCP_eSCO_FIX)
 	/*  ANREY: New Yury's eSco pacifier */
 	/* set = 1, save & turn on  0 - off & restore prev settings */
@@ -569,7 +568,6 @@ int wl_cfg80211_set_btcoex_dhcp(struct net_device *dev, dhd_pub_t *dhd, char *co
 #else
 	else if (powermode_val == '0') {
 #endif
-
 
 #if defined(OEM_ANDROID) && defined(DHCP_SCAN_SUPPRESS)
 		/* Since DHCP is complete, enable the scan back */

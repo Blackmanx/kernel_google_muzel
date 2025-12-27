@@ -196,7 +196,6 @@ typedef unsigned __int64 uint64;
 
 #endif /* SITE_TYPEDEFS */
 
-
 /*
  * Default Typedefs
  */
@@ -323,7 +322,6 @@ typedef float64 float_t;
 #define	PTRSZ	sizeof(char*)
 #endif
 
-
 /* Detect compiler type. */
 #ifdef _MSC_VER
 	#define BWL_COMPILER_MICROSOFT
@@ -334,7 +332,6 @@ typedef float64 float_t;
 #else
 	#error "Unknown compiler!"
 #endif /* _MSC_VER */
-
 
 #ifndef INLINE
 #if defined(BWL_COMPILER_MICROSOFT)
@@ -348,14 +345,12 @@ typedef float64 float_t;
 #endif /* _MSC_VER */
 #endif /* INLINE */
 
-
 /* Force inlining. */
 #if defined(BWL_COMPILER_GNU)
 #define INLINE_ALWAYS	inline  __attribute__ ((always_inline))
 #else
 #define INLINE_ALWAYS	INLINE
 #endif
-
 
 #undef TYPEDEF_BOOL
 #undef TYPEDEF_UCHAR

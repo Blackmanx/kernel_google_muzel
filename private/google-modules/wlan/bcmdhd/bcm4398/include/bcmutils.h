@@ -1,7 +1,7 @@
 /*
  * Misc useful os-independent macros and functions.
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -484,7 +484,6 @@ uint16 bcmhex2bin(const uint8* hex, uint hex_len, uint8 *buf, uint buf_len);
 
 #define BCME_STRLEN             64      /* Max string length for BCM errors */
 #define VALID_BCMERROR(e)       valid_bcmerror(e)
-
 
 #ifdef DBG_BUS
 /** tracks non typical execution paths, use gdb with arm sim + firmware dump to read counters */
@@ -1015,7 +1014,6 @@ typedef struct {
 	uint16 count; /* Total count of the packets */
 } pktlist_info_t;
 
-
 extern void pktlist_add(pktlist_info_t *pktlist, void *p, int len, char *file);
 extern void pktlist_remove(pktlist_info_t *pktlist, void *p);
 extern char* pktlist_dump(pktlist_info_t *pktlist, char *buf, uint bufsz);
@@ -1108,7 +1106,6 @@ bcm_cntsetbits(const uint32 u32arg)
 	return ((uint32)_CSBTBL[p[0]] + _CSBTBL[p[1]] + _CSBTBL[p[2]] + _CSBTBL[p[3]]);
 }
 
-
 static INLINE uint /* C equivalent count of leading 0's in a u32 */
 C_bcm_count_leading_zeros(uint32 u32arg)
 {
@@ -1198,7 +1195,6 @@ extern void bcm_mwbmap_show(struct bcm_mwbmap * mwbmap_hdl);
 
 extern void bcm_mwbmap_audit(struct bcm_mwbmap * mwbmap_hdl);
 /* End - Multiword bitmap based small Id allocator. */
-
 
 /* INTERFACE: Simple unique 16bit Id Allocator using a stack implementation. */
 
@@ -1317,13 +1313,11 @@ BCMPOSTTRAPFN(dll_head_p)(dll_t *list_p)
 	return list_p->next_p;
 }
 
-
 static INLINE_ALWAYS dll_t *
 BCMPOSTTRAPFN(dll_tail_p)(dll_t *list_p)
 {
 	return (list_p)->prev_p;
 }
-
 
 static INLINE_ALWAYS dll_t *
 BCMPOSTTRAPFN(dll_next_p)(dll_t *node_p)
@@ -1331,13 +1325,11 @@ BCMPOSTTRAPFN(dll_next_p)(dll_t *node_p)
 	return (node_p)->next_p;
 }
 
-
 static INLINE_ALWAYS dll_t *
 BCMPOSTTRAPFN(dll_prev_p)(dll_t *node_p)
 {
 	return (node_p)->prev_p;
 }
-
 
 static INLINE_ALWAYS bool
 BCMPOSTTRAPFN(dll_empty)(dll_t *list_p)
@@ -1345,13 +1337,11 @@ BCMPOSTTRAPFN(dll_empty)(dll_t *list_p)
 	return ((list_p)->next_p == (list_p));
 }
 
-
 static INLINE_ALWAYS bool
 BCMPOSTTRAPFN(dll_end)(dll_t *list_p, dll_t * node_p)
 {
 	return (list_p == node_p);
 }
-
 
 /* inserts the node new_p "after" the node at_p */
 static INLINE_ALWAYS void
@@ -1374,7 +1364,6 @@ BCMPOSTTRAPFN(dll_prepend)(dll_t *list_p, dll_t *node_p)
 {
 	dll_insert(node_p, list_p);
 }
-
 
 /* deletes a node from any list that it "may" be in, if at all. */
 static INLINE_ALWAYS void
@@ -1614,7 +1603,6 @@ extern int print_string(const char *str);
 
 #define printf_ps_0(str, ...)	print_string(str)
 #define printf_ps_x(str, ...)	printf(str, __VA_ARGS__)
-
 
 #define posttrap_printf(...)	\
 	do { \

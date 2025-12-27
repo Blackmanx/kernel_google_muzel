@@ -2,7 +2,7 @@
  * Generic Broadcom Home Networking Division (HND) DMA engine HW interface
  * This supports the following chips: BCM42xx, 44xx, 47xx .
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -30,7 +30,6 @@
  *  basic DMA register set is per channel(transmit or receive)
  *  a pair of channels is defined for convenience
  */
-
 
 /* 32 bits addressing */
 
@@ -285,7 +284,6 @@ typedef volatile struct {
  */
 #define D64_DEF_USBBURSTLEN     2
 #define D64_DEF_SDIOBURSTLEN    1
-
 
 #ifndef D64_USBBURSTLEN
 #define D64_USBBURSTLEN	DMA_BL_64

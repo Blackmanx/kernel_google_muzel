@@ -5,7 +5,7 @@
  * IEEE Std 802.1X-2001
  * IEEE 802.1X RADIUS Usage Guidelines
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -294,7 +294,6 @@ typedef BWL_PRE_PACKED_STRUCT struct {
 	uint8	link_id;		/* rsvd [0-3], link_id [4-7] */
 	uint8	key[EAPOL_WPA_MAX_KEY_SIZE];
 } BWL_POST_PACKED_STRUCT eapol_wpa2_key_mlo_igtk_encap_t;
-
 
 /* BIGTK encapsulation */
 #define EAPOL_RSN_BIPN_SIZE	6u

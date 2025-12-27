@@ -161,14 +161,12 @@ typedef volatile struct {
 #define PCI_SYS_ERR_INT_EN	(1 << 4)	/* System Error Interrupt Enable */
 #define PCI_SOFTWARE_RESET	(1U << 31)	/* Software reset of the PCI Core. */
 
-
 /* PCI Core ISR Register bit definitions */
 #define PCI_INT_PROP_ST		(1 << 0)	/* Interrupt Propagation Status */
 #define PCI_WB_ERR_INT_ST	(1 << 1)	/* Wishbone Error Interrupt Status */
 #define PCI_PCI_ERR_INT_ST	(1 << 2)	/* PCI Error Interrupt Status */
 #define PCI_PAR_ERR_INT_ST	(1 << 3)	/* Parity Error Interrupt Status */
 #define PCI_SYS_ERR_INT_ST	(1 << 4)	/* System Error Interrupt Status */
-
 
 /* Registers on the Wishbone bus */
 #define SPIH_CTLR_INTR		(1 << 0)	/* SPI Host Controller Core Interrupt */

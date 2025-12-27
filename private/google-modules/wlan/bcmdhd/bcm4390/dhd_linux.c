@@ -542,7 +542,6 @@ char ucode_path[MOD_PARAM_PATHLEN];
 
 module_param_string(clm_path, clm_path, MOD_PARAM_PATHLEN, 0660);
 
-
 /* backup buffer for firmware and nvram path */
 char fw_bak_path[MOD_PARAM_PATHLEN];
 char nv_bak_path[MOD_PARAM_PATHLEN];
@@ -1230,7 +1229,6 @@ int dhd_send_twt_info_suspend(dhd_pub_t *dhdp, bool suspend)
 	ti.version = WL_TWT_INFO_VER;
 	ti.length = sizeof(ti.version) + sizeof(ti.length);
 
-
 	if (!dhdp || dhdp->up == 0) {
 		return ret;
 	}
@@ -1536,7 +1534,6 @@ static int dhd_sta_pool_init(dhd_pub_t *dhdp, int max_sta);
 static void dhd_sta_pool_fini(dhd_pub_t *dhdp, int max_sta);
 /* Clear the pool of dhd_sta_t objects for built-in type driver */
 static void dhd_sta_pool_clear(dhd_pub_t *dhdp, int max_sta);
-
 
 /** Reset a dhd_sta object and free into the dhd pool. */
 static void
@@ -3242,7 +3239,6 @@ dhd_ifadd_event_handler(void *handle, void *event_info, u8 event)
 	bssidx = if_event->event.bssidx;
 	DHD_TRACE(("%s: registering if with ifidx %d\n", __FUNCTION__, ifidx));
 
-
 #if defined(WL_CFG80211) && (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 0, 0))
 	if (if_event->event.ifidx > 0) {
 		u8 *mac_addr;
@@ -3368,7 +3364,6 @@ dhd_ifdel_event_handler(void *handle, void *event_info, u8 event)
 	/* For non-cfg80211 drivers */
 	dhd_remove_if(&dhd->pub, ifidx, TRUE);
 #endif /* WL_CFG80211 && LINUX_VERSION_CODE >= KERNEL_VERSION(3, 0, 0) */
-
 
 	dhd_clear_del_in_progress(dhdp, ndev);
 
@@ -4284,7 +4279,6 @@ dhd_init_logtrace_process(dhd_info_t *dhd)
 	return BCME_OK;
 }
 
-
 int
 dhd_reinit_logtrace_process(void *dhd_info)
 {
@@ -4873,7 +4867,6 @@ void dhd_runtime_pm_enable(dhd_pub_t *dhdp)
 
 #endif /* DHD_PCIE_RUNTIMEPM */
 
-
 #ifdef ENABLE_ADAPTIVE_SCHED
 static void
 dhd_sched_policy(int prio)
@@ -5204,7 +5197,6 @@ struct ethtool_ops dhd_ethtool_ops = {
 	.get_drvinfo = dhd_ethtool_get_drvinfo
 };
 
-
 static int
 dhd_ethtool(dhd_info_t *dhd, void *uaddr)
 {
@@ -5419,6 +5411,9 @@ dhd_dbg_monitor_pkt(dhd_pub_t *dhdp, host_rxbuf_cmpl_t *msg, void *pkt, int ifid
 			ifidx, PKTLEN(dhdp->osh, skb)));
 	}
 
+#ifdef DHD_ART
+			dhdp->art_counters.rx_dbg_monitor_packets++;
+#endif /* DHD_ART */
 	if (direction) {
 		bool ack = !!(hdr.flags & WL_AML_F_ACKED);
 #ifdef DHD_PKT_LOGGING
@@ -5575,10 +5570,14 @@ dhd_monitor_open(struct net_device *net)
 	}
 #ifdef DHD_ART
 	else {
+		u8 random_mac_addr[ETH_ALEN];
 		DHD_PRINT(("dhd_monitor_open: ART mode\n"));
+		RANDOM_BYTES(random_mac_addr, ETHER_ADDR_LEN);
+		ETHER_SET_UNICAST(random_mac_addr);
+		ETHER_SET_LOCALADDR(random_mac_addr);
 
 		wdev = wl_cfg80211_add_if(cfg, primary_ndev,
-			WL_IF_TYPE_ART, net->name, net->dev_addr);
+			WL_IF_TYPE_ART, net->name, random_mac_addr);
 		if (!wdev) {
 			ret = -ENODEV;
 			goto exit;
@@ -6177,7 +6176,7 @@ dhd_add_monitor_if(dhd_info_t *dhd)
 	dev_priv = DHD_MON_DEV_PRIV(dev);
 	dev_priv->dhd = dhd;
 	memset(&dev_priv->stats, 0, sizeof(dev_priv->stats));
-#endif /* WL_CFG80211_MONITOR && !DHD_ART*/
+#endif /* WL_CFG80211_MONITOR && !DHD_ART */
 exit:
 
 	if (ret) {
@@ -7037,7 +7036,6 @@ dhd_stop(struct net_device *net)
 		dhd_bus_inform_ep_loaded_to_rc(&dhd->pub, dhd->pub.up);
 #endif /* BCMPCIE && CONFIG_ARCH_MSM && CONFIG_SEC_PCIE_L1SS */
 
-
 		ifp = dhd->iflist[0];
 		/*
 		 * For CFG80211: Clean up all the left over virtual interfaces
@@ -7272,25 +7270,7 @@ dhd_verify_firmware_mode_change(dhd_info_t *dhd)
 	 * current mode - update fw/nv path, get current FW  mode from dhd->fw_path
 	 */
 	dhd_update_fw_nv_path(dhd);
-#ifdef WL_MONITOR
-	DHD_INFO(("%s : check monitor mode with fw_path : %s\n", __FUNCTION__, dhd->fw_path));
 
-	if (strstr(dhd->fw_path, "_mon") != NULL) {
-		DHD_PRINT(("%s : monitor mode is enabled, set force reg on "
-			"and big hammer\n", __FUNCTION__));
-		dhd->wl_accel_force_reg_on = TRUE;
-		dhd->pub.fw_mode_changed = TRUE;
-		dhd->pub.do_chip_bighammer = TRUE;
-		return;
-	} else if (dhd->pub.monitor_enable == TRUE) {
-		DHD_PRINT(("%s : monitor was enabled, changed to other fw_mode, "
-			"set force reg on and big hammer\n", __FUNCTION__));
-		dhd->wl_accel_force_reg_on = TRUE;
-		dhd->pub.fw_mode_changed = TRUE;
-		dhd->pub.do_chip_bighammer = TRUE;
-		return;
-	}
-#endif /* WL_MONITOR */
 	current_mode = dhd_get_fw_mode(dhd);
 
 	DHD_PRINT(("%s: current_mode 0x%x, prev_opmode 0x%x\n", __FUNCTION__,
@@ -7401,6 +7381,11 @@ dhd_open(struct net_device *net)
 		return BCME_ERROR;
 	}
 
+#ifdef DHD_ART
+	/* Initialize ART counters */
+	bzero(&dhd->pub.art_counters, sizeof(dhd_art_counters_t));
+#endif /* DHD_ART */
+
 	dhd->pub.open_in_progress = TRUE;
 
 	OSL_SMP_WMB();
@@ -7419,7 +7404,6 @@ dhd_open(struct net_device *net)
 		}
 	}
 #endif /* PREVENT_REOPEN_DURING_HANG */
-
 
 	/* clear to run TCM test once per dhd_open() */
 	if (dhd_tcm_test_mode != TCM_TEST_MODE_ONCE) {
@@ -7653,7 +7637,6 @@ dhd_open(struct net_device *net)
 			}
 
 		}
-
 
 #ifdef BT_OVER_SDIO
 		if (dhd->pub.is_bt_recovery_required) {
@@ -8501,7 +8484,6 @@ dhd_allocate_static_if(dhd_pub_t *dhdpub, const char *name,
 	dhd_info_t *dhdinfo = (dhd_info_t *)dhdpub->info;
 	dhd_if_t *ifp;
 	u8 static_idx = DHD_INVALID_STATIC_IDX;
-
 
 	for (i = 0; i < DHD_MAX_STATIC_IFS; i++) {
 		if (dhdinfo->static_iflist[i] == NULL) {
@@ -10083,7 +10065,6 @@ dhd_attach(osl_t *osh, struct dhd_bus *bus, uint bus_hdrlen)
 	dhd_state |= DHD_ATTACH_LOGTRACE_INIT;
 #endif /* SHOW_LOGTRACE && !OEM_ANDROID */
 
-
 #ifdef DHD_LOG_DUMP
 	dhd_log_dump_init(&dhd->pub);
 #endif /* DHD_LOG_DUMP */
@@ -10123,7 +10104,6 @@ dhd_attach(osl_t *osh, struct dhd_bus *bus, uint bus_hdrlen)
 	dhd->pub.txpath_mem = 0;
 	dhd->pub.rxpath_mem = 0;
 #endif /* DHD_MEM_STATS */
-
 
 #ifdef DHD_STATUS_LOGGING
 	dhd->pub.statlog = dhd_attach_statlog(&dhd->pub, MAX_STATLOG_ITEM,
@@ -10614,7 +10594,6 @@ void dhd_update_ifp_headroom_len(dhd_pub_t *dhdp, dhd_if_t *ifp)
 	}
 }
 
-
 /* Deinit llc hdr info if allocated */
 void dhd_deinit_ifp_llc(dhd_pub_t *dhdp, dhd_if_t *ifp)
 {
@@ -10846,7 +10825,6 @@ extern bool dhd_update_btfw_path(dhd_info_t *dhdinfo, char *btfw_path)
 	int fw_len;
 	const char *fw = NULL;
 	wifi_adapter_info_t *adapter = dhdinfo->adapter;
-
 
 	/* Update bt firmware path. The path may be from adapter info or module parameter
 	 * The path from adapter info is used for initialization only (as it won't change).
@@ -11486,7 +11464,6 @@ int dhd_set_ap_powersave(dhd_pub_t *dhdp, int ifidx, int enable)
 	return 0;
 }
 #endif /* SUPPORT_AP_POWERSAVE */
-
 
 #if defined(READ_CONFIG_FROM_FILE)
 #include <linux/fs.h>
@@ -12619,7 +12596,6 @@ dhd_optimised_preinit_ioctls(dhd_pub_t *dhd)
 			DHD_ERROR(("%s: country code setting failed\n", __FUNCTION__));
 	}
 
-
 #if defined(ROAM_ENABLE)
 #ifdef USE_WFA_CERT_CONF
 	if (sec_get_param_wfa_cert(dhd, SET_PARAM_ROAMOFF, &roamvar) == BCME_OK) {
@@ -13175,7 +13151,6 @@ done:
 	}
 	return ret;
 }
-
 
 int
 dhd_legacy_preinit_ioctls(dhd_pub_t *dhd)
@@ -16100,7 +16075,6 @@ void dhd_detach(dhd_pub_t *dhdp)
 	osl_spin_lock_deinit(dhd->pub.osh, dhd->pub.mem_stats_lock);
 #endif /* DHD_MEM_STATS */
 
-
 #if defined(DHD_MESH)
 	osl_spin_lock_deinit(dhd->pub.osh, dhd->pub.mesh_rt_lock);
 #endif /* defined(DHD_MESH) */
@@ -16217,7 +16191,6 @@ void dhd_detach(dhd_pub_t *dhdp)
 	osl_spin_lock_deinit(dhd->pub.osh, dhd->pub.ts_lock);
 #endif /* DHD_TIMESYNC */
 
-
 #if defined(OEM_ANDROID)
 	dhd_cancel_work_sync(&dhd->dhd_hang_process_work);
 #endif /* OEM_ANDROID */
@@ -16289,7 +16262,6 @@ void dhd_detach(dhd_pub_t *dhdp)
 	dhd_cancel_work_sync(&dhd->dhd_dump_proc_work);
 #endif /* DHD_FILE_DUMP_EVENT && DHD_FW_COREDUMP */
 } /* dhd_detach */
-
 
 void
 dhd_free(dhd_pub_t *dhdp)
@@ -16432,7 +16404,6 @@ dhd_module_exit(void)
 
 }
 
-
 static int
 _dhd_module_init(void)
 {
@@ -16494,7 +16465,6 @@ _dhd_module_init(void)
 			strlcpy(nvram_path, nv_bak_path, sizeof(nvram_path));
 		}
 	} while (retry--);
-
 
 	if (err) {
 		DHD_ERROR(("%s: Failed to load driver max retry reached**\n", __FUNCTION__));
@@ -17700,8 +17670,6 @@ dhd_dev_get_feature_set(struct net_device *dev)
 		feature_set |= WIFI_FEATURE_INFRA_5G;
 	if (FW_SUPPORTED(dhd, p2p))
 		feature_set |= WIFI_FEATURE_P2P;
-	if (dhd->op_mode & DHD_FLAG_HOSTAP_MODE)
-		feature_set |= WIFI_FEATURE_SOFT_AP;
 	if (FW_SUPPORTED(dhd, tdls))
 		feature_set |= WIFI_FEATURE_TDLS;
 	if (FW_SUPPORTED(dhd, vsdb))
@@ -17772,7 +17740,13 @@ dhd_dev_get_feature_set(struct net_device *dev)
 #endif /* ROAMEXP_SUPPORT */
 #ifdef WL_LATENCY_MODE
 	feature_set |= WIFI_FEATURE_SET_LATENCY_MODE;
+	feature_set |= WIFI_FEATURE_SET_VOIP_MODE;
 #endif /* WL_LATENCY_MODE */
+
+	feature_set |= WIFI_FEATURE_SOFT_AP;
+	feature_set |= WIFI_FEATURE_CACHED_SCAN_RESULTS;
+	feature_set |= WIFI_FEATURE_DYNAMIC_SET_MAC;
+	feature_set |= WIFI_FEATURE_ADDITIONAL_STA;
 
 #ifdef WL_AGGRESSIVE_ROAM
 	feature_set |= WIFI_FEATURE_ROAMING_MODE_CONTROL;
@@ -19383,7 +19357,6 @@ int net_os_send_hang_message_reason(struct net_device *dev, const char *string_n
 }
 #endif /* OEM_ANDROID */
 
-
 int dhd_net_wifi_platform_set_power(struct net_device *dev, bool on, unsigned long delay_msec)
 {
 	dhd_info_t *dhd = DHD_DEV_INFO(dev);
@@ -19850,14 +19823,12 @@ int net_os_wake_lock_ctrl_timeout_enable(struct net_device *dev, int val)
 	return ret;
 }
 
-
 #if defined(DHD_TRACE_WAKE_LOCK)
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 7, 0))
 #include <linux/hashtable.h>
 #else
 #include <linux/hash.h>
 #endif /* KERNEL_VER >= KERNEL_VERSION(3, 7, 0) */
-
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 7, 0))
 /* Define 2^5 = 32 bucket size hash table */
@@ -19902,7 +19873,6 @@ static struct wk_trace_record *find_wklock_entry(unsigned long addr)
 	}
 	return NULL;
 }
-
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 7, 0))
 #define HASH_ADD(hashtable, node, key) \
@@ -20820,7 +20790,6 @@ dhd_dbg_state_read(struct file *file, char __user *ubuf,
 	return rval;
 }
 
-
 static ssize_t
 dhd_debugfs_write(struct file *file, const char __user *ubuf, size_t count, loff_t *ppos)
 {
@@ -20845,7 +20814,6 @@ dhd_debugfs_write(struct file *file, const char __user *ubuf, size_t count, loff
 
 	return count;
 }
-
 
 loff_t
 dhd_debugfs_lseek(struct file *file, loff_t off, int whence)
@@ -21286,6 +21254,12 @@ void dhd_schedule_memdump(dhd_pub_t *dhdp, uint8 *buf, uint32 size)
 			(dhdp->open_in_progress || dhdp->stop_in_progress)) {
 		/* dhd_mem_dump will clear memdump_type, so cache it */
 		uint32 memdump_type = dhdp->memdump_type;
+
+		/* protects against cases where flags are missing */
+		if (dhdp->memdump_type == DUMP_TYPE_DONGLE_TRAP) {
+			dhdp->dongle_trap_occured = TRUE;
+		}
+
 		dhd_info->scheduled_memdump = FALSE;
 		DHD_PRINT(("%s:Collecting mem_dump in same context\n ", __FUNCTION__));
 		dhd_mem_dump((void *)dhdp->info, (void *)dump, 0);
@@ -21970,7 +21944,6 @@ void dhd_schedule_trap_log_dump(dhd_pub_t *dhdp,
 		DHD_WQ_WORK_PRIORITY_HIGH);
 }
 
-
 /* Returns the pid of a the userspace process running with the given name */
 static struct task_struct *
 _get_task_info(const char *pname)
@@ -22097,7 +22070,6 @@ _dhd_schedule_macdbg_dump(void *handle, void *event_info, u8 event)
 			bzero(dumpfilename, DUMPMAC_FILENAME_SZ);
 			dumpbuf_len = 0;
 		}
-
 
 		/* PSMx */
 		if (dhd_macdbg_dumpmac(dhdp, dumpbuf, DUMPMAC_BUF_SZ,
@@ -22991,7 +22963,6 @@ dmaxfer_free_dmaaddr_handler(void *handle, void *event_info, u8 event)
 	}
 	dmaxfer_free_prev_dmaaddr(&dhd_info->pub, dmmap);
 }
-
 
 void
 dhd_schedule_dmaxfer_free(dhd_pub_t *dhdp, dmaxref_mem_map_t *dmmap)
@@ -24674,7 +24645,6 @@ __dhd_fixed_ring_get_prev(dhd_fixed_ring_info_t *ring, void *prev, uint32 type)
 	return (uint8 *)ring->elem + ring->elem_size * cur_idx;
 }
 
-
 static inline void
 __dhd_fixed_ring_lock(dhd_fixed_ring_info_t *ring, void *first_ptr, void *last_ptr, uint32 type)
 {
@@ -26262,4 +26232,43 @@ dhd_initilize_idsup(uint16 chipid)
 	 *  Once offload of 4-way HS to FW is ready this will be removed.
 	 */
 #endif /* BCMSUP_4WAY_HANDSHAKE */
+}
+
+#ifdef DHD_ART
+bool
+dhd_is_art_iface(dhd_pub_t *dhdp, int ifidx)
+{
+	dhd_info_t *dhdinfo = (dhd_info_t *)dhdp->info;
+	dhd_if_t *ifp = NULL;
+
+	if (ifidx < 0 || ifidx >= DHD_MAX_STATIC_IFS ||
+		!dhdinfo->iflist[ifidx] ||
+		!dhdinfo->monitor_dev) {
+		return FALSE;
+	}
+
+	ifp = dhdinfo->iflist[ifidx];
+	if (!ifp || !ifp->net || (ifp->net->name[0] == '\0')) {
+		return FALSE;
+	}
+
+	if (IS_ART_IFACE(ifp->net->name)) {
+		return TRUE;
+	} else {
+		return FALSE;
+	}
+}
+#endif /* DHD_ART */
+
+bool
+dhd_is_art_skb(struct sk_buff *skb)
+{
+	if (!skb || !skb->dev || (skb->dev->name[0] == '\0')) {
+		return FALSE;
+	}
+	if (IS_ART_IFACE(skb->dev->name)) {
+		return TRUE;
+	} else {
+		return FALSE;
+	}
 }

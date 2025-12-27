@@ -1,7 +1,7 @@
 /*
  * DHD Bus Module for PCIE
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -609,7 +609,6 @@ enum {
 	IOV_PCIE_LAST /**< unused IOVAR */
 };
 
-
 const bcm_iovar_t dhdpcie_iovars[] = {
 	{"intr",	IOV_INTR,	0, 	0, IOVT_BOOL,	0 },
 #ifdef DHD_BUS_MEM_ACCESS
@@ -849,7 +848,6 @@ dhd_bus_unregister(void)
 	return;
 }
 
-
 /** returns a host virtual address */
 uint32 *
 dhdpcie_bus_reg_map(osl_t *osh, ulong addr, int size)
@@ -1007,7 +1005,6 @@ dhd_bus_pcie_pwr_req_clear_nolock(struct dhd_bus *bus)
 {
 	_dhd_bus_pcie_pwr_req_clear_cmn(bus);
 }
-
 
 static INLINE void
 _dhd_bus_pcie_pwr_req_cmn(struct dhd_bus *bus)
@@ -1301,7 +1298,6 @@ dhdpcie_ltr_active_sanity_check(dhd_pub_t *dhdp)
 	/* for debug information */
 	dhdpcie_ltr_sleep_lat_get(dhdp, &ltr_sleep_lat_ns);
 }
-
 
 /* This is the function to plug-in any post prot init quirks */
 void
@@ -2798,7 +2794,6 @@ dhdpcie_dongle_attach(dhd_bus_t *bus)
 			(val | PCIE_BARCOHERENTACCEN_MASK));
 	}
 
-
 	/* EFI requirement - stop driver load if FW is already running
 	*  need to do this here before pcie_watchdog_reset, because
 	*  pcie_watchdog_reset will put the ARM back into halt state
@@ -2901,7 +2896,6 @@ dhdpcie_dongle_attach(dhd_bus_t *bus)
 	if (dongle_reset_needed) {
 		dhdpcie_dongle_reset(bus);
 	}
-
 
 	dhdpcie_dongle_flr_or_pwr_toggle(bus);
 
@@ -4585,7 +4579,6 @@ dhdpcie_download_firmware(struct dhd_bus *bus, osl_t *osh)
 	DHD_OS_WAKE_LOCK(bus->dhd);
 	ret = _dhdpcie_download_firmware(bus);
 
-
 	DHD_OS_WAKE_UNLOCK(bus->dhd);
 	return ret;
 } /* dhdpcie_download_firmware */
@@ -4995,7 +4988,6 @@ dhdpcie_download_nvram(struct dhd_bus *bus)
 		}
 	}
 
-
 err:
 	if (memblock) {
 #ifdef SUPPORT_OTA_UPDATE
@@ -5094,7 +5086,6 @@ _dhdpcie_free_nvram_params(struct dhd_bus *bus)
 	}
 }
 
-
 /** Handler to send a signal to the dhdmonitor process to notify of firmware traps */
 void
 dhdpcie_handle_dongle_trap(struct dhd_bus *bus)
@@ -5164,7 +5155,6 @@ _dhdpcie_download_firmware(struct dhd_bus *bus)
 	/* EXAMPLE: nvram_array */
 	/* If a valid nvram_arry is specified as above, it can be passed down to dongle */
 	/* dhd_bus_set_nvram_params(bus, (char *)&nvram_array); */
-
 
 	/* External nvram takes precedence if specified */
 	if ((bcmerror = dhdpcie_download_nvram(bus))) {
@@ -5348,7 +5338,6 @@ dhd_bus_dump_console_buffer(dhd_bus_t *bus)
 				break;
 			line[n] = ch;
 		}
-
 
 		if (n > 0) {
 			if (line[n - 1] == '\r')
@@ -5859,7 +5848,6 @@ done2:
 	return bcmerror;
 } /* dhdpcie_checkdied */
 
-
 /* Custom copy of dhdpcie_mem_dump() that can be called at interrupt level */
 void dhdpcie_mem_dump_bugcheck(dhd_bus_t *bus, uint8 *buf)
 {
@@ -6311,6 +6299,14 @@ dhdpcie_mem_dump(dhd_bus_t *bus)
 		case DUMP_TYPE_P2P_DISC_BUSY:
 			/* intentional fall through */
 		case DUMP_TYPE_ESCAN_SYNCID_MISMATCH:
+			/* intentional fall through */
+		case DUMP_TYPE_STA_ASSOC_TIMEOUT:
+			/* intentional fall through */
+		case DUMP_TYPE_STA_4WAY_HS_TIMEOUT:
+			/* intentional fall through */
+		case DUMP_TYPE_STA_ROAM_TIMEOUT:
+			/* intentional fall through */
+		case DUMP_TYPE_SAR_CONF_NOTFOUND:
 			/* intentional fall through */
 			if (dhdp->memdump_type == DUMP_TYPE_RESUMED_ON_TIMEOUT ||
 				dhdp->memdump_type == DUMP_TYPE_D3_ACK_TIMEOUT) {
@@ -8730,7 +8726,6 @@ aspm_enab:
 	return ret;
 }
 
-
 #if defined(__linux__)
 int
 dhd_bus_devreset(dhd_pub_t *dhdp, uint8 flag)
@@ -10759,7 +10754,6 @@ dhdpcie_bus_doiovar(dhd_bus_t *bus, const bcm_iovar_t *vi, uint32 actionid, cons
 		break;
 
 
-
 	case IOV_GVAL(IOV_DONGLE_RXLAT_INFO):
 	{
 		unsigned long flags = 0;
@@ -11189,6 +11183,11 @@ dhd_recover_timeout_by_scheduling_dpc(struct dhd_bus *bus)
 {
 	int host_irq_disabled = dhdpcie_irq_disabled(bus);
 	bool dpc_scheduled = FALSE;
+
+	if (dhd_get_reboot_status(bus->dhd) >= 0) {
+		DHD_ERROR(("%s: not to reschedule dpc, reboot is in progress\n", __FUNCTION__));
+		goto exit;
+	}
 
 	/* For INTX, reschedule only if INTSTATUS is set */
 	if (bus->d2h_intr_method == PCIE_INTX) {
@@ -13375,7 +13374,6 @@ dhdpcie_lcreg(osl_t *osh, uint32 mask, uint32 val)
 	uint8	lcreg_offset;	/* PCIE capability LCreg offset in the config space */
 	uint32	reg_val;
 
-
 	pcie_cap = dhdpcie_find_pci_capability(osh, PCI_CAP_PCIECAP_ID);
 
 	if (!pcie_cap) {
@@ -13555,7 +13553,6 @@ void dhd_dump_intr_registers(dhd_pub_t *dhd, struct bcmstrbuf *strbuf)
 	bcm_bprintf(strbuf, "d2h_mb_data=0x%x def_intmask=0x%x\n",
 		d2h_mb_data, dhd->bus->def_intmask);
 }
-
 
 void dhd_bus_dump_flowring(dhd_pub_t *dhdp, struct bcmstrbuf *strbuf)
 {
@@ -13850,7 +13847,6 @@ void dhd_bus_dump(dhd_pub_t *dhdp, struct bcmstrbuf *strbuf)
 
 	dhd_bus_dump_flowring(dhdp, strbuf);
 
-
 	dhd_dump_dpc_histos(dhdp, strbuf);
 
 	bcm_bprintf(strbuf, "D3 inform cnt %d\n", dhdp->bus->d3_inform_cnt);
@@ -14077,7 +14073,6 @@ exit:
 	si_setcoreidx(bus->sih, save_idx);
 	return ret;
 }
-
 
 static const char *
 dhd_bus_bandname(uint slice)
@@ -14438,7 +14433,6 @@ dhd_bus_gen_devmb_intr(struct dhd_bus *bus)
 #else
 #define DB7_TRAP_ACK_RETRIES	50u
 #endif /* BCMQT */
-
 
 /* Upon receiving a mailbox interrupt,
  * if H2D_FW_TRAP bit is set in mailbox location
@@ -15182,7 +15176,6 @@ dhd_bus_handle_mb_data(dhd_bus_t *bus, uint32 d2h_mb_data, const char *context)
 	driver_state_t driver_state;
 	BCM_REFERENCE(driver_state);
 
-
 	DHD_INFO(("D2H_MB_DATA: 0x%04x\n", d2h_mb_data));
 	DHD_LOG_MSGTYPE(bus->dhd, bus->dhd->logger, &driver_state, MSG_TYPE_D2H_MAILBOX_DATA,
 		&d2h_mb_data, sizeof(d2h_mb_data));
@@ -15639,7 +15632,6 @@ dhdpci_bus_rte_log_time_sync_poll(dhd_bus_t *bus)
 	}
 }
 #endif /* DHD_H2D_LOG_TIME_SYNC */
-
 
 static bool
 dhdpci_bus_read_frames(dhd_bus_t *bus)
@@ -16396,7 +16388,6 @@ dhdpcie_readshared(dhd_bus_t *bus)
 
 		bus->h2d_mb_data_ptr_addr = ltoh32(sh->h2d_mb_data_ptr);
 		bus->d2h_mb_data_ptr_addr = ltoh32(sh->d2h_mb_data_ptr);
-
 
 		if (bus->api.fw_rev >= PCIE_SHARED_VERSION_6) {
 			bus->max_tx_flowrings = ltoh16(ring_info.max_tx_flowrings);
@@ -17603,7 +17594,6 @@ dhdpcie_init_shared_addr(dhd_bus_t *bus)
 	dhdpcie_bus_membytes(bus, TRUE, DHD_PCIE_MEM_BAR1, addr, (uint8 *)&val, sizeof(val));
 }
 
-
 bool
 dhdpcie_chipmatch(uint16 vendor, uint16 device)
 {
@@ -18341,7 +18331,6 @@ dhd_bus_check_idle_scan(dhd_bus_t *bus)
 	return;
 }
 
-
 /* scan the nodes in active list till it finds a non idle node */
 void
 dhd_bus_idle_scan(dhd_bus_t *bus)
@@ -18766,7 +18755,6 @@ dhd_bus_flow_ring_cnt_update(dhd_bus_t *bus, uint16 flowid, uint32 txstatus)
 {
 	flow_ring_node_t *flow_ring_node;
 
-
 	/* If we have d2h sync enabled due to marker overloading, we cannot update this. */
 	if (bus->dhd->d2h_sync_mode)
 		return;
@@ -18784,11 +18772,9 @@ dhd_bus_flow_ring_cnt_update(dhd_bus_t *bus, uint16 flowid, uint32 txstatus)
 	ASSERT(flow_ring_node->flowid == flowid);
 	flow_ring_node->flow_info.tx_status[txstatus]++;
 
-
 	return;
 }
 #endif /* BCMDBG */
-
 
 bool
 dhdpcie_bus_get_pcie_hostready_supported(dhd_bus_t *bus)
@@ -18803,7 +18789,6 @@ dhd_pcie_dump_core_regs(dhd_pub_t * pub, uint32 index, uint32 first_addr, uint32
 	uint32	coreoffset = index << 12;
 	uint32	core_addr = SI_ENUM_BASE(bus->sih) + coreoffset;
 	uint32 value;
-
 
 	while (first_addr <= last_addr) {
 		core_addr = SI_ENUM_BASE(bus->sih) + coreoffset + first_addr;
@@ -19589,7 +19574,6 @@ err:
 }
 #endif /* BCMPCIE && DHD_LOG_DUMP */
 
-
 static uint32
 dhdpcie_resume_chipcommon_powerctrl(dhd_pub_t *dhd, uint32 reg_val)
 {
@@ -20202,7 +20186,6 @@ fail:
 	si_setcoreidx(bus->sih, save_idx);
 	return ret;
 }
-
 
 static int
 dhdpcie_pcie_clear_clk_req(dhd_pub_t *dhd)
@@ -21867,7 +21850,6 @@ dhd_bus_get_armca7_pc(struct dhd_bus *bus, bool loop_print)
 			4, &val, TRUE);
 	}
 
-
 exit:
 	/* lock back OsLockCtrl register to prevent access to ARMCA7 debug registers */
 	val = ARMCA7_OS_LOCK_VAL;
@@ -22078,7 +22060,6 @@ dhd_pcie_get_wrapper_regs(dhd_pub_t *dhd)
 
 	struct bcmstrbuf b;
 	struct bcmstrbuf *strbuf = &b;
-
 
 	/* The procedure to read wrapper for SOCI_NCI is different compared to SOCI_AI */
 	if (CHIPTYPE(bus->sih->socitype) == SOCI_NCI) {
@@ -23064,7 +23045,6 @@ dhdpcie_get_cbaon_coredumps(struct dhd_bus *bus)
 		DHD_ERROR(("%s: dhdpcie_get_cbcore_dmps failed !\n", __FUNCTION__));
 		return ret;
 	}
-
 
 	/* read GCI chipid using config space indirect backplane addressing,
 	 * if successful, dump AON core regs

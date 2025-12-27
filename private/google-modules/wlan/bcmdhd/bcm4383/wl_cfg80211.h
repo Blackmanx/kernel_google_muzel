@@ -1094,6 +1094,7 @@ typedef enum wl_iftype {
 	WL_IF_TYPE_AIBSS = 10,
 	WL_IF_TYPE_MLO_STA_LINK = 11,
 	WL_IF_TYPE_MLO_AP_LINK = 12,
+	WL_IF_TYPE_ART = 13,
 	WL_IF_TYPE_MAX
 } wl_iftype_t;
 
@@ -1116,6 +1117,7 @@ enum wl_mode {
 	WL_MODE_AP = 2,
 
 	WL_MODE_NAN = 4,
+	WL_MODE_ART = 5,
 	WL_MODE_MAX
 };
 
@@ -2358,6 +2360,7 @@ struct bcm_cfg80211 {
 #endif /* WL_BCNRECV */
 	struct net_device *static_ndev;
 	uint8 static_ndev_state;
+	uint8 nmi_ndev_state;
 	uint8 hal_state;
 	wl_wlc_version_t wlc_ver;
 	u8 scan_params_ver;
@@ -2465,6 +2468,9 @@ struct bcm_cfg80211 {
 	bool p2p_cleanup;
 	uint32 nan_usd_busy_cnt;
 	uint32 actfrm_fail_cnt;
+#ifdef DHD_ART
+	u8 art_bssid[ETHER_ADDR_LEN]; /* BSSID filter */
+#endif /* DHD_ART */
 };
 
 typedef struct wl_multink_config {
@@ -2489,7 +2495,6 @@ enum wl_recovery_state_type {
 	WL_STATE_CONNECTING_SKIP_DUMP
 };
 
-#define WL_STATIC_IFIDX	(DHD_MAX_IFS + DHD_MAX_STATIC_IFS - 1)
 enum static_ndev_states {
 	NDEV_STATE_NONE,
 	NDEV_STATE_OS_IF_CREATED,
@@ -2497,11 +2502,15 @@ enum static_ndev_states {
 	NDEV_STATE_FW_IF_FAILED,
 	NDEV_STATE_FW_IF_DELETED
 };
+
 #define IS_CFG80211_STATIC_IF(cfg, ndev) \
 	((cfg && (cfg->static_ndev == ndev)) ? true : false)
 #define IS_CFG80211_STATIC_IF_ACTIVE(cfg) \
 	((cfg && cfg->static_ndev && \
 	(cfg->static_ndev_state & NDEV_STATE_FW_IF_CREATED)) ? true : false)
+#define IS_CFG80211_NMI_IF_ACTIVE(cfg) \
+	((cfg && cfg->nmi_ndev && \
+	(cfg->nmi_ndev_state & NDEV_STATE_FW_IF_CREATED)) ? true : false)
 #define IS_CFG80211_STATIC_IF_NAME(cfg, name) \
 	(cfg && cfg->static_ndev && \
 	  !strncmp(cfg->static_ndev->name, name, strlen(name)))
@@ -3211,6 +3220,8 @@ wl_iftype_to_str(int wl_iftype)
 			return "WL_IF_TYPE_MONITOR";
 		case (WL_IF_TYPE_AIBSS):
 			return "WL_IF_TYPE_AIBSS";
+		case (WL_IF_TYPE_ART):
+			return "WL_IF_TYPE_ART";
 		default:
 			return "WL_IF_TYPE_UNKNOWN";
 	}
@@ -3747,7 +3758,8 @@ extern s32 wl_cfg80211_static_if_open(struct net_device *net);
 extern s32 wl_cfg80211_static_if_close(struct net_device *net);
 extern struct net_device * wl_cfg80211_post_static_ifcreate(struct bcm_cfg80211 *cfg,
 	wl_if_event_info *event, u8 *addr, s32 iface_type);
-extern s32 wl_cfg80211_post_static_ifdel(struct bcm_cfg80211 *cfg, struct net_device *ndev);
+extern s32 wl_cfg80211_post_static_ifdel(struct bcm_cfg80211 *cfg,
+		struct net_device *ndev, s32 ifidx, s32 bssidx);
 #endif  /* WL_STATIC_IF */
 extern struct wireless_dev *wl_cfg80211_get_wdev_from_ifname(struct bcm_cfg80211 *cfg,
 	const char *name);
@@ -4028,4 +4040,5 @@ extern void wl_cfg80211_get_bss_sta_info(struct bcm_cfg80211 *cfg, struct net_de
 	struct ether_addr *mac_ea, struct station_info *sinfo);
 #endif /* WL_BSS_STA_INFO */
 extern s32 wl_validate_bss_length(uint32 version, uint32 tot_len, uint32 ie_length);
+bool wl_cfg80211_is_dualsta_active(struct bcm_cfg80211 *cfg);
 #endif /* _wl_cfg80211_h_ */

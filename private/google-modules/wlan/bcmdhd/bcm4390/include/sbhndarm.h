@@ -434,7 +434,6 @@ typedef volatile struct ca7regs ca7regs_t;
 #define arm_PowerControl	powerctl
 #define arm_PowerControl2	powerctl2
 
-
 #if defined(__ARM_ARCH_7M__)
 #define ARMREG(regs, reg)	ARM_CM3_REG(regs, reg)
 #define ARMREGOFF(reg)		OFFSETOF(cm3regs_t, reg)

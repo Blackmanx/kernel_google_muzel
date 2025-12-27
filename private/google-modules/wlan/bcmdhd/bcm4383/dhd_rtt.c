@@ -3910,6 +3910,9 @@ dhd_rtt_start(dhd_pub_t *dhd)
 	struct net_device *dev = dhd_linux_get_primary_netdev(dhd);
 	u8 rtt_invalid_reason = RTT_STATE_VALID;
 	int rtt_sched_type = RTT_TYPE_INVALID;
+#ifdef DHD_ART
+	struct net_device *art_ndev;
+#endif /* DHD_ART */
 
 	NULL_CHECK(dhd, "dhd is NULL", err);
 
@@ -3918,6 +3921,16 @@ dhd_rtt_start(dhd_pub_t *dhd)
 
 	DHD_RTT(("Enter %s\n", __FUNCTION__));
 
+#ifdef DHD_ART
+	art_ndev = dhd_get_monitor_ndev(dhd);
+	if (art_ndev && (art_ndev->flags & IFF_UP)) {
+		DHD_RTT_ERR(("ART active. fail the rtt targets\n"));
+		err = BCME_ERROR;
+		err_at = 1;
+		goto exit;
+	}
+#endif /* DHD_ART */
+
 	if (RTT_IS_STOPPED(rtt_status)) {
 		DHD_RTT(("No Directed RTT target to process, check for geofence\n"));
 		goto geofence;
@@ -3925,7 +3938,7 @@ dhd_rtt_start(dhd_pub_t *dhd)
 
 	if (rtt_status->cur_idx >= rtt_status->rtt_config.rtt_target_cnt) {
 		err = BCME_RANGE;
-		err_at = 1;
+		err_at = 2;
 		DHD_RTT(("%s : idx %d is out of range\n", __FUNCTION__, rtt_status->cur_idx));
 		if (rtt_status->flags == WL_PROXD_SESSION_FLAG_TARGET) {
 			DHD_RTT_ERR(("STA is set as Target/Responder \n"));
@@ -3941,7 +3954,7 @@ dhd_rtt_start(dhd_pub_t *dhd)
 
 	if (ETHER_ISNULLADDR(rtt_target->addr.octet)) {
 		err = BCME_BADADDR;
-		err_at = 2;
+		err_at = 3;
 		DHD_RTT(("RTT Target addr is NULL\n"));
 		goto exit;
 	}
@@ -3950,7 +3963,7 @@ dhd_rtt_start(dhd_pub_t *dhd)
 	rtt_invalid_reason = dhd_rtt_invalid_states(dev, &rtt_target->addr);
 	if (rtt_invalid_reason != RTT_STATE_VALID) {
 		err = BCME_BUSY;
-		err_at = 3;
+		err_at = 4;
 		DHD_RTT(("DRV State is not valid for RTT\n"));
 		goto exit;
 	}
@@ -3960,7 +3973,7 @@ dhd_rtt_start(dhd_pub_t *dhd)
 	err = dhd_rtt_ftm_enable(dhd, TRUE);
 	if (err) {
 		DHD_RTT_ERR(("failed to enable FTM (%d)\n", err));
-		err_at = 4;
+		err_at = 5;
 		goto exit;
 	}
 	rtt_status->status = RTT_ENABLED;
@@ -3981,7 +3994,7 @@ dhd_rtt_start(dhd_pub_t *dhd)
 
 	if (err) {
 		DHD_RTT_ERR(("failed to start session of FTM : error %d\n", err));
-		err_at = 5;
+		err_at = 6;
 		goto exit;
 	} else {
 		/* schedule proxd timeout */
@@ -3997,7 +4010,7 @@ geofence:
 	rtt_sched_type = RTT_TYPE_NAN_GEOFENCE;
 	if ((err = dhd_rtt_sched_geofencing_target(dhd)) != BCME_OK) {
 		DHD_RTT_ERR(("geofencing sched failed, err = %d\n", err));
-		err_at = 6;
+		err_at = 7;
 	}
 #endif /* WL_NAN */
 

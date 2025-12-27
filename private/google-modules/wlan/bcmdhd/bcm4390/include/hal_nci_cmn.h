@@ -42,7 +42,6 @@
 #define IDM_ERRSTATUS_MISC_ERROR	(1u << 26)	/* MISC0 and MISC1 are valid */
 #define IDM_ERRSTATUS_ERROR_CODE_MASK	0xffu		/* Indicates the type of error */
 
-
 #define IDM_ERRCTLR_ENABLE		(1u << 0u)	/*  Global enable */
 #define IDM_ERRCTLR_BUS			(1u << 1u)	/*  Enable Bus error detection */
 #define IDM_ERRCTLR_UE			(1u << 2u)	/*  uncorrected error */

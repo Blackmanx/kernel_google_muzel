@@ -24,7 +24,6 @@
  * <<Broadcom-WL-IPTag/Dual:>>
  */
 
-
 /****************
  * Common types *
  */
@@ -1137,8 +1136,6 @@ typedef struct dhd_if_tx_status_latency {
 } dhd_if_tx_status_latency_t;
 #endif /* TX_STATUS_LATENCY_STATS */
 
-
-
 /* Bit in dhd_pub_t::gdb_proxy_stop_count set when firmware is stopped by GDB */
 #define GDB_PROXY_STOP_MASK 1
 
@@ -1338,6 +1335,24 @@ typedef struct dhd_db7_info {
 
 #ifdef DHD_ART
 #define IS_ART_IFACE(ifname) strstr(ifname, "radiotap0")
+typedef struct dhd_art_counters {
+    uint64 rx_packets;
+    uint64 rx_dbg_monitor_packets;
+    uint64 tx_packets;
+    uint64 ctrl_packets;
+    uint64 rx_no_monitor_dev_errors;
+    uint64 rx_skb_realloc_headroom_errors;
+    uint64 rx_skb_headroom_lt_etherheader;
+    uint64 rx_errors;
+    uint64 tx_errors;
+    uint64 tot_txcpl;
+    uint64 ctrl_errors;
+    uint64 rx_bssid_mismatch;
+    uint64 rx_first_pkt_dropped;
+    uint64 rx_first_or_prev_pkt_dropped;
+    uint64 rx_memcpy_errors;
+    uint64 skb_len_too_less;
+} dhd_art_counters_t;
 #else
 #define IS_ART_IFACE(ifname) FALSE
 #endif /* DHD_ART */
@@ -1906,7 +1921,6 @@ typedef struct dhd_pub {
 	int d2h_timeout_subtype;
 	bool hscb_enable;
 
-
 	uint64 logset_prsrv_mask;
 #ifdef DHD_PKT_LOGGING
 	struct dhd_pktlog *pktlog;
@@ -2179,8 +2193,15 @@ typedef struct dhd_pub {
 	bool usr_trig_dmp;
 	bool force_wl_reg_off;
 	bool reset_5g_rffe_vio;
+#ifdef DHD_ART
+	dhd_art_counters_t art_counters;
+#endif /* DHD_ART */
 } dhd_pub_t;
 
+#ifdef DHD_ART
+bool dhd_is_art_iface(dhd_pub_t *dhdp, int ifidx);
+#endif /* DHD_ART */
+bool dhd_is_art_skb(struct sk_buff *skb);
 #if defined(__linux__)
 int dhd_wifi_platform_set_power(dhd_pub_t *pub, bool on);
 #else
@@ -2827,12 +2848,19 @@ extern void dhd_bus_wakeup_work(dhd_pub_t *dhdp);
 #define WIFI_FEATURE_SET_TX_POWER_LIMIT              0x4000000
 /* Support Body/Head Proximity SAR */
 #define WIFI_FEATURE_USE_BODY_HEAD_SAR               0x8000000
+/* Support changing MAC address without iface reset */
+#define WIFI_FEATURE_DYNAMIC_SET_MAC                 0x10000000
 /* Support Latency mode setting */
 #define WIFI_FEATURE_SET_LATENCY_MODE                0x40000000
 /* Support P2P MAC randomization */
 #define WIFI_FEATURE_P2P_RAND_MAC                    0x80000000
 /* Support for configuring roaming mode */
 #define WIFI_FEATURE_ROAMING_MODE_CONTROL            0x800000000
+/* Support Voip mode setting */
+#define WIFI_FEATURE_SET_VOIP_MODE                   0x1000000000
+/* Support cached scan result report */
+#define WIFI_FEATURE_CACHED_SCAN_RESULTS             0x2000000000
+
 /* Invalid Feature */
 #define WIFI_FEATURE_INVALID                         0xFFFFFFFF
 
@@ -2998,7 +3026,6 @@ extern void dhd_set_cpucore(dhd_pub_t *dhd, int set);
 #ifdef DHD_DETECT_CONSECUTIVE_MFG_HANG
 #define MAX_CONSECUTIVE_MFG_HANG_COUNT 2
 #endif /* DHD_DETECT_CONSECUTIVE_MFG_HANG */
-
 
 #if defined(DHD_FW_COREDUMP)
 #if defined(linux) || defined(LINUX)
@@ -4164,7 +4191,6 @@ extern void dhd_os_general_spin_unlock(dhd_pub_t *pub, unsigned long flags);
 #define DHD_PKT_LOG_UNLOCK(lock, flags)   osl_spin_unlock(lock, (flags))
 #endif /* DHD_PKT_LOGGING */
 
-
 #if defined(__linux__)
 #define DHD_LINUX_GENERAL_LOCK(dhdp, flags)	DHD_GENERAL_LOCK(dhdp, flags)
 #define DHD_LINUX_GENERAL_UNLOCK(dhdp, flags)	DHD_GENERAL_UNLOCK(dhdp, flags)
@@ -4811,7 +4837,6 @@ typedef struct dhd_gdb_proxy_probe_data {
 }
 #endif /* GDB_PROXY */
 
-
 #ifdef DHD_EFI
 extern void dhd_insert_random_mac_addr(dhd_pub_t *dhd, char *nvram_mem, uint *len);
 #endif /* DHD_EFI */
@@ -5052,7 +5077,6 @@ static INLINE int dhd_check_shinfo_nrfrags(dhd_pub_t *dhdp, void *pktbuf, dmaadd
 int dhd_ether_to_8023_hdr(osl_t *osh, struct ether_header *eh, void *p);
 int dhd_8023_llc_to_ether_hdr(osl_t *osh, struct ether_header *eh8023, void *p);
 #endif
-
 
 int dhd_ether_to_generic_llc_hdr(struct dhd_pub *dhd, uint8 ifidx,
 	struct ether_header *eh, void *p);

@@ -110,7 +110,6 @@ extern bool check_client_intr(sdioh_info_t *sd);
 extern void sdioh_sdmmc_devintr_on(sdioh_info_t *sd);
 extern void sdioh_sdmmc_devintr_off(sdioh_info_t *sd);
 
-
 /**************************************************************
  * Internal interfaces: bcmsdh_sdmmc.c references to per-port code
  */

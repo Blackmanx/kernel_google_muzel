@@ -42,7 +42,6 @@
 #define HTC_HE_CTLID_MASK	0x0Fu	/* HTC HE CTLID mask  */
 #define HTC_HE_CTLID(htc)	(((htc) >> HTC_HE_CTLID_SHIFT) & HTC_HE_CTLID_MASK)
 
-
 #define HTC_HE_CTLID_TRS	0x0u	/* Triggered response scheduling */
 #define HTC_HE_CTLID_OMI	0x1u	/* Operating mode */
 #define HTC_HE_CTLID_HLA	0x2u	/* HE link adaptation */
@@ -50,7 +49,6 @@
 #define HTC_HE_CTLID_UPH	0x4u	/* UL power headroom */
 #define HTC_HE_CTLID_BQR	0x5u	/* Bandwidth query report */
 #define HTC_HE_CTLID_CAS	0x6u	/* Command and status */
-
 
 /* HTC-Control field definitions: (Table 9.9a HTC Control field) */
 #define HTC_HE_CTL_SIZE		30u	/* HTC Control field size */
@@ -94,13 +92,11 @@
 #define OMI_CHW_80MHZ			2
 #define OMI_CHW_160MHZ_80P80MHZ		3
 
-
 /* Table 9-18d ACI Bitmap subfield encoding */
 #define HE_BSR_ACI_MAP_BE		0u
 #define HE_BSR_ACI_MAP_BK		1u
 #define HE_BSR_ACI_MAP_VI		2u
 #define HE_BSR_ACI_MAP_VO		3u
-
 
 /* GI And LTF Type subfield encoding (Table 9-31d) */
 #define HE_LTF_1_GI_1_6us	(0u)
@@ -653,7 +649,6 @@ typedef BWL_PRE_PACKED_STRUCT struct he_op_ie {
 #define HE_6G_OP_BW_80              2u
 #define HE_6G_OP_BW_160_80P80       3u
 
-
 /* Regulatory Info subfield in the United States */
 #define HE_6G_OP_REG_INFO_INDOOR_AP_US  0u
 #define HE_6G_OP_REG_INFO_SP_AP_US      1u
@@ -698,7 +693,6 @@ typedef BWL_PRE_PACKED_STRUCT struct he_op_ie {
 #define HE_6G_CTL_DUP_BCN_SHIFT     0x02u
 #define HE_6G_OP_CTL_DUP_BCN(ctl) \
 	((ctl & HE_6G_CTL_DUP_BCN_MASK) >> HE_6G_CTL_DUP_BCN_SHIFT)
-
 
 /* HE 6G Operation info */
 typedef BWL_PRE_PACKED_STRUCT struct he_6g_op_info {

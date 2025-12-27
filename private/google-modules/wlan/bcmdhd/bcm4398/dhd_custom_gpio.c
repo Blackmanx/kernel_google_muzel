@@ -1,7 +1,7 @@
 /*
  * Customer code to add GPIO control during WLAN start/stop
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -367,7 +367,6 @@ const struct cntry_locales_custom translate_custom_table[] = {
 	{"Q1", "Q1", 77},
 #endif /* (CUSTOMER_HW2 || BOARD_HIKEY || BOARD_STB) &&  CUSTOMER_HW5 */
 };
-
 
 /* Customized Locale convertor
 *  input : ISO 3166-1 country abbreviation

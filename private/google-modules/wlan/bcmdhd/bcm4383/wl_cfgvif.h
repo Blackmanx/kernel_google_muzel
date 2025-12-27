@@ -339,6 +339,9 @@ extern s32 wl_cfgvif_apply_default_keep_alive(struct net_device *ndev, struct bc
 extern s32 wl_cfgvif_update_assoc_fail_status(struct bcm_cfg80211 *cfg,
 	struct net_device *ndev, const wl_event_msg_t *e);
 #endif /* LINUX_VER >= 5.4 */
+extern s32 wl_cfgvif_interface_ops(struct bcm_cfg80211 *cfg,
+	struct net_device *ndev, s32 bsscfg_idx,
+	wl_iftype_t iftype, s32 del, u8 *addr);
 #ifdef WL_AGGRESSIVE_ROAM
 extern void wl_cfgvif_enable_aggressive_roam(struct bcm_cfg80211 *cfg, struct net_device *dev,
 	bool enable);

@@ -1,7 +1,7 @@
 /*
  * bcmevent read-only data shared by kernel or app layers
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -29,7 +29,6 @@
 #include <bcmevent.h>
 #include <802.11.h>
 #include <802.11brcm.h>
-
 
 /* Table of event name strings for UIs and debugging dumps */
 typedef struct {
@@ -192,7 +191,6 @@ static const bcmevent_name_str_t bcmevent_names[] = {
 #endif /* WLFBT */
 	BCMEVENT_NAME(WLC_E_AUTHORIZED),
 	BCMEVENT_NAME(WLC_E_PROBREQ_MSG_RX),
-
 
 
 	BCMEVENT_NAME(WLC_E_CSA_START_IND),

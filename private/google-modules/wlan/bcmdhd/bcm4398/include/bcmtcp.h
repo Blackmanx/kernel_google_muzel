@@ -1,7 +1,7 @@
 /*
  * Fundamental constants relating to TCP Protocol
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -30,7 +30,6 @@
 
 /* This marks the start of a packed structure section. */
 #include <packed_section_start.h>
-
 
 #define TCP_SRC_PORT_OFFSET	0	/* TCP source port offset */
 #define TCP_DEST_PORT_OFFSET	2	/* TCP dest port offset */

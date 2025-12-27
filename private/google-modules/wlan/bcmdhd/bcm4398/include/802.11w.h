@@ -2,7 +2,7 @@
  * Fundamental types and constants relating to 802.11w -
  * "Protected Management Frames"
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -43,7 +43,6 @@ BWL_PRE_PACKED_STRUCT struct mmic_ie {
 typedef struct mmic_ie mmic_ie_t;
 
 #define DOT11_MMIC_IE_HDR_SIZE (OFFSETOF(mmic_ie_t, mic))
-
 
 /* This marks the end of a packed structure section. */
 #include <packed_section_end.h>

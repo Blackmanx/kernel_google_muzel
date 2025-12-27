@@ -1,7 +1,7 @@
 /*
  * Linux cfg80211 driver - Android related functions
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -31,7 +31,6 @@
 #if defined(WL_SDO)
 #define WL_GENL
 #endif
-
 
 #ifdef WL_GENL
 #include <net/genetlink.h>

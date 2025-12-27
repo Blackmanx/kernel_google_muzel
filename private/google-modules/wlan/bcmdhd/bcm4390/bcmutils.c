@@ -167,7 +167,6 @@ const
 char * getvar_internal(char *vars, const char *name);
 static int getintvar_internal(char *vars, const char *name);
 
-
 /*
  * Search the name=value vars for a specific one and return its value.
  * Returns NULL if not found.
@@ -377,7 +376,6 @@ BCMATTACHFN(get_int16_vararray_slicespecific)(osl_t *osh, char *vars, char *vars
 		name, NULL, dest_array, dest_size);
 }
 
-
 /* Prepend a slice-specific accessor to an nvram string name.
  * Sets name_out to the allocated string. Returns the allocated size of the name string.
  * Caller is responsible for freeing the resulting name string with MFREE.
@@ -471,7 +469,6 @@ getgpiopin(char *vars, char *pin_name, uint def_pin)
 }
 #endif /* BCMNVRAMR || BCMNVRAMW */
 #endif /* !BCMDONGLEHOST */
-
 
 /* return total length of buffer chain. In case of CSO, submsdu may have extra tsohdr and if
  * pktotlen should not include submsdu tso header, use the API pkttotlen_no_sfhtoe_hdr.
@@ -637,7 +634,6 @@ pktfrombuf(osl_t *osh, void *p, uint offset, uint len, uchar *buf)
 {
 	uint n, ret = 0;
 
-
 	/* skip 'offset' bytes */
 	for (; p && offset; p = PKTNEXT(osh, p)) {
 		if (offset < PKTLEN(osh, p))
@@ -703,7 +699,6 @@ BCMFASTPATH(pktdataoffset)(osl_t *osh, void *p,  uint offset)
 	}
 	return (uint8*) (pdata+pkt_off);
 }
-
 
 /* given a offset in pdata, find the pkt seg hdr */
 void *
@@ -1009,7 +1004,6 @@ bcmdumplog(char *buf, int size)
 	}
 
 }
-
 
 /*
  * Dump one log entry at a time.
@@ -1942,7 +1936,6 @@ bcm_iovar_lencheck(const bcm_iovar_t *vi, void *arg, uint len, bool set)
 #define MWBMAP_DBG(x)
 #endif  /* !BCM_MWBMAP_DEBUG */
 
-
 typedef struct bcm_mwbmap {     /* Hierarchical multiword bitmap allocator    */
 	uint16 wmaps;               /* Total number of words in free wd bitmap    */
 	uint16 imaps;               /* Total number of words in free id bitmap    */
@@ -2541,7 +2534,6 @@ BCMFASTPATH(id16_map_alloc)(void * id16_map_hndl)
 	return val16;
 }
 
-
 void /* Free a 16bit id value into the id16 allocator */
 BCMFASTPATH(id16_map_free)(void * id16_map_hndl, uint16 val16)
 {
@@ -2671,7 +2663,6 @@ dll_pool_init(void * osh, uint16 elems_max, uint16 elem_size)
 	return dll_pool_p;
 }
 
-
 void *
 dll_pool_alloc(dll_pool_t * dll_pool_p)
 {
@@ -2696,7 +2687,6 @@ BCMPOSTTRAPFN(dll_pool_free)(dll_pool_t * dll_pool_p, void * elem_p)
 	dll_prepend(&dll_pool_p->free_list, node_p);
 	dll_pool_p->free_count += 1;
 }
-
 
 void
 dll_pool_free_tail(dll_pool_t * dll_pool_p, void * elem_p)
@@ -2728,7 +2718,6 @@ dll_pool_dump(dll_pool_t * dll_pool_p, dll_elem_dump elem_dump)
 #endif /* BCMDBG */
 
 #endif /* BCMDRIVER */
-
 
 #if defined(BCMDRIVER) || defined(WL_UNITTEST)
 
@@ -2917,7 +2906,6 @@ bcm_find_ie(const uint8* tlvs, uint tlvs_len, uint8 tag, uint8 oui_len,
 
 	return NULL;
 }
-
 
 #if defined(WLTINYDUMP) || defined(BCMDBG) || defined(WLMSG_INFORM) || \
 	defined(WLMSG_ASSOC) || defined(WLMSG_PRPKT) || defined(WLMSG_WSEC)
@@ -3329,7 +3317,6 @@ bcmstrncat(char *dest, const char *src, uint size)
 	return (dest);
 }
 
-
 /****************************************************************************
 * Function:   bcmstrtok
 *
@@ -3410,10 +3397,8 @@ bcmstrtok(char **string, const char *delimiters, char *tokdelim)
 	}
 }
 
-
 #define xToLower(C) \
 	((C >= 'A' && C <= 'Z') ? (char)((int)C - (int)'A' + (int)'a') : C)
-
 
 /****************************************************************************
 * Function:   bcmstricmp
@@ -3445,7 +3430,6 @@ bcmstricmp(const char *s1, const char *s2)
 	if (!*s1 && *s2) return -1;
 	return 0;
 }
-
 
 /****************************************************************************
 * Function:   bcmstrnicmp
@@ -4083,7 +4067,6 @@ bcm_write_tlv_ext(uint8 type, uint8 ext, const void *data, uint8 datalen, uint8 
 	return (new_dst);
 }
 
-
 uint8 *
 BCMPOSTTRAPFN(bcm_write_tlv_safe)(int type, const void *data, uint datalen, uint8 *dst,
 	uint dst_maxlen)
@@ -4121,7 +4104,6 @@ bcm_copy_tlv(const void *src, uint8 *dst)
 	return (new_dst);
 }
 
-
 uint8 *
 bcm_copy_tlv_safe(const void *src, uint8 *dst, uint dst_maxlen)
 {
@@ -4135,7 +4117,6 @@ bcm_copy_tlv_safe(const void *src, uint8 *dst, uint dst_maxlen)
 
 	return (new_dst);
 }
-
 
 #if !defined(BCMROMOFFLOAD_EXCLUDE_BCMUTILS_FUNCS)
 /*******************************************************************************
@@ -5345,7 +5326,6 @@ bcm_mw_to_qdbm(uint16 mw)
 	return (qdbm);
 }
 
-
 uint
 BCMPOSTTRAPFN(bcm_bitcount)(const uint8 *bitmap, uint length)
 {
@@ -6155,7 +6135,6 @@ bcm_match_buffers(const uint8 *b1, uint b1_len, const uint8 *b2, uint b2_len)
 	return FALSE;
 }
 
-
 #ifdef PRIVACY_MASK
 /* applies privacy mask on the input address itself */
 void
@@ -6454,7 +6433,6 @@ BCMATTACHFN(varbuf_append)(varbuf_t *b, const char *fmt, ...)
 
 	return r;
 }
-
 
 #if defined(BCMDRIVER)
 /**

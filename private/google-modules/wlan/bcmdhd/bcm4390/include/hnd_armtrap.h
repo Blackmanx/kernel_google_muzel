@@ -24,7 +24,6 @@
 #ifndef	_hnd_armtrap_h_
 #define	_hnd_armtrap_h_
 
-
 /* ARM trap handling */
 
 /* Trap types defined by ARM (see arminc.h) */

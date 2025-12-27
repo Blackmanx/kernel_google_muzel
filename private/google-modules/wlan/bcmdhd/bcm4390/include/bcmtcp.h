@@ -31,7 +31,6 @@
 /* This marks the start of a packed structure section. */
 #include <packed_section_start.h>
 
-
 #define TCP_SRC_PORT_OFFSET	0	/* TCP source port offset */
 #define TCP_DEST_PORT_OFFSET	2	/* TCP dest port offset */
 #define TCP_SEQ_NUM_OFFSET	4	/* TCP sequence number offset */

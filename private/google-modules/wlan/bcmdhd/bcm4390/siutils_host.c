@@ -388,7 +388,6 @@ int si_get_amni_slave_cfg_cc_reg_addrs(si_t *sih, volatile uint32 **idm_errstatu
 }
 #endif /* SOCI_NCI_BUS */
 
-
 /*
  * Reset 5G RFFE Gpio lines on reboot from DHD.
  * JIRA:SWDHD-4585 RB:302458

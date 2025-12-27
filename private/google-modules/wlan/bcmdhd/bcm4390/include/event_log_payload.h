@@ -162,7 +162,6 @@ typedef struct scb_subq_summary {
 #define SCBDATA_APPS_F_OFF_BLOCKED      0x00000200
 #define SCBDATA_APPS_F_OFF_IN_PROG      0x00000400
 
-
 /**
  * Summary for tx datapath AMPDU SCB cubby
  * This is a specific data structure to describe the AMPDU datapath state for an SCB

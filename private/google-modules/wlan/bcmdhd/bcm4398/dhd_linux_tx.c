@@ -2,7 +2,7 @@
  * Broadcom Dongle Host Driver (DHD),
  * Linux-specific network interface for transmit(tx) path
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -472,6 +472,7 @@ BCMFASTPATH(__dhd_sendpkt)(dhd_pub_t *dhdp, int ifidx, void *pktbuf)
 			ifp->stats.tx_packets++;
 			ifp->tx_pkts++;
 			ifp->stats.tx_bytes += datalen;
+			dhd_plat_tx_pktcount(dhdp->plat_info, dhdp->tx_packets);
 		}
 		dhdp->actual_tx_pkts++;
 	}
@@ -749,7 +750,6 @@ BCMFASTPATH(dhd_start_xmit)(struct sk_buff *skb, struct net_device *net)
 		}
 	}
 #endif /* HOST_SFH_LLC */
-
 
 	/* re-align socket buffer if "skb->data" is odd address */
 	if (((unsigned long)(skb->data)) & 0x1) {

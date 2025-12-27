@@ -118,6 +118,10 @@
 	(((ulong)addr >= bus->dongle_ram_base) && \
 	((ulong)(addr + len) <= (bus->dongle_ram_base + bus->ramsize)))
 
+#ifdef DHD_ART
+#define ART_ACTIVE(dhd)	(((dhd)->dongle_art_enabled) && ((dhd)->host_art_enabled) && \
+		((dhd)->dongle_txpost_ext_enabled))
+#endif /* DHD_ART */
 #ifdef TX_CSO
 #define TXCSO_ENAB(dhd)		((dhd)->dongle_txcso_enabled)
 #define TXCSO_ACTIVE(dhd)	(((dhd)->dongle_txcso_enabled) && ((dhd)->host_txcso_enabled) && \
@@ -603,6 +607,9 @@ typedef struct dhd_bus {
 #ifdef OEM_ANDROID
 	bool chk_pm;	/* To avoid counting of wake up from Runtime PM */
 #endif /* OEM_ANDROID */
+#ifdef DHD_ENABLE_L1SS_FROM_PM_COMPLETE
+	bool system_resume_in_progress;
+#endif /* DHD_ENABLE_L1SS_FROM_PM_COMPLETE */
 #if defined(PCIE_INB_DW)
 	bool calc_ds_exit_latency;
 	bool deep_sleep; /* Indicates deep_sleep set or unset by the DHD IOVAR deep_sleep */
@@ -946,7 +953,6 @@ extern uint32 dhdpcie_rc_access_cap(dhd_bus_t *bus, int cap, uint offset, bool i
 extern uint32 dhdpcie_ep_access_cap(dhd_bus_t *bus, int cap, uint offset, bool is_ext,
 		bool is_write, uint32 writeval);
 extern uint32 dhd_debug_get_rc_linkcap(dhd_bus_t *bus);
-extern void dhdpcie_enable_irq_loop(dhd_bus_t *bus);
 #else
 static INLINE uint32 dhdpcie_rc_config_read(dhd_bus_t *bus, uint offset)
 {

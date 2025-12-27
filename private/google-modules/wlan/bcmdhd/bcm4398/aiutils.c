@@ -3,7 +3,7 @@
  * of the SiliconBackplane-based Broadcom chips.
  * Note: this file is used for both dongle and DHD builds.
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -49,7 +49,6 @@
 #define PMU_DMP(sii) (0)
 #define GCI_DMP(sii) (0)
 #endif /* !defined(BCMDONGLEHOST) */
-
 
 /* EROM parsing */
 
@@ -617,7 +616,6 @@ BCMPOSTTRAPFN(ai_setcoreidx_2ndwrap)(si_t *sih, uint coreidx)
 	return _ai_setcoreidx(sih, coreidx, 1);
 }
 
-
 volatile void *
 BCMPOSTTRAPFN(ai_setcoreidx_3rdwrap)(si_t *sih, uint coreidx)
 {
@@ -720,7 +718,6 @@ ai_numaddrspaces(const si_t *sih)
 
 	return 2;
 }
-
 
 /* Return the address of the nth address space in the current core
  * Arguments:
@@ -1049,7 +1046,6 @@ ai_corereg_writeonly(si_t *sih, uint coreidx, uint regoff, uint mask, uint val)
 	si_info_t *sii = SI_INFO(sih);
 	si_cores_info_t *cores_info = (si_cores_info_t *)sii->cores_info;
 
-
 	ASSERT(GOODIDX(coreidx, sii->numcores));
 	ASSERT(regoff < SI_CORE_SIZE);
 	ASSERT((val & ~mask) == 0);
@@ -1121,7 +1117,6 @@ ai_corereg_writeonly(si_t *sih, uint coreidx, uint regoff, uint mask, uint val)
 	return (w);
 }
 
-
 /*
  * If there is no need for fiddling with interrupts or core switches (typically silicon
  * back plane registers, pci registers and chipcommon registers), this function
@@ -1138,7 +1133,6 @@ BCMPOSTTRAPFN(ai_corereg_addr)(si_t *sih, uint coreidx, uint regoff)
 	bool fast = FALSE;
 	si_info_t *sii = SI_INFO(sih);
 	si_cores_info_t *cores_info = (si_cores_info_t *)sii->cores_info;
-
 
 	ASSERT(GOODIDX(coreidx, sii->numcores));
 	ASSERT(regoff < SI_CORE_SIZE);
@@ -1196,7 +1190,6 @@ ai_core_disable(const si_t *sih, uint32 bits)
 	volatile uint32 dummy;
 	uint32 status;
 	aidmp_t *ai;
-
 
 	ASSERT(GOODREGS(sii->curwrap));
 	ai = sii->curwrap;
@@ -1309,7 +1302,6 @@ BCMPOSTTRAPFN(_ai_core_reset)(const si_t *sih, uint32 bits, uint32 resetbits)
 	}
 #endif /* BCMDBG_ERR */
 
-
 #ifdef UCM_CORRUPTION_WAR
 	/* Pulse FGC after lifting Reset */
 	W_REG(sii->osh, &ai->ioctrl, (bits | SICF_FGC | SICF_CLOCK_EN));
@@ -1358,7 +1350,6 @@ BCMPOSTTRAPFN(ai_core_reset_ext)(const si_t *sih, uint32 bits, uint32 resetbits)
 }
 #endif /* BOOKER_NIC400_INF */
 
-
 void
 ai_core_cflags_wo(const si_t *sih, uint32 mask, uint32 val)
 {
@@ -1381,7 +1372,6 @@ ai_core_cflags_wo(const si_t *sih, uint32 mask, uint32 val)
 		W_REG(sii->osh, &ai->ioctrl, w);
 	}
 }
-
 
 uint32
 BCMPOSTTRAPFN(ai_core_cflags)(const si_t *sih, uint32 mask, uint32 val)
@@ -1824,7 +1814,6 @@ ai_force_clocks(const si_t *sih, uint clock_state)
 
 	/* ensure there are no pending backplane operations */
 	SPINWAIT((R_REG(sii->osh, &ai->resetstatus) != 0), 300);
-
 
 	if (clock_state == FORCE_CLK_ON) {
 		ioctrl = R_REG(sii->osh, &ai->ioctrl);

@@ -4,7 +4,7 @@
  * This file describes the payloads of event log entries that are data buffers
  * rather than formatted string entries. The contents are generally XTLVs.
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -161,7 +161,6 @@ typedef struct scb_subq_summary {
 #define SCBDATA_APPS_F_OFF_PEND         0x00000100
 #define SCBDATA_APPS_F_OFF_BLOCKED      0x00000200
 #define SCBDATA_APPS_F_OFF_IN_PROG      0x00000400
-
 
 /**
  * Summary for tx datapath AMPDU SCB cubby

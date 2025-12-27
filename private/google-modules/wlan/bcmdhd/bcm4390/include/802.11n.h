@@ -148,7 +148,6 @@ typedef struct dot11_ht_cap_ie dot11_ht_cap_ie_t;
 #define HT_CAP_RX_STBC_TWO_STREAM	0x2	/* rx STBC support of 1-2 spatial streams */
 #define HT_CAP_RX_STBC_THREE_STREAM	0x3	/* rx STBC support of 1-3 spatial streams */
 
-
 #define HT_CAP_TXBF_CAP_IMPLICIT_TXBF_RX	0x1
 #define HT_CAP_TXBF_CAP_NDP_RX			0x8
 #define HT_CAP_TXBF_CAP_NDP_TX			0x10
@@ -316,7 +315,6 @@ typedef struct dot11_obss_ie dot11_obss_ie_t;
 #define HT_CTRL_AC_CONSTRAINT	0x40000000	/* AC Constraint */
 #define HT_CTRL_RDG_MOREPPDU	0x80000000	/* RDG/More PPDU */
 
-
 /* HT action ids */
 #define DOT11_ACTION_ID_HT_CH_WIDTH	0	/* notify channel width action id */
 #define DOT11_ACTION_ID_HT_MIMO_PS	1	/* mimo ps action id */
@@ -379,7 +377,6 @@ typedef struct dot11_obss_chanlist dot11_obss_chanlist_t;
 
 /* Extended Capability Information Field */
 #define DOT11_OBSS_COEX_MNG_SUPPORT	0x01	/* 20/40 BSS Coexistence Management support */
-
 
 /* This marks the end of a packed structure section. */
 #include <packed_section_end.h>

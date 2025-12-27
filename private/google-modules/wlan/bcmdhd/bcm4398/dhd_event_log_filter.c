@@ -1,7 +1,7 @@
 /*
  * Wifi dongle status Filter and Report
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -108,7 +108,6 @@
 #define EWPF_NO_ABS		FALSE
 #define EWPF_NEED_ABS		TRUE
 
-
 #define EWPF_MAX_INFO_TYPE	5
 #define EWPF_INFO_VER		0
 #define EWPF_INFO_TYPE		1
@@ -190,7 +189,6 @@ static int evt_xtlv_idx_cb(void *ctx, const uint8 *data, uint16 type, uint16 len
 static int evt_xtlv_type_cb(void *ctx, const uint8 *data, uint16 type, uint16 len);
 static int filter_main_cb(void *ctx, const uint8 *data, uint16 type, uint16 len);
 static int evt_xtlv_roam_cb(void *ctx, const uint8 *data, uint16 type, uint16 len);
-
 
 /* ========= Event Handler functions and its callbacks: ============= */
 typedef struct _EWPF_tbl {
@@ -1163,7 +1161,6 @@ evt_xtlv_roam_cb(void *ctx, const uint8 *data, uint16 type, uint16 len)
 	new_tbl[idx].cb_func(&sub_ctx, data, type, len);
 	return BCME_OK;
 }
-
 
 static int
 filter_main_cb(void *ctx, const uint8 *data, uint16 type, uint16 len)

@@ -1,7 +1,7 @@
 /*
  * Customer specific types and constants relating to 802.11
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -31,10 +31,8 @@
 /* This marks the start of a packed structure section. */
 #include <packed_section_start.h>
 
-
 /* Action frame type for vendor specific action frames */
 #define	VS_AF_TYPE	221
-
 
 #ifdef IBSS_RMC
 /* customer's OUI */

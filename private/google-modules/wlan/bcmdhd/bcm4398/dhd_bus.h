@@ -4,7 +4,7 @@
  * Provides type definitions and function prototypes used to link the
  * DHD OS, bus, and protocol modules.
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -97,7 +97,6 @@ extern int dhd_bus_console_in(dhd_pub_t *dhd, uchar *msg, uint msglen);
 /* Deferred processing for the bus, return TRUE requests reschedule */
 extern bool dhd_bus_dpc(struct dhd_bus *bus);
 extern void dhd_bus_isr(bool * InterruptRecognized, bool * QueueMiniportHandleInterrupt, void *arg);
-
 
 /* Check for and handle local prot-specific iovar commands */
 extern int dhd_bus_iovar_op(dhd_pub_t *dhdp, const char *name,

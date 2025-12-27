@@ -54,12 +54,10 @@
 #define	COR_BLREN		0x01
 #define	COR_FUNEN		0x01
 
-
 #define	PCICIA_FCSR		(2 / 2)
 #define	PCICIA_PRR		(4 / 2)
 #define	PCICIA_SCR		(6 / 2)
 #define	PCICIA_ESR		(8 / 2)
-
 
 #define PCM_MEMOFF		0x0000
 #define F0_MEMOFF		0x1000
@@ -98,7 +96,6 @@
 #define	SRI_SZ_MASK		0x03
 #define	SRI_BLANK		0x04
 #define	SRI_OTP			0x80
-
 
 #define SROM16K_BANK_SEL_MASK		(3 << 11)
 #define SROM16K_BANK_SHFT_MASK		11
@@ -139,7 +136,6 @@
 #define	LAN_MEDIA		3		/* Transmission media */
 #define	LAN_NID			4		/* Node identification (aka MAC addr) */
 #define	LAN_CONN		5		/* Connector standard */
-
 
 /* CFTable */
 #define CFTABLE_REGWIN_2K	0x08		/* 2k reg windows size */

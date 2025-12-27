@@ -102,7 +102,6 @@ extern void sdstd_os_yield(sdioh_info_t *sd);
 #define RETRIES_SMALL 100
 #endif
 
-
 #define USE_BLOCKMODE		0x2	/* Block mode can be single block or multi */
 #define USE_MULTIBLOCK		0x4
 
@@ -224,12 +223,10 @@ struct sdioh_info {
 #define CHECK_TUNING_PRE_DATA	1
 #define CHECK_TUNING_POST_DATA	2
 
-
 #ifdef DHD_DEBUG
 #define SD_DHD_DISABLE_PERIODIC_TUNING 0x01
 #define SD_DHD_ENABLE_PERIODIC_TUNING  0x00
 #endif
-
 
 /************************************************************
  * Internal interfaces: per-port references into bcmsdstd.c
@@ -251,7 +248,6 @@ extern void sdstd_intrs_off(sdioh_info_t *sd, uint16 norm, uint16 err);
 
 /* Wait for specified interrupt and error bits to be set */
 extern void sdstd_spinbits(sdioh_info_t *sd, uint16 norm, uint16 err);
-
 
 /**************************************************************
  * Internal interfaces: bcmsdstd.c references to per-port code

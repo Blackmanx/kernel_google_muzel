@@ -446,11 +446,17 @@ typedef enum download_type {
 #endif /* #if defined(NDIS) */
 
 /* For supporting multiple interfaces */
-#define DHD_MAX_IFS			16
-#define DHD_MAX_STATIC_IFS	1
-#define DHD_DEL_IF			-0xE
-#define DHD_BAD_IF			-0xF
-#define DHD_DUMMY_INFO_IF	0xDEAF	/* Hack i/f to handle events from INFO Ring */
+#define DHD_MAX_IFS                16u
+/* static interface exposed at network level on driver load,
+ * but till interface is initialised via ifconfig up, the fw
+ * interface will not be allocated.
+ */
+#define DHD_MAX_STATIC_IFS         3u
+#define DHD_INVALID_STATIC_IDX     0xFFu
+#define DHD_INVALID_IFIDX          0xFFu
+#define DHD_DEL_IF                 0xEu
+#define DHD_BAD_IF                 0xFEu
+#define DHD_DUMMY_INFO_IF          0xDEAFu	/* Hack i/f to handle events from INFO Ring */
 /* to avoid build error for NDIS for timebeing */
 #define DHD_EVENT_IF DHD_DUMMY_INFO_IF
 
@@ -473,7 +479,8 @@ enum dhd_op_flags {
 	DHD_FLAG_IBSS_MODE				= (1 << (8)),
 	DHD_FLAG_MFG_MODE				= (1 << (9)),
 	DHD_FLAG_RSDB_MODE				= (1 << (10)),
-	DHD_FLAG_MP2P_MODE				= (1 << (11))
+	DHD_FLAG_MP2P_MODE				= (1 << (11)),
+	DHD_FLAG_MONITOR_MODE                           = (1 << (12))
 };
 #endif /* defined(__linux__) */
 
@@ -1323,6 +1330,30 @@ typedef struct dhd_db7_info {
 	uint64	debug_max_db7_trap_time;
 } dhd_db7_info_t;
 
+#ifdef DHD_ART
+#define IS_ART_IFACE(ifname) strstr(ifname, "radiotap0")
+typedef struct dhd_art_counters {
+    uint64 rx_packets;
+    uint64 rx_dbg_monitor_packets;
+    uint64 tx_packets;
+    uint64 ctrl_packets;
+    uint64 rx_no_monitor_dev_errors;
+    uint64 rx_skb_realloc_headroom_errors;
+    uint64 rx_skb_headroom_lt_etherheader;
+    uint64 rx_errors;
+    uint64 tx_errors;
+    uint64 tot_txcpl;
+    uint64 ctrl_errors;
+    uint64 rx_bssid_mismatch;
+    uint64 rx_first_pkt_dropped;
+    uint64 rx_first_or_prev_pkt_dropped;
+    uint64 rx_memcpy_errors;
+    uint64 skb_len_too_less;
+} dhd_art_counters_t;
+#else
+#define IS_ART_IFACE(ifname) FALSE
+#endif /* DHD_ART */
+
 /**
  * Common structure for module and instance linkage.
  * Instantiated once per hardware (dongle) instance that this DHD manages.
@@ -2014,6 +2045,7 @@ typedef struct dhd_pub {
 		wl_roam_stats_v1_t v1;
 	} roam_evt;
 	bool ring_attached;
+	atomic_t edl_attached;
 #ifdef DHD_PCIE_RUNTIMEPM
 	bool rx_pending_due_to_rpm;
 #ifdef RPM_FAST_TRIGGER
@@ -2048,6 +2080,11 @@ typedef struct dhd_pub {
 	uint64 lb_rxp_napi_complete_cnt;
 	uint64 rx_dma_stall_hc_ignore_cnt;
 #endif /* DHD_LB_STATS */
+#ifdef DHD_ART
+	bool host_art_enabled;
+	bool dongle_art_enabled;
+	bool usr_art_enabled;
+#endif /* DHD_ART */
 #ifdef TX_CSO
 	bool dongle_txcso_enabled;
 	bool host_txcso_enabled;
@@ -2137,8 +2174,15 @@ typedef struct dhd_pub {
 	uint16 ctrlcpl_dmaidx_wr;
 	uint *sssr_srcb_buf_after;
 	bool force_wl_reg_off;
+#ifdef DHD_ART
+	dhd_art_counters_t art_counters;
+#endif /* DHD_ART */
 } dhd_pub_t;
 
+#ifdef DHD_ART
+bool dhd_is_art_iface(dhd_pub_t *dhdp, int ifidx);
+#endif /* DHD_ART */
+bool dhd_is_art_skb(struct sk_buff *skb);
 #if defined(__linux__)
 int dhd_wifi_platform_set_power(dhd_pub_t *pub, bool on);
 #else
@@ -2175,11 +2219,16 @@ typedef struct {
 
 #if defined(PCIE_FULL_DONGLE)
 /*
+ * Packet Tag for PCIE Full Dongle DHD
+ *
  * WARNING: dhd_wlfc.h also defines a dhd_pkttag_t
  * making wlfc incompatible with PCIE_FULL DONGLE
+ *
+ * In tx path dhd_tx_lb_pkttag_fr also used the same skb
+ * contorl buffer. Make sure the struct members of
+ * dhd_tx_lb_pkttag_fr and dhd_pkttag_fd match from the top.
  */
 
-/* Packet Tag for PCIE Full Dongle DHD */
 typedef struct dhd_pkttag_fd {
 	uint16    flowid;   /* Flowring Id */
 	uint16    ifid;
@@ -2328,6 +2377,8 @@ extern void dhd_txfl_wake_lock_timeout(dhd_pub_t *pub, int val);
 extern void dhd_txfl_wake_unlock(dhd_pub_t *pub);
 extern void dhd_nan_wake_lock_timeout(dhd_pub_t *pub, int val);
 extern void dhd_nan_wake_unlock(dhd_pub_t *pub);
+extern void dhd_art_wake_lock(dhd_pub_t *pub);
+extern void dhd_art_wake_unlock(dhd_pub_t *pub);
 extern int dhd_os_wake_lock_timeout(dhd_pub_t *pub);
 extern int dhd_os_wake_lock_rx_timeout_enable(dhd_pub_t *pub, int val);
 extern int dhd_os_wake_lock_ctrl_timeout_enable(dhd_pub_t *pub, int val);
@@ -2423,6 +2474,18 @@ static inline void MUTEX_UNLOCK_SOFTAP_SET(dhd_pub_t *dhdp)
 			__FUNCTION__, __LINE__); \
 		dhd_nan_wake_unlock(pub); \
 	} while (0)
+#define DHD_ART_WAKE_LOCK(pub) \
+	do { \
+		printf("call ART wake_lock: %s %d\n", \
+			__FUNCTION__, __LINE__); \
+		dhd_art_wake_lock(pub); \
+	} while (0)
+#define DHD_ARTT_WAKE_UNLOCK(pub) \
+	do { \
+		printf("call ART wake_unlock: %s %d\n", \
+			__FUNCTION__, __LINE__); \
+		dhd_art_wake_unlock(pub); \
+	} while (0)
 #define DHD_OS_WAKE_LOCK_TIMEOUT(pub) \
 	do { \
 		printf("call wake_lock_timeout: %s %d\n", \
@@ -2483,6 +2546,8 @@ static inline void MUTEX_UNLOCK_SOFTAP_SET(dhd_pub_t *dhdp)
 #define DHD_NAN_WAKE_LOCK_TIMEOUT(pub, val)	dhd_nan_wake_lock_timeout(pub, val)
 #define DHD_NAN_WAKE_UNLOCK(pub)		dhd_nan_wake_unlock(pub)
 #define DHD_OS_WAKE_LOCK_TIMEOUT(pub)		dhd_os_wake_lock_timeout(pub)
+#define DHD_ART_WAKE_LOCK(pub)			dhd_art_wake_lock(pub)
+#define DHD_ART_WAKE_UNLOCK(pub)		dhd_art_wake_unlock(pub)
 #define DHD_OS_WAKE_LOCK_RX_TIMEOUT_ENABLE(pub, val) \
 	dhd_os_wake_lock_rx_timeout_enable(pub, val)
 #define DHD_OS_WAKE_LOCK_CTRL_TIMEOUT_ENABLE(pub, val) \
@@ -2672,8 +2737,9 @@ extern int dhd_attach_net(dhd_pub_t *dhdp, bool need_rtnl_lock);
 extern int dhd_attach_p2p(dhd_pub_t *);
 extern int dhd_detach_p2p(dhd_pub_t *);
 #endif /* WLP2P && WL_CFG80211 */
-extern int dhd_register_if(dhd_pub_t *dhdp, int idx, bool need_rtnl_lock);
-
+extern int dhd_register_if(dhd_pub_t *dhdp, int ifidx, bool need_rtnl_lock);
+extern int dhd_register_static_if(dhd_pub_t *dhdp, struct net_device *ndev, bool need_rtnl_lock);
+extern int dhd_remove_static_if(dhd_pub_t *dhdpub, struct net_device *ndev, bool need_rtnl_lock);
 /* Indication from bus module regarding removal/absence of dongle */
 extern void dhd_detach(dhd_pub_t *dhdp);
 extern void dhd_free(dhd_pub_t *dhdp);
@@ -2765,12 +2831,19 @@ extern void dhd_bus_wakeup_work(dhd_pub_t *dhdp);
 #define WIFI_FEATURE_SET_TX_POWER_LIMIT              0x4000000
 /* Support Body/Head Proximity SAR */
 #define WIFI_FEATURE_USE_BODY_HEAD_SAR               0x8000000
+/* Support changing MAC address without iface reset */
+#define WIFI_FEATURE_DYNAMIC_SET_MAC                 0x10000000
 /* Support Latency mode setting */
 #define WIFI_FEATURE_SET_LATENCY_MODE                0x40000000
 /* Support P2P MAC randomization */
 #define WIFI_FEATURE_P2P_RAND_MAC                    0x80000000
 /* Support for configuring roaming mode */
 #define WIFI_FEATURE_ROAMING_MODE_CONTROL            0x800000000
+/* Support Voip mode setting */
+#define WIFI_FEATURE_SET_VOIP_MODE                   0x1000000000
+/* Support cached scan result report */
+#define WIFI_FEATURE_CACHED_SCAN_RESULTS             0x2000000000
+
 /* Invalid Feature */
 #define WIFI_FEATURE_INVALID                         0xFFFFFFFF
 
@@ -3171,6 +3244,8 @@ extern int dhd_event_ifchange(struct dhd_info *dhd, struct wl_event_data_if *ife
        char *name, uint8 *mac);
 extern struct net_device *dhd_allocate_if(dhd_pub_t *dhdpub, int ifidx, const char *name,
 	uint8 *mac, uint8 bssidx, bool need_rtnl_lock, const char *dngl_name);
+extern struct net_device *dhd_allocate_static_if(dhd_pub_t *dhdpub, const char *name,
+	uint8 *mac, bool need_rtnl_lock, const char *dngl_name);
 extern int dhd_remove_if(dhd_pub_t *dhdpub, int ifidx, bool need_rtnl_lock);
 #ifdef WL_STATIC_IF
 extern s32 dhd_update_iflist_info(dhd_pub_t *dhdp, struct net_device *ndev, int ifidx,
@@ -5213,4 +5288,7 @@ int dhd_bt_fw_dwnld_blob(void *wl_hdl, char *buf, size_t len);
 extern void dhd_etb_dump_deinit(dhd_pub_t *dhd);
 #endif /* DHD_SDTC_ETB_DUMP */
 int write_dump_to_file(dhd_pub_t *dhd, uint8 *buf, int size, char *fname);
+struct net_device *dhd_get_monitor_ndev(dhd_pub_t *dhd);
+void dhd_set_monitor_chspec(dhd_pub_t *dhdp, chanspec_t chspec);
+chanspec_t dhd_get_monitor_chspec(dhd_pub_t *dhdp);
 #endif /* _dhd_h_ */

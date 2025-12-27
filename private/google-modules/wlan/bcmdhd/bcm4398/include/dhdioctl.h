@@ -5,7 +5,7 @@
  *
  * Definitions subject to change without notice.
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -29,7 +29,6 @@
 #define	_dhdioctl_h_
 
 #include <typedefs.h>
-
 
 /* Linux network driver ioctl encoding */
 typedef struct dhd_ioctl {
@@ -171,7 +170,6 @@ typedef enum dhd_iftype {
 	DHD_IF_TYPE_STA		= 0,
 	DHD_IF_TYPE_AP		= 1,
 
-
 	DHD_IF_TYPE_NAN_NMI	= 3,
 	DHD_IF_TYPE_NAN		= 4,
 	DHD_IF_TYPE_P2P_GO	= 5,
@@ -272,7 +270,6 @@ typedef enum dhd_iface_mgmt_policy {
 #define DHD_LPBKDTDUMP_VAL	0x20000000
 #define DHD_PRSRV_MEM_VAL	0x40000000
 #define DHD_IOVAR_MEM_VAL	0x80000000
-
 
 /* Message levels for Mesh */
 #define MESH_MSG_HDR_VAL        0x00000001u /* Header details */

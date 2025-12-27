@@ -2,7 +2,7 @@
  * Broadcom SDIO/PCMCIA
  * Software-specific definitions shared between device and host side
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -92,7 +92,6 @@
 #define HMB_DATA_D3EXIT		0x800	/* firmware announcing D3 exit */
 #define HMB_DATA_DSPROT_MASK	0xf00
 #endif /* DS_PROT */
-
 
 #define HMB_DATA_FCDATA_MASK	0xff000000	/* per prio flowcontrol data */
 #define HMB_DATA_FCDATA_SHIFT	24		/* per prio flowcontrol data */

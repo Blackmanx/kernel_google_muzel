@@ -95,7 +95,6 @@ static DEFINE_SPINLOCK(noti_list_lock);
 		}\
 	} while (0)
 
-
 #define TIMESPEC64_TO_US(ts)  (((ts).tv_sec * USEC_PER_SEC) + \
 							(ts).tv_nsec / NSEC_PER_USEC)
 
@@ -163,7 +162,6 @@ struct rtt_noti_callback {
 	dhd_rtt_compl_noti_fn noti_fn;
 };
 
-
 /* bitmask indicating which command groups; */
 typedef enum {
 	FTM_SUBCMD_FLAG_METHOD	= 0x01,	/* FTM method command */
@@ -185,7 +183,6 @@ typedef struct ftm_subcmd_info {
 	bcm_xtlv_unpack_cbfn_t *handler;  /* cmd response handler (optional) */
 	ftm_subcmd_flag_t	cmdflag; /* CMD flag (optional)  */
 } ftm_subcmd_info_t;
-
 
 typedef struct ftm_config_options_info {
 	uint32 flags;				/* wl_proxd_flags_t/wl_proxd_session_flags_t */
@@ -220,7 +217,6 @@ typedef struct ftm_strmap_entry {
 	int32		id;
 	char		*text;
 } ftm_strmap_entry_t;
-
 
 typedef struct ftm_status_map_host_entry {
 	wl_proxd_status_t proxd_status;
@@ -630,7 +626,6 @@ ftm_map_id_to_str(int32 id, const ftm_strmap_entry_t *p_table, uint32 num_entrie
 	return "invalid";
 }
 
-
 #if defined(WL_CFG80211) && defined(RTT_DEBUG)
 /* define entry, e.g. { WL_PROXD_CMD_xxx, "WL_PROXD_CMD_xxx" } */
 #define DEF_STRMAP_ENTRY(id) { (id), #id }
@@ -670,7 +665,6 @@ ftm_cmdid_to_str(uint16 cmdid)
 	return ftm_map_id_to_str((int32) cmdid, &ftm_cmdid_map[0], ARRAYSIZE(ftm_cmdid_map));
 }
 #endif /* WL_CFG80211 && RTT_DEBUG */
-
 
 /*
 * convert BCME_xxx error codes into related error strings
@@ -725,7 +719,6 @@ ftm_session_state_value_to_logstr(wl_proxd_session_state_t state)
 		ARRAYSIZE(ftm_session_state_value_loginfo));
 }
 
-
 #ifdef WL_CFG80211
 /*
 * send 'proxd' iovar for all ftm get-related commands
@@ -767,7 +760,6 @@ rtt_do_get_ioctl(dhd_pub_t *dhd, wl_proxd_iov_t *p_proxd_iov, uint16 proxd_iovsi
 exit:
 	return status;
 }
-
 
 static wl_proxd_iov_t *
 rtt_alloc_getset_buf(dhd_pub_t *dhd, wl_proxd_method_t method, wl_proxd_session_id_t session_id,
@@ -816,7 +808,6 @@ rtt_alloc_getset_buf(dhd_pub_t *dhd, wl_proxd_method_t method, wl_proxd_session_
 
 	return p_proxd_iov;
 }
-
 
 static int
 dhd_rtt_common_get_handler(dhd_pub_t *dhd, ftm_subcmd_info_t *p_subcmd_info,
@@ -1708,7 +1699,6 @@ exit:
 	return setup_in_prog;
 }
 
-
 void
 dhd_rtt_nan_update_directed_setup_inprog(dhd_pub_t *dhd,
 	nan_ranging_inst_t *rng_inst, bool inprog)
@@ -2532,7 +2522,6 @@ dhd_rtt_get_geofence_current_target(dhd_pub_t *dhd)
 	return cur_target;
 }
 
-
 /* returns geofence target from list for the peer */
 rtt_geofence_target_info_t*
 dhd_rtt_get_geofence_target(dhd_pub_t *dhd, struct ether_addr* peer_addr, int8 *index)
@@ -2591,7 +2580,6 @@ dhd_rtt_add_geofence_target(dhd_pub_t *dhd, rtt_geofence_target_info_t *target)
 		err = BCME_OK;
 		goto exit;
 	}
-
 
 	geofence_target_cnt = rtt_status->geofence_cfg.geofence_target_cnt;
 	if (geofence_target_cnt >= RTT_MAX_GEOFENCE_TARGET_CNT) {
@@ -2941,7 +2929,6 @@ dhd_rtt_invalid_states(struct net_device *ndev, struct ether_addr *peer_addr)
 
 	UNUSED_PARAMETER(cfg);
 	UNUSED_PARAMETER(invalid_reason);
-
 
 	/* Make sure peer addr is not NULL in caller */
 	ASSERT(peer_addr);
@@ -3527,7 +3514,6 @@ dhd_rtt_set_az_ftm_config_param(ftm_config_param_info_t *ftm_params,
 	}
 }
 
-
 static void
 dhd_rtt_set_mc_az_ftm_config_param(ftm_config_param_info_t *ftm_params,
 	int *ftm_param_cnt, rtt_mc_az_target_info_t *rtt_target, uint16 tlvid)
@@ -3886,7 +3872,6 @@ dhd_rtt_mc_az_config_sta_rtt(dhd_pub_t *dhd, struct net_device *dev,
 		goto exit;
 	}
 
-
 	/* configure the session 1 as initiator */
 	ftm_configs[ftm_cfg_cnt].enable = TRUE;
 
@@ -3963,7 +3948,6 @@ dhd_rtt_mc_az_config_sta_rtt(dhd_pub_t *dhd, struct net_device *dev,
 	/* number of frame per burst */
 	DHD_RTT_MC_AZ_CHK_SET_PARAM(ftm_params, ftm_param_cnt,
 		rtt_target, WL_FTM_TLV_ID_BURST_NUM_MEAS);
-
 
 	if ((rtt_target->cmn_tgt_info.tgt_type == RTT_TWO_WAY_MC) ||
 			(rtt_target->cmn_tgt_info.tgt_type == RTT_ONE_WAY)) {
@@ -4136,7 +4120,6 @@ dhd_rtt_start_ranging(dhd_pub_t *dhd, rtt_config_params_t *config)
 		goto done;	/* abort */
 	}
 
-
 	/* allocate a temp buffer for parsing cmd-args */
 	ranging_sids_size = OFFSETOF(wl_proxd_session_id_list_t, ids) +
 		(config->rtt_target_cnt) * sizeof(wl_proxd_session_id_t);
@@ -4292,6 +4275,9 @@ dhd_rtt_start(dhd_pub_t *dhd)
 	struct net_device *dev = dhd_linux_get_primary_netdev(dhd);
 	u8 rtt_invalid_reason = RTT_STATE_VALID;
 	int rtt_sched_type = RTT_TYPE_INVALID;
+#ifdef DHD_ART
+	struct net_device *art_ndev;
+#endif /* DHD_ART */
 
 	NULL_CHECK(dhd, "dhd is NULL", err);
 
@@ -4300,6 +4286,16 @@ dhd_rtt_start(dhd_pub_t *dhd)
 
 	DHD_RTT(("Enter %s\n", __FUNCTION__));
 
+#ifdef DHD_ART
+	art_ndev = dhd_get_monitor_ndev(dhd);
+	if (art_ndev && (art_ndev->flags & IFF_UP)) {
+		DHD_RTT_ERR(("ART active. fail the rtt targets\n"));
+		err = BCME_ERROR;
+		err_at = 1;
+		goto exit;
+	}
+#endif /* DHD_ART */
+
 	if (RTT_IS_STOPPED(rtt_status)) {
 		DHD_RTT(("No Directed RTT target to process, check for geofence\n"));
 		goto geofence;
@@ -4307,7 +4303,7 @@ dhd_rtt_start(dhd_pub_t *dhd)
 
 	if (rtt_status->cur_idx >= rtt_status->rtt_config.rtt_target_cnt) {
 		err = BCME_RANGE;
-		err_at = 1;
+		err_at = 2;
 		DHD_RTT(("%s : idx %d is out of range\n", __FUNCTION__, rtt_status->cur_idx));
 		if (rtt_status->flags == WL_PROXD_SESSION_FLAG_TARGET) {
 			DHD_RTT_ERR(("STA is set as Target/Responder \n"));
@@ -4323,7 +4319,7 @@ dhd_rtt_start(dhd_pub_t *dhd)
 
 	if (ETHER_ISNULLADDR(rtt_target->cmn_tgt_info.addr.octet)) {
 		err = BCME_BADADDR;
-		err_at = 2;
+		err_at = 3;
 		DHD_RTT(("RTT Target addr is NULL\n"));
 		goto exit;
 	}
@@ -4332,7 +4328,7 @@ dhd_rtt_start(dhd_pub_t *dhd)
 	rtt_invalid_reason = dhd_rtt_invalid_states(dev, &rtt_target->cmn_tgt_info.addr);
 	if (rtt_invalid_reason != RTT_STATE_VALID) {
 		err = BCME_BUSY;
-		err_at = 3;
+		err_at = 4;
 		DHD_RTT(("DRV State is not valid for RTT\n"));
 		goto exit;
 	}
@@ -4342,7 +4338,7 @@ dhd_rtt_start(dhd_pub_t *dhd)
 	err = dhd_rtt_ftm_enable(dhd, TRUE);
 	if (err) {
 		DHD_RTT_ERR(("failed to enable FTM (%d)\n", err));
-		err_at = 4;
+		err_at = 5;
 		goto exit;
 	}
 	rtt_status->status = RTT_ENABLED;
@@ -4363,7 +4359,7 @@ dhd_rtt_start(dhd_pub_t *dhd)
 
 	if (err) {
 		DHD_RTT_ERR(("failed to start session of FTM : error %d\n", err));
-		err_at = 5;
+		err_at = 6;
 		goto exit;
 	} else {
 		/* schedule proxd timeout */
@@ -4379,7 +4375,7 @@ geofence:
 	rtt_sched_type = RTT_TYPE_NAN_GEOFENCE;
 	if ((err = dhd_rtt_sched_geofencing_target(dhd)) != BCME_OK) {
 		DHD_RTT_ERR(("geofencing sched failed, err = %d\n", err));
-		err_at = 6;
+		err_at = 7;
 	}
 #endif /* WL_NAN */
 
@@ -4631,7 +4627,6 @@ dhd_rtt_convert_results_to_host_v1(rtt_mc_az_result_t *rtt_result, const uint8 *
 	} else {
 		rtt_report->distance = FTM_INVALID;
 	}
-
 	/* time stamp */
 	/* get the time elapsed from boot time */
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 39))
@@ -5957,7 +5952,6 @@ exit:
 
 }
 
-
 static int
 dhd_rtt_parse_az_result_event(wl_proxd_event_t *proxd_ev_data,
 	int tlvs_len, rtt_mc_az_result_t *rtt_result, wl_proxd_ftm_session_status_t *session_status)
@@ -5985,7 +5979,6 @@ exit:
 	return ret;
 
 }
-
 
 static int
 dhd_rtt_handle_directed_mc_rtt_burst_end(dhd_pub_t *dhd, struct ether_addr *peer_addr,
@@ -6660,7 +6653,6 @@ dhd_rtt_event_handler(dhd_pub_t *dhd, wl_event_msg_t *event, void *event_data)
 			}
 		}
 		break;
-
 
 	default:
 		DHD_RTT_ERR(("WLC_E_PROXD: not supported EVENT Type:%d\n", event_type));

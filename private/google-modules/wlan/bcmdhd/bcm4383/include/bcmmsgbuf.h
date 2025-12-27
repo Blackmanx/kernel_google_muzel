@@ -541,6 +541,7 @@ typedef struct pcie_dma_xfer_params {
 #define BCMPCIE_FLOW_RING_OPT_EXT_TXSTATUS	0x02u /* bit1 */
 #define BCMPCIE_FLOW_RING_INTF_MESH		0x04u /* bit2, identifies the mesh flow ring */
 #define BCMPCIE_FLOW_RING_INTF_LLW		0x08u /* bit3, identifies the llw flow ring */
+#define BCMPCIE_FLOW_RING_INTF_ART		0x10u /* bit4, identifies the art flow ring */
 
 /** Complete msgbuf hdr for flow ring update from host to dongle */
 typedef struct tx_flowring_create_request {
@@ -1222,6 +1223,9 @@ typedef union txbuf_submit_item {
 	unsigned char		check[H2DRING_TXPOST_ITEMSIZE];
 } txbuf_submit_item_t;
 
+/* Tx post Ext flags */
+#define BCMPCIE_PKT_FLAGS_ART	(0x80u)	/* Active radiotap support */
+
 /* metadata_len */
 #define BCMPCIE_TX_PKT_LATENCY_MASK     0xFFFu
 #define BCMPCIE_TX_PKT_LATENCY_SHIFT        0u
@@ -1687,7 +1691,8 @@ enum {
 	TXPOST_EXT_TAG_TYPE_RSVD	= 0u,	/* Reserved */
 	TXPOST_EXT_TAG_TYPE_CSO		= 1u,
 	TXPOST_EXT_TAG_TYPE_MESH	= 2u,
-	TXPOST_EXT_TAG_TYPE_MAX		= 3u	/* NOTE: increment this as you add reasons above */
+	TXPOST_EXT_TAG_TYPE_ART		= 3u,
+	TXPOST_EXT_TAG_TYPE_MAX		= 4u	/* NOTE: increment this as you add reasons above */
 };
 
 /* Fixed lengths for each extended tag */
@@ -1695,8 +1700,18 @@ typedef uint8 txpost_ext_tag_len_t;
 enum {
 	TXPOST_EXT_TAG_LEN_RSVD		= 0u, /* Reserved */
 	TXPOST_EXT_TAG_LEN_CSO		= 4u,
-	TXPOST_EXT_TAG_LEN_MESH		= 20u
+	TXPOST_EXT_TAG_LEN_MESH		= 20u,
+	TXPOST_EXT_TAG_LEN_ART		= 30u,
 };
+
+#define TXPOST_EXT_ART_HDR_LEN	(DOT11_MAC_HDR_LEN + DOT11_QOS_LEN)
+
+/* ART header information in extended Txpost workitem */
+typedef struct txpost_wi_art_info_s {
+	txpost_ext_tag_type_t ext_tag;
+	uint8 PAD[3];
+	uint8 art_hdr[TXPOST_EXT_ART_HDR_LEN];
+} txpost_wi_art_info_t;
 
 /* CSO specific information for the cso enabled txpost workitem */
 typedef struct txpost_wi_cso_info_s {

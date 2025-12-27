@@ -1,7 +1,7 @@
 /*
  * Broadcom device-specific manifest constants.
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -369,7 +369,6 @@
 #define PAPD_CALREF_DB_2G 0xFF
 #define PAPD_CALREF_DB_5G 0xFF00
 #define PAPD_CALREF_DB_5G_SHIFT 8
-
 
 /* board specific GPIO assignment, gpio 0-3 are also customer-configurable led */
 #define	BOARD_GPIO_BTC3W_IN	0x850	/* bit 4 is RF_ACTIVE, bit 6 is STATUS, bit 11 is PRI */

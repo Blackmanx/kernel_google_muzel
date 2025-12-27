@@ -43,10 +43,8 @@
 #define EVENT_LOG_TAG_BUS_SETUP	10
 #define EVENT_LOG_TAG_BUS_MISC	11
 
-
 #define EVENT_LOG_TAG_SRSCAN		22
 #define EVENT_LOG_TAG_PWRSTATS_INFO	23
-
 
 /* Timestamp logging for plotting. */
 #define EVENT_LOG_TAG_TSLOG		26
@@ -81,7 +79,6 @@
 #define EVENT_LOG_TAG_PCI_DBG	52
 #define EVENT_LOG_TAG_PCI_DATA  53
 #define EVENT_LOG_TAG_PCI_RING	54
-
 
 #define EVENT_LOG_TAG_RANGING_TRACE	55
 #define EVENT_LOG_TAG_WL_ERROR		56
@@ -126,11 +123,9 @@
 #define EVENT_LOG_TAG_BTCX_STATS	95
 #define EVENT_LOG_TAG_LEAKY_AP_STATS	96
 
-
 #define EVENT_LOG_TAG_MIMO_PS_STATS	98
 #define EVENT_LOG_TAG_PWRSTATS_PHY	99
 #define EVENT_LOG_TAG_PWRSTATS_SCAN	100
-
 
 #define EVENT_LOG_TAG_PWRSTATS_WAKE_V2	102
 #define EVENT_LOG_TAG_LQM		103
@@ -187,11 +182,9 @@
 #define EVENT_LOG_TAG_BAM			154
 #define EVENT_LOG_TAG_TXFAIL			155
 
-
 #define EVENT_LOG_TAG_RANDMAC_INFO		159
 #define EVENT_LOG_TAG_RANDMAC_DBG		160
 #define EVENT_LOG_TAG_RANDMAC_ERR		161
-
 
 #define EVENT_LOG_TAG_MSCH_CAL			163
 #define EVENT_LOG_TAG_MSCH_OPP_CAL		164
@@ -228,7 +221,6 @@
 #define EVENT_LOG_TAG_WL_COUNTERS_AUX		209
 #define EVENT_LOG_TAG_AMPDU_DUMP_AUX		210
 
-
 #define EVENT_LOG_TAG_PWRSTATS_PHY_AUX		212
 #define EVENT_LOG_TAG_PWRSTATS_SCAN_AUX		213
 #define EVENT_LOG_TAG_PWRSTATS_WAKE_V2_AUX	214
@@ -258,7 +250,6 @@
 #define EVENT_LOG_TAG_PHY_OBSS_INFO		235
 #define EVENT_LOG_TAG_SBI_SC_INFO		236
 #define EVENT_LOG_TAG_SBI_SC_ERR		237
-
 
 /* Available space for new tags for Dingo, Iguana and branches
  * prior to Koala only. From Koala onwards, new tags must be greater
@@ -362,7 +353,6 @@
 #define EVENT_LOG_TAG_WL_TDLS_DBG               316
 #define EVENT_LOG_TAG_WL_TDLS_ERR               317
 
-
 /* MSCH messages */
 #define EVENT_LOG_TAG_MSCH_DATASTRUCT		319 /* don't use, kept for backward compatibility */
 #define EVENT_LOG_TAG_MSCH_PROFILE		319
@@ -409,7 +399,6 @@
 #define EVENT_LOG_TAG_BTCEC_ERR			340
 #define EVENT_LOG_TAG_BTCEC_INFO		341
 #define EVENT_LOG_TAG_BTCEC_SCHED		342
-
 
 #ifdef SLOT_SCHED
 #define EVENT_LOG_TAG_SBSS_HC		344
@@ -525,7 +514,6 @@
 
 /* EWP HW event log tags */
 #define EVENT_LOG_TAG_EWP_HW			410
-
 
 #define EVENT_LOG_TAG_COEXCPU_ERROR		413
 
@@ -697,7 +685,6 @@ typedef enum wl_el_set_type_def {
 #define EVENT_LOG_TAG_FLUSH_SETNUM		0x80	/* Flush preserved set */
 #define EVENT_LOG_TAG_FLUSH_MASK		0x3f	/* SetNum Mask */
 
-
 typedef enum wl_el_flush_type {
 	EL_TAG_PRSRV_FLUSH_NONE = 0,	/* No flush of preserve buf on this tag */
 	EL_TAG_PRSRV_FLUSH_SETNUM,	/* Flush the buffer set specifid on this tag */
@@ -714,7 +701,6 @@ typedef struct wl_el_set_flush_prsrv_s {
 				 * action is EVENT_LOG_TAG_FLUSH_SETNUM
 				 */
 } wl_el_set_flush_prsrv_t;
-
 
 #define	SD_PRHDRS(i, s, h, p, n, l)
 #define	SD_PRPKT(m, b, n)

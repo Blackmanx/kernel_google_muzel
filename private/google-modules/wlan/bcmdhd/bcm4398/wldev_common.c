@@ -1,7 +1,7 @@
 /*
  * Common function shared by Linux WEXT, cfg80211 and p2p drivers
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -120,7 +120,6 @@ static s32 wldev_ioctl(
 	return ret;
 }
 
-
 /*
 SET commands :
 cast buffer to non-const  and call the GET function
@@ -140,7 +139,6 @@ s32 wldev_ioctl_set(
 #endif
 
 }
-
 
 s32 wldev_ioctl_get(
 	struct net_device *dev, u32 cmd, void *arg, u32 len)
@@ -222,7 +220,6 @@ s32 wldev_iovar_setint(
 	return wldev_iovar_setbuf(dev, iovar, &val, sizeof(val), iovar_buf,
 		sizeof(iovar_buf), NULL);
 }
-
 
 s32 wldev_iovar_getint(
 	struct net_device *dev, s8 *iovar, s32 *pval)
@@ -626,7 +623,6 @@ s32 wldev_iovar_setint_bsscfg(
 	return wldev_iovar_setbuf_bsscfg(dev, iovar, &val, sizeof(val), iovar_buf,
 		sizeof(iovar_buf), bssidx, NULL);
 }
-
 
 s32 wldev_iovar_getint_bsscfg(
 	struct net_device *dev, s8 *iovar, s32 *pval, s32 bssidx)

@@ -164,7 +164,6 @@ static struct platform_device sscd_dev = {
 		},
 };
 
-
 /* Google PCIe interface */
 static int pcie_ch_num = GOOGLE_PCIE_CH_NUM;
 static dhd_pcie_event_cb_t g_pfn;
@@ -976,9 +975,9 @@ module_param(dhd_cpufreq_boost, uint, 0660);
 #endif
 
 #if IS_ENABLED(CONFIG_SOC_LGA)
-#define DHD_LITTLE_CORE_PERF_FREQ   1459000u
-#define DHD_MID_CORE_PERF_FREQ      1267000u
-#define DHD_BIG_CORE_PERF_FREQ      1267000u
+#define DHD_LITTLE_CORE_PERF_FREQ   2016000u
+#define DHD_MID_CORE_PERF_FREQ      2092000u
+#define DHD_BIG_CORE_PERF_FREQ      2092000u
 #else
 #define DHD_LITTLE_CORE_PERF_FREQ   1548000u
 #define DHD_MID_CORE_PERF_FREQ      1549000u

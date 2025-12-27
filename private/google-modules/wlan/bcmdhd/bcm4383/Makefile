@@ -34,8 +34,14 @@ ifneq ($(KERNEL_SRC),)
     KCFLAGS += -I$(dir $(KERNEL_SRC))private/google-modules/soc/rdo/include
     # For "include/linux/platform_data/sscoredump.h"
     KCFLAGS += -I$(dir $(KERNEL_SRC))private/google-modules/soc/gs/include
+    ifneq ("$(wildcard $(dir ${O})private/google-modules/soc/rdo/Module.symvers)","")
+      EXTRA_SYMBOLS += $(dir ${O})private/google-modules/soc/rdo/Module.symvers
+    endif
     ifneq ("$(wildcard $(dir ${O})private/google-modules/soc/rdo/pci/google-pcie-v1_Module.symvers)","")
-      EXTRA_SYMBOLS+= $(dir ${O})private/google-modules/soc/rdo/pci/google-pcie-v1_Module.symvers
+      EXTRA_SYMBOLS += $(dir ${O})private/google-modules/soc/rdo/pci/google-pcie-v1_Module.symvers
+    endif
+    ifneq ("$(wildcard $(dir ${O})private/google-modules/soc/rdo/pci/google-pcie-v2_Module.symvers)","")
+      EXTRA_SYMBOLS += $(dir ${O})private/google-modules/soc/rdo/pci/google-pcie-v2_Module.symvers
     endif
   endif
   EXTRA_CFLAGS+="-Wno-missing-prototypes"

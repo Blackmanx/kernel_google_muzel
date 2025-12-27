@@ -77,7 +77,8 @@ typedef struct dhd_info {
 	/* for supporting multiple interfaces.
 	* static_ifs hold the net ifaces without valid FW IF
 	*/
-	dhd_if_t *iflist[DHD_MAX_IFS + DHD_MAX_STATIC_IFS];
+	dhd_if_t *iflist[DHD_MAX_IFS];
+	dhd_if_t *static_iflist[DHD_MAX_STATIC_IFS];
 	void *adapter;			/* adapter information, interrupt, fw path etc. */
 	char fw_path[PATH_MAX];		/* path to firmware image */
 	char nv_path[PATH_MAX];		/* path to nvram vars file */
@@ -144,6 +145,7 @@ typedef struct dhd_info {
 	struct wakeup_source *wl_scanwake;  /* Wifi scan wakelock */
 #endif /* DHD_USE_SCAN_WAKELOCK */
 	struct wakeup_source *wl_nanwake; /* NAN wakelock */
+	struct wakeup_source *wl_artwake; /* Wifi ART wakelock */
 #endif /* CONFIG_HAS_WAKELOCK */
 
 #if defined(OEM_ANDROID)
@@ -397,6 +399,7 @@ typedef struct dhd_info {
     char btfw_path[PATH_MAX];
 #endif /* defined (BT_OVER_SDIO) */
 #ifdef WL_MONITOR
+	chanspec_t monitor_chspec; /* monitor pseudo device */
 	struct net_device *monitor_dev; /* monitor pseudo device */
 	struct sk_buff *monitor_skb;
 	uint	monitor_len;

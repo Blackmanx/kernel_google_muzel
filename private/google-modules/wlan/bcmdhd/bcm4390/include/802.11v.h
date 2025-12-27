@@ -265,7 +265,6 @@ BWL_PRE_PACKED_STRUCT struct dot11_tfs_se {
 } BWL_POST_PACKED_STRUCT;
 typedef struct dot11_tfs_se dot11_tfs_se_t;
 
-
 /** TFS response element */
 BWL_PRE_PACKED_STRUCT struct dot11_tfs_resp_ie {
 	uint8 id;				/* 92, DOT11_MNG_TFS_RESPONSE_ID */
@@ -357,7 +356,6 @@ BWL_PRE_PACKED_STRUCT struct dot11_tfs_notify_resp {
 } BWL_POST_PACKED_STRUCT;
 typedef struct dot11_tfs_notify_resp dot11_tfs_notify_resp_t;
 #define DOT11_TFS_NOTIFY_RESP_LEN	3	/* Fixed length */
-
 
 /** WNM-Sleep Management Request frame header */
 BWL_PRE_PACKED_STRUCT struct dot11_wnm_sleep_req {
@@ -777,7 +775,6 @@ typedef struct dot11_tclas_proc_ie dot11_tclas_proc_ie_t;
 #define DOT11_TCLAS_PROC_MATCHALL	0	/* All high level element need to match */
 #define DOT11_TCLAS_PROC_MATCHONE	1	/* One high level element need to match */
 #define DOT11_TCLAS_PROC_NONMATCH	2	/* Non match to any high level element */
-
 
 /* TSPEC element defined in 802.11 std section 8.4.2.32 - Not supported */
 #define DOT11_TSPEC_IE_LEN		57	/* Fixed length */

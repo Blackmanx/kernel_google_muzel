@@ -674,7 +674,6 @@ void dhd_lb_stats_deinit(dhd_pub_t *dhdp)
 		MFREE(dhdp->osh, dhd->napi_latency, DHD_NAPI_LATENCY_SIZE);
 	}
 
-
 	for (j = 0; j < HIST_BIN_SIZE; j++) {
 		if (dhd->napi_rx_hist[j]) {
 			MFREE(dhdp->osh, dhd->napi_rx_hist[j], alloc_size);
@@ -1622,7 +1621,6 @@ dhd_lb_rxpost_dispatch(dhd_pub_t *dhdp)
 	binary_sema_up(&dhd->lb_rxpost_thread);
 }
 
-
 /* Rxpost Work */
 static int
 dhd_lb_rxpost_thread(void *data)
@@ -1651,10 +1649,8 @@ exit:
 	DHD_TRACE(("%s: EXITED...\n", __FUNCTION__));
 	KTHREAD_COMPLETE_AND_EXIT(&tsk->completed, 0);
 
-
 }
 #endif /* DHD_LB_RXPOST */
-
 
 #endif /* DHD_LB */
 

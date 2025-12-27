@@ -1,6 +1,6 @@
 # bcmdhd
 #
-# Copyright (C) 2024, Broadcom.
+# Copyright (C) 2025, Broadcom.
 #
 #      Unless you and Broadcom execute a separate written software license
 # agreement governing use of this software, this software is licensed to you
@@ -101,6 +101,12 @@ DHDCFLAGS += -DCONFIG_DHD_SET_RANDOM_MAC_VAL=$(CONFIG_DHD_SET_RANDOM_MAC_VAL)
 DHDCFLAGS += -DCONFIG_BCMDHD_PREALLOC_MEMDUMP=$(CONFIG_BCMDHD_PREALLOC_MEMDUMP)
 DHDCFLAGS += -DCONFIG_BCMDHD_OOB_HOST_WAKE=$(CONFIG_BCMDHD_OOB_HOST_WAKE)
 DHDCFLAGS += -DCONFIG_BCMDHD_GET_OOB_STATE=$(CONFIG_BCMDHD_GET_OOB_STATE)
+endif
+
+ifneq ($(CONFIG_DEBUG_KMEMLEAK),)
+  DHDCFLAGS += \
+    -DDHD_DUMP_RXPKTIDMAP \
+    -DDHD_PRINT_RXPKTS_TRACE
 endif
 
 DHDCFLAGS += -DBCMUTILS_ERR_CODES -DUSE_NEW_RSPEC_DEFS -DBCM_FLEX_ARRAY
@@ -361,12 +367,18 @@ ifneq ($(CONFIG_SOC_GOOGLE),)
         # PCIE CPL TIMEOUT WAR
 	# DHDCFLAGS += -DDHD_TREAT_D3ACKTO_AS_LINKDWN
 	# Skip coredump for certain health check traps
-	# temporary enable it for the check
-	#DHDCFLAGS += -DDHD_SKIP_COREDUMP_ON_HC
+	DHDCFLAGS += -DDHD_SKIP_COREDUMP_ON_HC
 	# Skip coredump for older chip revs
 	DHDCFLAGS += -DDHD_SKIP_COREDUMP_OLDER_CHIPS
 	# Skip coredump for continousy pkt drop health check
 	DHDCFLAGS += -DSKIP_COREDUMP_PKTDROP_RXHC
+        # Boost host cpufreq to max for peak tput. default is false
+        DHDCFLAGS += -DDHD_HOST_CPUFREQ_BOOST
+        # Boost host cpufreq to max for peak tput. default is true
+        DHDCFLAGS += -DDHD_HOST_CPUFREQ_BOOST_DEFAULT_ENAB
+        DHDCFLAGS += -DPKT_COUNT_HIGH=60000
+        DHDCFLAGS += -DPKT_COUNT_MID=5000
+        DHDCFLAGS += -DPKT_COUNT_LOW=3000
 endif
 endif
 
@@ -382,6 +394,8 @@ ifneq ($(CONFIG_SOC_GOOGLE),)
     DHDCFLAGS += -DWL_MLO_BKPORT_NEW_PORT_AUTH
     # CROSS AKM related back port changes
     DHDCFLAGS += -DWL_CROSS_AKM_BKPORT
+    # Avoid SSR dump on state mismatch
+    DHDCFLAGS += -DDHD_AVOID_SSR_ON_STATE_MISMATCH
     ifneq ($(filter y, $(CONFIG_BCM4398) $(CONFIG_BCM4390)),)
         # ch_switch_notify back port changes
         DHDCFLAGS += -DWL_CH_SWITCH_BKPORT

@@ -3,7 +3,7 @@
  * Also, see WFA QoS Management spec:
  * https://drive.google.com/file/d/1dj4D92kUhLKrImWkOJZ0__Meg9fZm9fL/view?usp=share_link
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -160,6 +160,17 @@ typedef struct wme_param_ie wme_param_ie_t;
 #define WFA_OUI_TYPE_SAE_PK		0x1F
 #define WFA_OUI_TYPE_TD_INDICATION	0x20
 
+/* OUI_TYPE assignments for MRSNO */
+#define WFA_OUI_TYPE_RSN_OVERRIDE		0x29
+#define WFA_OUI_TYPE_RSN_OVERRIDE_2		0x2A
+#define WFA_OUI_TYPE_RSNXE_OVERRIDE		0x2B
+#define WFA_OUI_TYPE_RSN_SELECTION		0x2C
+#define WFA_OUI_TYPE_RSN_OVERRIDE_MLO_LINK_KDE	0x2D
+
+/* Snonce Cookie for MRSNO 4way-HS and FT reassociation */
+#define EAPOL_WPA2_WFA_SNONCE_COOKIE		"\x50\x6F\x9A\x00\x00\x29"
+#define EAPOL_WPA2_WFA_SNONCE_COOKIE_LEN	6u
+
 /* WCN */
 #define WCN_OUI			"\x00\x50\xf2"	/* WCN OUI */
 #define WCN_TYPE		4	/* WCN type */
@@ -174,7 +185,6 @@ typedef struct wme_param_ie wme_param_ie_t;
 /* WMM OUI subtype */
 #define WMM_OUI_SUBTYPE_PARAMETER	1
 #define WMM_PARAMETER_IE_LEN		24
-
 
 #define SAE_PK_MOD_LEN		32u
 BWL_PRE_PACKED_STRUCT struct dot11_sae_pk_element {
@@ -410,6 +420,38 @@ typedef BWL_PRE_PACKED_STRUCT struct dscp_policy_domain_name_attr {
 	uint8 data[];		/* domain name */
 } BWL_POST_PACKED_STRUCT dscp_policy_domain_name_attr_t;
 #define DSCP_POLICY_DOMAIN_NAME_ATTR_SIZE (sizeof(dscp_policy_domain_name_attr_t))
+
+/* WFA RSN/RSNXE Override Vendor Specific IE */
+#define WFA_RSN_OVERRIDE_OUI_TYPE_OFFSET	5u
+#define WFA_RSN_OVERRIDE_IE_DATA_OFFSET		6u
+typedef BWL_PRE_PACKED_STRUCT struct wfa_rsn_override_ie {
+	uint8 id;               /* DOT11_MNG_VS_ID 0xDD(221) */
+	uint8 len;              /* IE length */
+	uint8 oui[WFA_OUI_LEN]; /* WFA OUI 50:6F:9A */
+	uint8 oui_type;         /* WFA_OUI_TYPE_RSN(XE)_OVERRIDE */
+	uint8 data[];           /* RSN/RSNXE IE attributes */
+} BWL_POST_PACKED_STRUCT wfa_rsn_override_ie_t;
+#define WFA_RSN_OVERRIDE_IE_SIZE (sizeof(wfa_rsn_override_ie_t))
+
+typedef BWL_PRE_PACKED_STRUCT struct wfa_rsn_selection_ie {
+	uint8 id;               /* DOT11_MNG_VS_ID 0xDD(221) */
+	uint8 len;              /* IE length */
+	uint8 oui[WFA_OUI_LEN]; /* WFA OUI 50:6F:9A */
+	uint8 oui_type;         /* WFA_OUI_TYPE_RSN_SELECTION */
+	uint8 data;		/* 0 = RSNE, 1 = RSNE Override , 2 = RSN Override 2 */
+} BWL_POST_PACKED_STRUCT wfa_rsn_selection_ie_t;
+#define WFA_RSN_SELECTION_IE_SIZE (sizeof(wfa_rsn_selection_ie_t))
+
+#define WFA_RSNOV_LINK_KDE_IE_DATA_OFFSET 7u
+typedef BWL_PRE_PACKED_STRUCT struct wfa_rsnov_link_kde_ie {
+	uint8 id;               /* DOT11_MNG_PROPR_ID 0xDD(221) */
+	uint8 len;              /* IE length */
+	uint8 oui[WFA_OUI_LEN]; /* WFA OUI 50:6F:9A */
+	uint8 oui_type;         /* WFA_OUI_TYPE_RSN_OVERRIDE_MLO_LINK_KDE */
+	uint8 link_id;		/* Link identifier */
+	uint8 data[];		/* The set of RSN Override, Override 2, RSNXE Overrie IEs */
+} BWL_POST_PACKED_STRUCT wfa_rsnov_link_kde_ie_t;
+#define WFA_RSNOV_LINK_KDE_IE_SIZE (sizeof(wfa_rsnov_link_kde_ie_t))
 
 /* This marks the end of a packed structure section. */
 #include <packed_section_end.h>

@@ -213,7 +213,6 @@ typedef union bcm_event_msg_u {
 #define WLC_E_PKTDELAY_IND		95	/* event for tx pkt delay suddently jump */
 
 
-
 #define WLC_E_PSTA_PRIMARY_INTF_IND	99	/* psta primary interface indication */
 #define WLC_E_NAN			100     /* NAN event - Reserved for future */
 #define WLC_E_BEACON_FRAME_RX		101
@@ -333,7 +332,6 @@ typedef union bcm_event_msg_u {
 #define WLC_E_SBI_SC_EVENT		216	/* SBI SC event */
 #define WLC_E_SSID_MITIGATION           217     /* SSID mitigation event */
 #define WLC_E_LAST			218	/* highest val + 1 for range checking */
-
 
 /* define an API for getting the string name of an event */
 extern const char *bcmevent_get_name(uint event_type);
@@ -487,14 +485,12 @@ typedef enum wlc_roam_cache_update_reason {
 #define WLC_E_STATUS_SLICE_SWAP_COMPLETE	4u
 #define WLC_E_STATUS_SDB_FAILED                 5u
 
-
 /* SDB transition reason code */
 #define WLC_E_REASON_HOST_DIRECT			0u
 #define WLC_E_REASON_INFRA_ASSOC			1u
 #define WLC_E_REASON_INFRA_ROAM				2u
 #define WLC_E_REASON_INFRA_DISASSOC			3u
 #define WLC_E_REASON_NO_MODE_CHANGE_NEEDED		4u
-
 
 #define WLC_E_REASON_SDB_MODESW_SLICE_CHANGE		7u
 #define WLC_E_REASON_SDB_MODESW_CHAIN_CHANGE		8u
@@ -528,7 +524,6 @@ typedef struct wl_event_sdb_trans {
 /* reason codes for WLC_E_GTK_KEYROT_NO_CHANSW event */
 #define WLC_E_GTKKEYROT_SCANDELAY       0       /* Delay scan while gtk in progress */
 
-
 #define WLC_E_GTKKEYROT_SKIPCHANSW_P2P  2       /* Avoid chansw by p2p while gtk in progress */
 
 /* roam reason codes */
@@ -558,7 +553,6 @@ typedef struct wl_event_sdb_trans {
 #define WLC_E_REASON_BTCX_ROAM		21	/* roamed due to Btcx roam */
 #define WLC_E_REASON_MLD_REASSOC	22	/* MLD reassoc */
 #define WLC_E_REASON_LAST		23	/* NOTE: increment this as you add reasons above */
-
 
 /* prune reason codes */
 #define WLC_E_PRUNE_ENCR_MISMATCH	1u	/* encryption mismatch */
@@ -613,7 +607,6 @@ typedef struct wl_event_sdb_trans {
 #define WLC_E_PRUNE_ASSOC_DISALLOWED		44u	/* Assoc is not allowed */
 #define WLC_E_PRUNE_LINK_MISMATCH		45u	/* Number of link mismatch  */
 #define WLC_E_PRUNE_SCORE_ZERO			46u	/* Prune due to score is 0 */
-
 
 /* WPA failure reason codes carried in the WLC_E_PSK_SUP event */
 #define WLC_E_SUP_OTHER			0u	/* Other reason */
@@ -720,7 +713,6 @@ typedef struct wlc_wsec_event {
  * WLC_E_ACTION_FRAME_RX
  */
 
-
 #define BCM_RX_FRAME_DATA_VERSION_3 3u
 
 #define MAX_PHY_CORE_NUM 4u
@@ -801,8 +793,6 @@ typedef struct wl_event_data_natoe {
 #define WLC_E_IF_ROLE_P2P_GO		3	/* P2P Group Owner */
 #define WLC_E_IF_ROLE_P2P_CLIENT	4	/* P2P Client */
 #define WLC_E_IF_ROLE_ART		5	/* Active Radiotap */
-
-
 
 #define WLC_E_IF_ROLE_IBSS		8	/* IBSS */
 #define WLC_E_IF_ROLE_NAN		9	/* NAN */
@@ -939,7 +929,6 @@ typedef struct wlc_phy_cal_info {
 	uint8 slice;
 } wlc_phy_cal_info_t;
 
-
 /* GAS event data */
 typedef BWL_PRE_PACKED_STRUCT struct wl_event_gas {
 	uint16	channel;		/* channel of GAS protocol */
@@ -1037,7 +1026,6 @@ typedef BWL_PRE_PACKED_STRUCT struct proxd_event_ts_results {
 	ts_sample_t ts_buff[BCM_FLEX_ARRAY]; /* Timestamps */
 } BWL_POST_PACKED_STRUCT wl_proxd_event_ts_results_t;
 
-
 /* Video Traffic Interference Monitor Event */
 #define INTFER_EVENT_VERSION		1
 #define INTFER_STREAM_TYPE_NONTCP	1
@@ -1057,7 +1045,6 @@ typedef struct wl_rrm_event {
 	int16 subevent;
 	char payload[BCM_FLEX_ARRAY];	/* Measurement payload */
 } wl_rrm_event_t;
-
 
 /* WLC_E_PSTA_PRIMARY_INTF_IND event data */
 typedef struct wl_psta_primary_intf_event {
@@ -1207,7 +1194,6 @@ typedef struct wl_event_radar_detect_data {
 	uint16 target_chanspec; /*  Target chanspec after detection of radar on current_chanspec */
 	radar_detected_event_info_t radar_info[2];
 } wl_event_radar_detect_data_t;
-
 
 #define WL_EVENT_MODESW_VER_1			1
 #define WL_EVENT_MODESW_VER_CURRENT		WL_EVENT_MODESW_VER_1
@@ -1468,6 +1454,7 @@ typedef enum {
 	CHANSW_INIT = 3,	/* channel set at WLC up time */
 	CHANSW_ASSOC = 4,	/* channel switch due to association */
 	CHANSW_ROAM = 5,	/* channel switch due to roam */
+
 	CHANSW_IOVAR = 7,	/* channel switch due to IOVAR */
 	CHANSW_NAN_SCAN = 8,	/* channel switch due to NAN Scan */
 	CHANSW_APCS = 9,	/* Channel switch from AP channel select module */
@@ -1506,7 +1493,6 @@ typedef struct event_aggr_data {
 					 */
 	uint8	data[];	/* Aggregate buffer containing Events */
 } event_aggr_data_t;
-
 
 /* WLC_E_TVPM_MITIGATION event structure version */
 #define WL_TVPM_MITIGATION_VERSION 1
@@ -1891,7 +1877,6 @@ typedef enum wl_icm_reason {
 	WLC_E_ICM_REASON_SINGLE_LINK	= 1u,	/* Downgrade to single link */
 	WLC_E_ICM_REASON_DUAL_LINK	= 2u,	/* Downgrade to two link */
 } wl_icm_reason_t;
-
 
 /* ICM information (WLC_E_ICM) event data */
 #define WL_ICM_EVENT_VERSION_1	(1u)

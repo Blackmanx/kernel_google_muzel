@@ -2,7 +2,7 @@
  * Fundamental types and constants relating to WFA NAN
  * (Neighbor Awareness Networking)
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -266,7 +266,6 @@ typedef BWL_PRE_PACKED_STRUCT struct wifi_nan_svc_id_attr_s {
 #define NAN_SC_BINDING_BITMAP_PRESENT 0x40
 /* Max olength used for KDK in NAN R4 */
 #define NAN_SEC_MAX_KDK_LEN		32u
-
 
 /* Service descriptor */
 typedef BWL_PRE_PACKED_STRUCT struct wifi_nan_svc_descriptor_attr_s {
@@ -870,7 +869,6 @@ enum
 								NDL_ATTR_TYPE_STATUS_RESPONSE)
 #define NAN_NDL_CONFIRM(_ndl)		(((_ndl)->type_status & NAN_NDL_TYPE_MASK) == \
 								NDL_ATTR_TYPE_STATUS_CONFIRM)
-
 
 #define NAN_NDL_STATUS_SHIFT	4
 #define NAN_NDL_STATUS_MASK	0xF0
@@ -1859,7 +1857,6 @@ typedef BWL_PRE_PACKED_STRUCT struct wifi_nan_mcast_sched_attr_s {
 	uint8 sched_own[ETHER_ADDR_LEN];
 	uint8 var[]; /* multicast sched entry list (schedule_entry_list) */
 } BWL_POST_PACKED_STRUCT wifi_nan_mcast_sched_attr_t;
-
 
 /* FAC Channel Entry  (section 10.7.19.1.5) */
 typedef BWL_PRE_PACKED_STRUCT struct wifi_nan_fac_chan_entry_s {

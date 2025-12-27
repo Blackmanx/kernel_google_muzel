@@ -255,7 +255,6 @@ fail:
 	return NULL;
 }
 
-
 extern SDIOH_API_RC
 sdioh_detach(osl_t *osh, sdioh_info_t *sd)
 {
@@ -1291,7 +1290,6 @@ sdioh_buffer_tofrom_bus(sdioh_info_t *sd, uint fix_inc, uint write, uint func,
 	return ((err_ret == 0) ? SDIOH_API_RC_SUCCESS : SDIOH_API_RC_FAIL);
 }
 
-
 /*
  * This function takes a buffer or packet, and fixes everything up so that in the
  * end, a DMA-able packet is created.
@@ -1666,7 +1664,6 @@ sdmmc_get_clock_rate(sdioh_info_t *sd)
 	struct mmc_host *host = sdio_func->card->host;
 	return mmc_host_clk_rate(host);
 }
-
 
 void
 sdmmc_set_clock_rate(sdioh_info_t *sd, uint hz)

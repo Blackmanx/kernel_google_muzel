@@ -328,7 +328,6 @@ enum wl_ftm_session_state {
 };
 typedef int16 wl_ftm_session_state_t;
 
-
 /* FTM TLV IDs. Mirror of existing legacy PROXD with added entries for
  * new 11AZ ranging parameters.
  */
@@ -654,7 +653,6 @@ enum wl_ftm_ranging_format_bw {
 };
 typedef uint8 wl_ftm_ranging_format_bw_t;
 
-
 /* WL_FTM_TLV_ID_AZ_RTT_SAMPLE_V1
  * 11az RTT sample from a measurement
  */
@@ -876,6 +874,5 @@ typedef struct wl_ftm_timestamp_dump_v1 {
 	uint16 pad;
 	wl_ftm_timestamps_t timestamps_list[];	/* list of timestamps for each list entry */
 } wl_ftm_timestamp_dump_v1_t;
-
 
 #endif /* _ftm_ioctl_h */

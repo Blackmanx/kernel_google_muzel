@@ -608,6 +608,7 @@ typedef struct {
 #define PCIE_SHARED2_DEV_TXPOST_EXT_TAG_CAP_RSVD	(1u << 0u) /* Reserved  */
 #define PCIE_SHARED2_DEV_TXPOST_EXT_TAG_CAP_CSO		(1u << 1u) /* CSO */
 #define PCIE_SHARED2_DEV_TXPOST_EXT_TAG_CAP_MESH	(1u << 2u) /* MESH */
+#define PCIE_SHARED2_DEV_TXPOST_EXT_TAG_CAP_ART		(1u << 3u) /* Active radiotap */
 
 /* Aggregated Work Item definitions */
 #define PCIE_AGGR_WI_TXPOST		(1u << 0u)

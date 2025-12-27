@@ -618,7 +618,6 @@ BWL_PRE_PACKED_STRUCT union pasn_params_cbinfo_field {
 } BWL_POST_PACKED_STRUCT;
 typedef union pasn_params_cbinfo_field pasn_params_cbinfo_field_t;
 
-
 BWL_PRE_PACKED_STRUCT struct pasn_params_group_key {
 	uint16 group_id;	/* IANA id of Finite Cyclic Group */
 	uint8 len;		/* Public key length */

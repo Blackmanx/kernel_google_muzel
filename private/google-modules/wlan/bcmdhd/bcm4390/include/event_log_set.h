@@ -108,7 +108,6 @@
 #define EVENT_LOG_SET_PRSRV_BLOCK_SIZE	(EVENT_LOG_BLOCK_SIZE_1K)
 #endif
 
-
 #define EVENT_LOG_SET_9			(9u)
 /* General purpose preserve chatty.
  * EVENT_LOG_SET_PRSRV_CHATTY log set should not be used by FW as it is

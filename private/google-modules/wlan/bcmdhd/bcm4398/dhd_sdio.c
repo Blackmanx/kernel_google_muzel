@@ -1,7 +1,7 @@
 /*
  * DHD Bus Module for SDIO
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -85,7 +85,6 @@ extern void bcmsdh_reject_ioreqs(void *sdh, bool reject);
 extern bool  bcmsdh_fatal_error(void *sdh);
 static int dhdsdio_suspend(void *context);
 static int dhdsdio_resume(void *context);
-
 
 #ifndef DHDSDIO_MEM_DUMP_FNAME
 #define DHDSDIO_MEM_DUMP_FNAME         "mem_dump"
@@ -453,7 +452,6 @@ typedef struct dhd_bus {
 #endif /* defined (BT_OVER_SDIO) */
 } dhd_bus_t;
 
-
 /*
  * Whenever DHD_IDLE_IMMEDIATE condition is handled, we have to now check if
  * BT is active too. Instead of adding #ifdef code in all the places, we thought
@@ -774,7 +772,6 @@ static int dhdsdio_download_btfw(struct dhd_bus *bus, osl_t *osh, void *sdh);
 static int _dhdsdio_download_btfw(struct dhd_bus *bus);
 #endif /* defined (BT_OVER_SDIO) */
 
-
 /*
  * PR 114233: [4335] Sdio 3.0 overflow due to spur mode PLL change
  */
@@ -1088,7 +1085,6 @@ dhdsdio_set_wakeupctrl(dhd_bus_t *bus)
 	val = bcmsdh_cfg_read(bus->sdh, SDIO_FUNC_1, SBSDIO_FUNC1_WAKEUPCTRL, NULL);
 }
 
-
 #define KSO_DBG(x)
 /* KSO set typically takes depending on resource up & number of
 * resources which were down. Max value is PMU_MAX_TRANSITION_DLY usec.
@@ -1121,7 +1117,6 @@ dhdsdio_clk_kso_enab(dhd_bus_t *bus, bool on)
 
 	/* 1st KSO write goes to AOS wake up core if device is asleep  */
 	bcmsdh_cfg_write(bus->sdh, SDIO_FUNC_1, SBSDIO_FUNC1_SLEEPCSR, wr_val, &err);
-
 
 	/* In case of 43012 chip, the chip could go down immediately after KSO bit is cleared.
 	 * So the further reads of KSO register could fail. Thereby just bailing out immediately
@@ -1193,7 +1188,6 @@ dhdsdio_clk_kso_enab(dhd_bus_t *bus, bool on)
 
 		bcmsdh_cfg_write(bus->sdh, SDIO_FUNC_1, SBSDIO_FUNC1_SLEEPCSR, wr_val, &err);
 	} while (try_cnt++ < CUSTOM_MAX_KSO_ATTEMPTS);
-
 
 	if (try_cnt > 2)
 		KSO_DBG(("%s> op:%s, try_cnt:%d, rd_val:%x, ERR:%x \n",
@@ -1511,7 +1505,6 @@ dhdsdio_htclk(dhd_bus_t *bus, bool on, bool pendok)
 		} else {
 			ht_avail_error = 0;
 		}
-
 
 		/* Check current status */
 		clkctl = bcmsdh_cfg_read(sdh, SDIO_FUNC_1, SBSDIO_FUNC1_CHIPCLKCSR, &err);
@@ -2152,7 +2145,6 @@ dhd_bus_txdata(struct dhd_bus *bus, void *pkt)
 #else /* SDTEST */
 	BCM_REFERENCE(datalen);
 #endif /* SDTEST */
-
 
 #if defined(DHD_TX_DUMP) && defined(DHD_TX_FULL_DUMP)
 	dump_data = PKTDATA(osh, pkt);
@@ -2854,7 +2846,6 @@ dhd_bus_txctl(struct dhd_bus *bus, uchar *msg, uint msglen)
 		len = ROUNDUP(len, ALIGNMENT);
 
 	ASSERT(ISALIGNED((uintptr)frame, 2));
-
 
 	/* Need to lock here to protect txseq and SDIO tx calls */
 	dhd_os_sdlock(bus->dhd);
@@ -3815,7 +3806,6 @@ dhdsdio_checkdied(dhd_bus_t *bus, char *data, uint size)
 					line[n] = ch;
 				}
 
-
 				if (n > 0) {
 					if (line[n - 1] == '\r')
 						n--;
@@ -4089,7 +4079,6 @@ dhdsdio_doiovar(dhd_bus_t *bus, const bcm_iovar_t *vi, uint32 actionid, const ch
 		bcopy(params, &int_val, sizeof(int_val));
 
 	bool_val = (int_val != 0) ? TRUE : FALSE;
-
 
 	/* Some ioctls use the bus */
 	dhd_os_sdlock(bus->dhd);
@@ -5971,7 +5960,6 @@ dhdsdio_rxglom(dhd_bus_t *bus, uint8 rxseq)
 		}
 #endif
 
-
 		/* Validate the superframe header */
 		dptr = (uint8 *)PKTDATA(osh, pfirst);
 		sublen = ltoh16_ua(dptr);
@@ -6552,7 +6540,6 @@ dhdsdio_readframes(dhd_bus_t *bus, uint maxframes, bool *finished)
 				GSPI_PR55150_BAILOUT;
 				continue;
 			}
-
 
 			/* Extract software header fields */
 			chan = SDPCM_PACKET_CHANNEL(&bus->rxhdr[SDPCM_FRAMETAG_LEN]);
@@ -7224,7 +7211,6 @@ dhdsdio_dpc(dhd_bus_t *bus)
 		intstatus &= ~I_HMB_HOST_INT;
 		intstatus |= dhdsdio_hostmail(bus, &hmbdata);
 
-
 	}
 
 #ifdef DHD_UCODE_DOWNLOAD
@@ -7696,7 +7682,6 @@ dhdsdio_sdtest_set(dhd_bus_t *bus, uint count)
 	if (dhdsdio_txpkt(bus, SDPCM_TEST_CHANNEL, &pkt, 1, TRUE) != BCME_OK)
 		bus->pktgen_fail++;
 }
-
 
 static void
 dhdsdio_testrcv(dhd_bus_t *bus, void *pkt, uint seq)
@@ -8740,7 +8725,6 @@ dhdsdio_probe_attach(struct dhd_bus *bus, osl_t *osh, void *sdh, void *regsva,
 	}
 #endif /* BCMSPI */
 
-
 	/* Tx needs priority queue, where to determine levels? */
 	/* Should it try to do WLC mapping, or just pass through? */
 	pktq_init(&bus->txq, (PRIOMASK + 1), QLEN);
@@ -9022,7 +9006,6 @@ dhdsdio_release_malloc(dhd_bus_t *bus, osl_t *osh)
 
 }
 
-
 static void
 dhdsdio_release_dongle(dhd_bus_t *bus, osl_t *osh, bool dongle_isolation, bool reset_flag)
 {
@@ -9076,7 +9059,6 @@ dhdsdio_disconnect(void *ptr)
 	mutex_lock(&_dhd_sdio_mutex_lock_);
 #endif /* defined(__linux__) && defined(MULTIPLE_SUPPLICANT) */
 
-
 	if (bus) {
 		ASSERT(bus->dhd);
 		/* Advertise bus cleanup during rmmod */
@@ -9088,7 +9070,6 @@ dhdsdio_disconnect(void *ptr)
 	mutex_unlock(&_dhd_sdio_mutex_lock_);
 	DHD_PRINT(("%s : the lock is released.\n", __FUNCTION__));
 #endif /* __linux__ */
-
 
 	DHD_TRACE(("%s: Disconnected\n", __FUNCTION__));
 }
@@ -9210,7 +9191,6 @@ dhdsdio_resume(void *context)
 	return 0;
 }
 
-
 /* Register/Unregister functions are called by the main DHD entry
  * point (e.g. module insertion) to link with the bus driver, in
  * order to look for or await the device.
@@ -9263,7 +9243,6 @@ dhdsdio_download_code_file(struct dhd_bus *bus, char *pfw_path)
 	int offset_end = bus->ramsize;
 	const struct firmware *fw = NULL;
 	int buf_offset = 0, residual_len = 0;
-
 
 	DHD_PRINT(("%s: download firmware %s\n", __FUNCTION__, pfw_path));
 
@@ -10548,7 +10527,6 @@ _dhdsdio_download_btfw(struct dhd_bus *bus)
 	int	bcm_error = -1;
 	void	*image = NULL;
 	uint8	*mem_blk = NULL, *mem_ptr = NULL, *data_ptr = NULL;
-
 
 	uint32 offset_addr = 0, offset_len = 0, bytes_to_write = 0;
 

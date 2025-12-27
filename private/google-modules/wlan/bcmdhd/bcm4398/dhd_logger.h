@@ -8,7 +8,7 @@
  *
  * The interface is OS independent/common.
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -177,7 +177,6 @@ do { \
 			dhd_log_route_events(pdl, pkt, len); \
 		} \
 	} while (0)
-
 
 /* Log Filter APIs */
 int32

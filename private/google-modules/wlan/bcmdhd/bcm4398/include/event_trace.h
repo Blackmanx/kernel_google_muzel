@@ -1,7 +1,7 @@
 /*
  * Trace log blocks sent over HBUS
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -115,7 +115,6 @@ typedef union {
 	};
 	uint32 t;
 } wl_event_log_id_ver_t;
-
 
 #define ETHER_ADDR_PACK_LOW(addr)  (((addr)->octet[3])<<24 | ((addr)->octet[2])<<16 | \
 	((addr)->octet[1])<<8 | ((addr)->octet[0]))

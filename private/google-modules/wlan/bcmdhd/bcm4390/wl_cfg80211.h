@@ -96,6 +96,8 @@ struct wl_ibss;
 #endif /* WL_TWT_HAL_IF && WL_TWT */
 
 /* Enable by default */
+/* aware dfs chan policy enable it by default */
+#define WL_DYNAMIC_CHAN_POLICY_AWARE_DFS
 #define WL_WTC
 /* WPA3 compatibility mode */
 #define WL_MRSNO_OFFLD
@@ -700,7 +702,6 @@ do {										\
 		}								\
 } while (0)
 
-
 #ifdef WL_SCAN
 #undef WL_SCAN
 #endif
@@ -1128,7 +1129,6 @@ typedef enum wl_iftype {
 	WL_IF_TYPE_STA = 0,
 	WL_IF_TYPE_AP = 1,
 
-
 	WL_IF_TYPE_NAN_NMI = 3,
 	WL_IF_TYPE_NAN = 4,
 	WL_IF_TYPE_P2P_GO = 5,
@@ -1160,7 +1160,6 @@ enum wl_mode {
 	WL_MODE_BSS = 0,
 	WL_MODE_IBSS = 1,
 	WL_MODE_AP = 2,
-
 
 	WL_MODE_NAN = 4,
 	WL_MODE_ART = 5,
@@ -2547,6 +2546,7 @@ enum static_ndev_states {
 	NDEV_STATE_FW_IF_FAILED,
 	NDEV_STATE_FW_IF_DELETED
 };
+
 #define IS_CFG80211_STATIC_IF(cfg, ndev) \
 	((cfg && (cfg->static_ndev == ndev)) ? true : false)
 #define IS_CFG80211_STATIC_IF_ACTIVE(cfg) \
@@ -3248,7 +3248,6 @@ wl_iftype_to_str(int wl_iftype)
 		case (WL_IF_TYPE_AP):
 			return "WL_IF_TYPE_AP";
 
-
 		case (WL_IF_TYPE_NAN_NMI):
 			return "WL_IF_TYPE_NAN_NMI";
 		case (WL_IF_TYPE_NAN):
@@ -3936,13 +3935,13 @@ extern s32 wl_update_prof(struct bcm_cfg80211 *cfg, struct net_device *ndev,
 extern s32 wl_handle_auth_event(struct bcm_cfg80211 *cfg, struct net_device *ndev,
 	const wl_event_msg_t *e, void *data);
 #endif /* WL_CLIENT_SAE */
+
 #ifdef WL_CFGVENDOR_SEND_ALERT_EVENT
 extern int wl_cfg80211_alert(struct net_device *dev);
 #endif /* WL_CFGVENDOR_SEND_ALERT_EVENT */
 extern void
 wl_cfg80211_set_okc_pmkinfo(struct bcm_cfg80211 *cfg, struct net_device *dev,
 	wsec_pmk_t *pmk, bool validate_sec);
-
 
 #ifdef AUTH_ASSOC_STATUS_EXT
 typedef enum auth_assoc_status_ext {
@@ -4100,4 +4099,5 @@ extern s32 wl_cfg80211_set_pm(struct net_device *dev, u32 pm_enable, wl_pm_state
 extern s32 wl_validate_bss_length(uint32 version, uint32 tot_len, uint32 ie_length);
 bool wl_cfg80211_verify_bss(struct bcm_cfg80211 *cfg, struct net_device *ndev,
 		struct cfg80211_bss **bss);
+bool wl_cfg80211_is_dualsta_active(struct bcm_cfg80211 *cfg);
 #endif /* _wl_cfg80211_h_ */

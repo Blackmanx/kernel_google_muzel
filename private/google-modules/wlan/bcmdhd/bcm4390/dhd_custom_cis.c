@@ -46,7 +46,6 @@
 #include <dhd_pcie.h>
 #endif /* DHD_USE_CISINFO_FROM_OTP */
 
-
 #ifdef DHD_USE_CISINFO_FROM_OTP
 typedef struct cis_tuple_addrs {
 	uint chipid;
@@ -684,7 +683,6 @@ naming_info_t bcm4389_naming_table[] = {
 	{ {"usi_es21"}, {"_ES21"}, {""} },
 	{ {"usi_es31"}, {"_ES31"}, {""} },
 };
-
 
 /* select the NVRAM/FW tag naming table */
 naming_info_t *
@@ -2307,7 +2305,6 @@ dhd_check_stored_module_info(char *vid)
 }
 #endif /* USE_DIRECT_VID_TAG */
 #endif /* DHD_USE_CISINFO */
-
 
 #if defined(SUPPORT_MULTIPLE_REVISION)
 static int concate_revision_bcm4358(dhd_bus_t *bus, char *fw_path, char *nv_path)

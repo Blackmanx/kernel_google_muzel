@@ -129,7 +129,6 @@
 #define DHD_IF_ROLE_GENERIC_STA(pub, idx) \
 	(DHD_IF_ROLE_STA(pub, idx) || DHD_IF_ROLE_P2PGC(pub, idx) || DHD_IF_ROLE_WDS(pub, idx))
 
-
 #ifndef DHD_AWDL
 #define DHD_IF_ROLE_MULTI_CLIENT(pub, idx) \
 	(DHD_IF_ROLE_AP(pub, idx) || DHD_IF_ROLE_P2PGO(pub, idx) ||\

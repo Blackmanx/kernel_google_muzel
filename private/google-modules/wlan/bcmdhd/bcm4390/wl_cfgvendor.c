@@ -684,7 +684,6 @@ wl_cfgvendor_send_hotlist_event(struct wiphy *wiphy,
 	return 0;
 }
 
-
 static int
 wl_cfgvendor_gscan_get_capabilities(struct wiphy *wiphy,
 	struct wireless_dev *wdev, const void  *data, int len)
@@ -864,7 +863,6 @@ wl_cfgvendor_initiate_gscan(struct wiphy *wiphy,
 	} else {
 		return -EINVAL;
 	}
-
 
 }
 
@@ -1979,20 +1977,13 @@ wl_cfgvendor_set_channel_policy(struct wiphy *wiphy,
 #ifdef WL_DYNAMIC_CHAN_POLICY_DFS
 					/* convert to fw val */
 					wl_chan_policy |= WL_CHAN_CC_DFS_EXT;
-#else
-					WL_ERR(("DFS policy not supported. clearing\n"));
-					return -EINVAL;
+					WL_ERR(("P2P DFS Policy supported\n"));
 #endif /* WL_DYNAMIC_CHAN_POLICY_DFS */
-				}
-
-				if (channel_policy & DYN_CHAN_POLICY_AWARE_DFS) {
-#ifdef WL_DYNAMIC_CHAN_POLICY_DFS
+#ifdef WL_DYNAMIC_CHAN_POLICY_AWARE_DFS
 					/* convert to fw val */
 					wl_chan_policy |= WL_CHAN_CC_AWARE_DFS_EXT;
-#else
-					WL_ERR(("DFS policy not supported. clearing\n"));
-					return -EINVAL;
-#endif /* WL_DYNAMIC_CHAN_POLICY_DFS */
+					WL_ERR(("Aware DFS Policy supported\n"));
+#endif /* WL_DYNAMIC_CHAN_POLICY_AWARE_DFS */
 				}
 
 				err = wldev_iovar_setint(wdev->netdev,
@@ -2033,7 +2024,6 @@ wl_cfgvendor_latency_mode_config(struct wiphy *wiphy,
 #if defined(WL_AUTO_QOS)
 	dhd_pub_t *dhdp = wl_cfg80211_get_dhdp(wdev->netdev);
 #endif /* WL_AUTO_QOS */
-
 
 	nla_for_each_attr(iter, data, len, rem) {
 		type = nla_type(iter);
@@ -2653,7 +2643,6 @@ wl_cfgvendor_rtt_set_az_config(rtt_mc_az_target_info_t *rtt_target,
 
 	return err;
 }
-
 
 static int
 wl_cfgvendor_rtt_set_mc_config(rtt_mc_az_target_info_t *rtt_target,
@@ -6931,12 +6920,12 @@ wl_cfgvendor_nan_bootstrapping_req_ind_event_data_filler(struct sk_buff *msg,
 {
 	int ret = BCME_OK;
 
-	ret = nla_put_u16(msg, NAN_ATTRIBUTE_SUBSCRIBE_ID, event_data->local_inst_id);
+	ret = nla_put_u16(msg, NAN_ATTRIBUTE_SUBSCRIBE_ID, event_data->requestor_id);
 	if (unlikely(ret)) {
 		WL_ERR(("Failed to put local instance ID, ret=%d\n", ret));
 		goto fail;
 	}
-	ret = nla_put_u32(msg, NAN_ATTRIBUTE_PUBLISH_ID, event_data->requestor_id);
+	ret = nla_put_u32(msg, NAN_ATTRIBUTE_PUBLISH_ID, event_data->local_inst_id);
 	if (unlikely(ret)) {
 		WL_ERR(("Failed to put requestor instance ID, ret=%d\n", ret));
 		goto fail;
@@ -7080,7 +7069,6 @@ wl_cfgvendor_nan_dp_ind_event_data_filler(struct sk_buff *msg,
 			goto fail;
 		}
 	}
-
 
 fail:
 	return ret;
@@ -7896,7 +7884,6 @@ wl_cfgvendor_send_nan_event(struct wiphy *wiphy, struct net_device *dev,
 		break;
 	}
 
-
 	default:
 		goto fail;
 	}
@@ -8229,7 +8216,6 @@ wl_cfgvendor_nan_stop_handler(struct wiphy *wiphy,
 		WL_ERR(("nan vendor args is invalid\n"));
 		goto exit;
 	}
-
 
 	if (nancfg->nan_init_state == false) {
 		WL_INFORM_MEM(("nan is not initialized/nmi doesnt exists\n"));
@@ -9638,6 +9624,7 @@ int wl_update_ml_link_stat(struct bcm_cfg80211 *cfg, struct net_device *inet_nde
 	err = wldev_ioctl_get(bcmcfg_to_prmry_ndev(cfg), WLC_GET_REVINFO, &revinfo,
 			sizeof(revinfo));
 	if (err != BCME_OK) {
+		WL_ERR(("%s: Failed to get revinfo err %d\n", __FUNCTION__, err));
 		goto exit;
 	}
 
@@ -9801,14 +9788,6 @@ int wl_update_ml_link_stat(struct bcm_cfg80211 *cfg, struct net_device *inet_nde
 		}
 	}
 
-	err = wldev_link_get_rssi(inet_ndev, link_idx, &scbval);
-	if (unlikely(err)) {
-		WL_ERR(("get_rssi error (%d)\n", err));
-		goto exit;
-	}
-
-	COMPAT_ASSIGN_VALUE(iface, rssi_mgmt, scbval.val);
-
 	/* Update duty cycle info based on RSDB/VSDB */
 	if (wl_cfg80211_determine_rsdb_scc_mode(cfg, link_idx)) {
 		COMPAT_ASSIGN_VALUE(iface, time_slicing_duty_cycle_percent,
@@ -9825,7 +9804,12 @@ int wl_update_ml_link_stat(struct bcm_cfg80211 *cfg, struct net_device *inet_nde
 		goto exit;
 	}
 
-	COMPAT_ASSIGN_VALUE(iface, num_peers, NUM_PEER);
+	err = wldev_link_get_rssi(inet_ndev, link_idx, &scbval);
+	if (unlikely(err)) {
+		WL_ERR(("get_rssi error (%d)\n", err));
+		goto exit;
+	}
+	COMPAT_ASSIGN_VALUE(iface, rssi_mgmt, scbval.val);
 
 	err = wldev_link_iovar_getbuf(inet_ndev, link_idx, "bss_peer_info",
 		NULL, 0, iovar_buf, WLC_IOCTL_MAXLEN, NULL);
@@ -9835,11 +9819,13 @@ int wl_update_ml_link_stat(struct bcm_cfg80211 *cfg, struct net_device *inet_nde
 			(void)memcpy_s(&iface.peer_info->peer_mac_address, ETH_ALEN,
 				peer_list_info->peer_info->ea.octet, ETH_ALEN);
 		}
-	} else if (err == BCME_UNSUPPORTED) {
-		WL_ERR(("bss_peer_info is unsupported \n"));
-	} else if (err == BCME_NOTASSOCIATED) {
-		WL_ERR(("bss_peer_info IOVAR failed. STA is not associated.\n"));
 	} else {
+		if (err == BCME_UNSUPPORTED) {
+			WL_ERR(("bss_peer_info is unsupported \n"));
+		} else if (err == BCME_NOTASSOCIATED) {
+			WL_ERR(("bss_peer_info IOVAR failed. STA is not associated.\n"));
+		}
+
 		WL_ERR(("error (%d) - size = %zu\n", err, sizeof(bss_peer_list_info_t)));
 		goto exit;
 	}
@@ -9864,8 +9850,6 @@ int wl_update_ml_link_stat(struct bcm_cfg80211 *cfg, struct net_device *inet_nde
 
 		num_rate = p_wifi_rate_stat->length/sizeof(*p_wifi_rate_stat);
 		WL_INFORM_MEM(("num_rate %d\n", num_rate));
-
-		COMPAT_ASSIGN_VALUE(iface, peer_info->num_rate, num_rate);
 	}
 
 	err = wldev_link_iovar_getbuf(inet_ndev, link_idx, "bssload_report", NULL,
@@ -9887,9 +9871,11 @@ int wl_update_ml_link_stat(struct bcm_cfg80211 *cfg, struct net_device *inet_nde
 		goto exit;
 	}
 
+	COMPAT_ASSIGN_VALUE(iface, num_peers, NUM_PEER);
+	COMPAT_ASSIGN_VALUE(iface, peer_info->num_rate, num_rate);
 	COMPAT_MEMCOPY_IFACE(*output, *total_len, wifi_link_stat, iface, wifi_rate_stat_v1);
 
-	if ((err == BCME_OK) && (peer_list_info && peer_list_info->count > 0)) {
+	if (peer_list_info && peer_list_info->count > 0) {
 		for (i = 0; i < num_rate; i++) {
 			p_wifi_rate_stat =
 				(wifi_rate_stat *)(rate_iovar_buf + i*sizeof(wifi_rate_stat));
@@ -9914,15 +9900,8 @@ int wl_update_ml_link_stat(struct bcm_cfg80211 *cfg, struct net_device *inet_nde
 		 * Remove redundant wifi_peer_info[1] size from 'wifi_iface_stat'
 		 * Remove redundant wifi_rate_stat[1] size from 'wifi_peer_info'
 		 */
-		*total_len = *total_len -
-			sizeof(wifi_rate_stat_v1) +
-			(NUM_PEER * num_rate * sizeof(wifi_rate_stat_v1));
-	} else if (err == BCME_NOTASSOCIATED || err == BCME_UNSUPPORTED) {
-		/* Skipping to read the rate stat for not associated case,
-		 * as cca stats are still needed, not returning the err code
-		 */
-		WL_DBG(("not associated. peer_info skipped\n"));
-		err = BCME_OK;
+		*total_len = (*total_len - sizeof(wifi_rate_stat_v1)) +
+		       (NUM_PEER * num_rate * sizeof(wifi_rate_stat_v1));
 	}
 
 exit:
@@ -12216,7 +12195,6 @@ wl_cfgvendor_set_p2p_rand_mac(struct wiphy *wiphy,
 		(void)memcpy_s(wl_to_p2p_bss_macaddr(cfg, P2PAPI_BSSCFG_DEVICE), ETHER_ADDR_LEN,
 				nla_data(data), ETHER_ADDR_LEN);
 		(void)memcpy_s(wdev->address, ETHER_ADDR_LEN, nla_data(data), ETHER_ADDR_LEN);
-
 
 		err = wl_cfgp2p_disable_discovery(cfg);
 		if (unlikely(err < 0)) {

@@ -1,7 +1,7 @@
 /*
  * DHD debugability header file
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -719,7 +719,6 @@ typedef struct dhd_dbg_buf {
 	char *buf;
 	uint len;
 } dhd_dbg_buf_t;
-
 
 #define PTM_FW_TIME_LEN 64u
 #define  ENHANCED_TIMESTAMP_V2_MSG_LEN	(sizeof(ets_msg_t) + sizeof(ets_msg_v2_t))

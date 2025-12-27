@@ -78,7 +78,6 @@ typedef struct {
 #define PCIE_SHARED_IDLE_FLOW_RING		0x80000
 #define PCIE_SHARED_2BYTE_INDICES       0x100000
 
-
 #define PCIE_SHARED_FAST_DELETE_RING	0x00000020      /* Fast Delete Ring */
 #define PCIE_SHARED_EVENT_BUF_POOL_MAX	0x000000c0      /* event buffer pool max bits */
 #define PCIE_SHARED_EVENT_BUF_POOL_MAX_POS     6       /* event buffer pool max bit position */
@@ -171,7 +170,6 @@ typedef struct {
 
 #define PCIE_SHARED_D2H_MAGIC		0xFEDCBA09
 #define PCIE_SHARED_H2D_MAGIC		0x12345678
-
 
 typedef uint16			pcie_hwa_db_index_t;	/* 16 bit HWA index (IPC Rev 7) */
 #define PCIE_HWA_DB_INDEX_SZ	(2u)			/* 2 bytes  sizeof(pcie_hwa_db_index_t) */
@@ -282,7 +280,6 @@ enum d2hring_idx {
 /** D2H DMA Indices array size */
 #define BCMPCIE_D2H_RW_INDEX_ARRAY_SZ(rw_index_sz) \
 	((rw_index_sz) * BCMPCIE_D2H_COMMON_MSGRINGS)
-
 
 /* Backwards compatibility for legacy branches. */
 #if !defined(PHYS_ADDR_N)
@@ -559,7 +556,6 @@ typedef struct {
 #define D2HMB_TRAP_IN_TRAP              D2H_DEV_TRAP_IN_TRAP
 #define D2HMB_EXT_TRAP_DATA             D2H_DEV_EXT_TRAP_DATA
 #define D2H_FWTRAP_MAC_SSSR_RDY		0x00010000u	/* MAC SSSR prepped */
-
 
 /* Size of Extended Trap data Buffer */
 #define BCMPCIE_EXT_TRAP_DATA_MAXLEN  4096

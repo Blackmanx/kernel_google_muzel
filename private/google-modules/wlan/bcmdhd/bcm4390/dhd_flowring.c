@@ -674,6 +674,7 @@ dhd_flowid_find(dhd_pub_t *dhdp, uint8 ifindex, uint8 prio, char *sa, char *da)
 	} else {
 
 		if (ETHER_ISMULTI(da) &&
+
 			TRUE) {
 			ismcast = TRUE;
 			hash = 0;
@@ -685,6 +686,7 @@ dhd_flowid_find(dhd_pub_t *dhdp, uint8 ifindex, uint8 prio, char *sa, char *da)
 
 		while (cur) {
 			if ((ismcast && ETHER_ISMULTI(cur->flow_info.da) &&
+
 				TRUE) ||
 				(!memcmp(cur->flow_info.da, da, ETHER_ADDR_LEN) &&
 				(cur->flow_info.tid == prio))) {
@@ -814,6 +816,7 @@ dhd_flowid_alloc(dhd_pub_t *dhdp, uint8 ifindex, uint8 prio, char *sa, char *da)
 
 		/* For bcast/mcast assign first slot in in interface */
 		hash = (ETHER_ISMULTI(da) &&
+
 			TRUE) ?  0 : DHD_FLOWRING_HASHINDEX(da, prio);
 
 		cur = if_flow_lkup[ifindex].fl_hash[hash];
@@ -1371,7 +1374,6 @@ dhd_flow_rings_flush(dhd_pub_t *dhdp, uint8 ifindex)
 	}
 }
 
-
 /** Delete flow ring(s) for given peer address. */
 void
 dhd_flow_rings_delete_for_peer(dhd_pub_t *dhdp, uint8 ifindex, char *addr)
@@ -1647,7 +1649,6 @@ dhd_active_tx_flowring_bkpq_len(dhd_pub_t *dhd)
 	return active_tx_flowring_qlen;
 }
 
-
 #ifdef IDLE_TX_FLOW_MGMT
 /* resume request */
 int
@@ -1709,7 +1710,6 @@ dhd_bus_check_idle_scan(dhd_bus_t *bus)
 
 	return;
 }
-
 
 /* scan the nodes in active list till it finds a non idle node */
 void

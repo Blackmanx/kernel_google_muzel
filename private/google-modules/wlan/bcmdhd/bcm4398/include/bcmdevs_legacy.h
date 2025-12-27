@@ -1,7 +1,7 @@
 /*
  * Broadcom device-specific manifest constants used by DHD, but deprecated in firmware.
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -120,7 +120,6 @@
 #define BCM43752_D11AX2G_ID	0x449e		/* 43752 802.11ax 2.4G device */
 #define BCM43752_D11AX5G_ID	0x449f		/* 43752 802.11ax 5G device */
 
-
 /* Chip IDs */
 #define	BCM43012_CHIP_ID	0xA804          /* 43012 chipcommon chipid */
 #define	BCM43013_CHIP_ID	0xA805          /* 43013 chipcommon chipid */
@@ -165,7 +164,6 @@
 #define BCM4362_CHIP_ID		0x4362          /* 4362 chipcommon chipid */
 #define BCM43751_CHIP_ID	0xAAE7          /* 43751 chipcommon chipid */
 #define BCM43752_CHIP_ID	0xAAE8          /* 43752 chipcommon chipid */
-
 
 /* Derivative chip IDs */
 #define BCM4345_CHIP(chipid)	(CHIPID(chipid) == BCM4345_CHIP_ID || \

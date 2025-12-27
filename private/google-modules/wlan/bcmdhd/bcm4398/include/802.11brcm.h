@@ -1,7 +1,7 @@
 /*
  * Broadcom proprietary types and constants relating to 802.11
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -131,7 +131,6 @@ typedef struct brcm_prop_ie_s brcm_prop_ie_t;
 typedef struct dpt_brcm_prop_ie_s brcm_prop_ie_t;
 #endif /* NEW_BRCM_PROP_IE */
 #define BRCM_PROP_IE_LEN	6	/* len of fixed part of brcm_prop ie */
-
 
 /**
  * Following is the generic structure for brcm_prop_ie (uses BRCM_PROP_OUI).

@@ -1,7 +1,7 @@
 /*
  * Common OS-independent driver header for rate management.
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -118,7 +118,6 @@ typedef uint32 ratespec_bw_t;
 #define HE_IS_GI_1_6us(gi)	((gi) == WL_RSPEC_HE_2x_LTF_GI_1_6us)
 #define HE_IS_GI_3_2us(gi)	((gi) == WL_RSPEC_HE_4x_LTF_GI_3_2us)
 
-
 /* RSPEC Macros for extracting and using HE-ER and DCM */
 #define RSPEC_HE_DCM(rspec)		(((rspec) & WL_RSPEC_DCM) >> WL_RSPEC_DCM_SHIFT)
 #define RSPEC_HE_ER(rspec)		(((rspec) & WL_RSPEC_ER_MASK) >> WL_RSPEC_ER_SHIFT)
@@ -181,7 +180,6 @@ typedef uint32 ratespec_bw_t;
 #define WL_RSPEC_BW_160MHZ	0x00040000u	/* 4 */
 // unused			0x00050000u	/* 5 */
 #define WL_RSPEC_BW_320MHZ	0x00060000u	/* 6 */
-
 
 /* ======== RSPEC_ENCODING field ======== */
 
@@ -275,7 +273,6 @@ typedef uint32 ratespec_bw_t;
 				 (((nss) << WL_RSPEC_EHT_NSS_SHIFT) & WL_RSPEC_EHT_NSS_MASK) | \
 				 ((mcs) & WL_RSPEC_EHT_MCS_MASK))
 
-
 #define LEGACY_RSPEC_DUP(rate, bw)	(WL_RSPEC_ENCODE_RATE | bw | \
 					((rate) & WL_RSPEC_LEGACY_RATE_MASK))
 /**
@@ -285,7 +282,6 @@ typedef uint32 ratespec_bw_t;
  */
 /* return rate in unit of Kbps */
 #define RSPEC2KBPS(rspec)	wf_rspec_to_rate(rspec)
-
 
 /* return rate in unit of 500Kbps */
 /* works only for legacy rate */

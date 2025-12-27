@@ -1,7 +1,7 @@
 /*
  * Linux cfg80211 Vendor Extension Code
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -6928,6 +6928,9 @@ wl_cfgvendor_nan_stop_handler(struct wiphy *wiphy,
 	}
 exit:
 	mutex_unlock(&cfg->if_sync);
+	if (cmd_data) {
+		MFREE(cfg->osh, cmd_data, sizeof(*cmd_data));
+	}
 	NAN_DBG_EXIT();
 	return ret;
 }

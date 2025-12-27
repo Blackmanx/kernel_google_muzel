@@ -714,7 +714,6 @@ typedef struct dhd_dbg_buf {
 	uint len;
 } dhd_dbg_buf_t;
 
-
 #define PTM_FW_TIME_LEN 64u
 #define  ENHANCED_TIMESTAMP_V2_MSG_LEN	(sizeof(ets_msg_t) + sizeof(ets_msg_v2_t))
 

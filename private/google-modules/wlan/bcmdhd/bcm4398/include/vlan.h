@@ -1,7 +1,7 @@
 /*
  * 802.1Q VLAN protocol definitions
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -77,7 +77,6 @@ struct dot3_mac_llc_snapvlan_header {
 };
 
 #define	ETHERVLAN_HDR_LEN	(ETHER_HDR_LEN + VLAN_TAG_LEN)
-
 
 /* This marks the end of a packed structure section. */
 #include <packed_section_end.h>

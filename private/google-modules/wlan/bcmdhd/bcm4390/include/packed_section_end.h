@@ -35,7 +35,6 @@
  * <<Broadcom-WL-IPTag/Dual:>>
  */
 
-
 /* Error check - BWL_PACKED_SECTION is defined in packed_section_start.h
  * and undefined in packed_section_end.h. If it is NOT defined at this
  * point, then there is a missing include of packed_section_start.h.

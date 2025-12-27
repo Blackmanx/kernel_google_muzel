@@ -49,7 +49,6 @@ static int roam_band = WLC_BAND_AUTO;
 static roam_channel_cache roam_cache[MAX_ROAM_CACHE];
 static uint band_bw;
 
-
 static void add_roamcache_channel(wl_roam_channel_list_t *channels, chanspec_t ch)
 {
 	int i;

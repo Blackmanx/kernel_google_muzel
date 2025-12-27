@@ -140,7 +140,6 @@ typedef enum wpa_cipher_suites wpa_cipher_suites_t;
 				 (cipher) == WPA_CIPHER_WEP_MMH)
 #endif /* BCMCCX */
 
-
 #define IS_WPA_CIPHER(cipher)	((cipher) == WPA_CIPHER_NONE || \
 				 (cipher) == WPA_CIPHER_WEP_40 || \
 				 (cipher) == WPA_CIPHER_WEP_104 || \

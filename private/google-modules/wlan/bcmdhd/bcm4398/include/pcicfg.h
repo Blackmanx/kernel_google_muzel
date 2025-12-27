@@ -1,7 +1,7 @@
 /*
  * pcicfg.h: PCI configuration constants and structures.
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -41,7 +41,6 @@
 #ifndef PCI_INVALID_DEVICEID
 #define PCI_INVALID_DEVICEID	0xffff
 #endif
-
 
 /* Convert between bus-slot-function-register and config addresses */
 
@@ -386,7 +385,6 @@ typedef struct _ppb_config_regs {
 
 /* Everything below is BRCM HND proprietary */
 
-
 /* Brcm PCI configuration registers */
 #define cap_list	rsvd_a[0]
 #define bar0_window	dev_dep[0x80 - 0x40]
@@ -625,7 +623,6 @@ typedef struct _pcie_enhanced_caphdr {
 
 #define PCI_TPOWER_SCALE_MASK 0x3
 #define PCI_TPOWER_SCALE_SHIFT 3 /* 0:1 is scale and 2 is rsvd */
-
 
 #define	PCI_BAR0_SHADOW_OFFSET	(2 * 1024)	/* bar0 + 2K accesses sprom shadow (in pci core) */
 #define	PCI_BAR0_SPROM_OFFSET	(4 * 1024)	/* bar0 + 4K accesses external sprom */

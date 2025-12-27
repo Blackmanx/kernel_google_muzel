@@ -170,7 +170,6 @@ uint32 g_rxlfrag_non_rxfrag_queued = 0;
 
 /** accessor functions required when ROMming this file, forced into RAM */
 
-
 pktpool_t *
 BCMPOSTTRAPRAMFN(get_pktpools_registry)(int id)
 {
@@ -750,7 +749,6 @@ BCMPOSTTRAPFASTPATH(pktpool_deq)(pktpool_t *pktp)
 	PKTSETQCALLER(p, pktp, CALL_SITE);
 	return p;
 }
-
 
 static void
 BCMPOSTTRAPFASTPATH(pktpool_enq)(pktpool_t *pktp, void *p)
@@ -1478,7 +1476,6 @@ BCMFASTPATH(pktpool_nfree)(pktpool_t *pktp, void *head, void *tail, uint count)
 
 	BCM_REFERENCE(count_orig);
 
-
 	if (count > 1) {
 		pktp->avail += (count - 1);
 		if (BCMRXDATAPOOL_ENAB() || URB_ENAB()) {
@@ -1502,7 +1499,6 @@ BCMFASTPATH(pktpool_nfree)(pktpool_t *pktp, void *head, void *tail, uint count)
 	}
 	pktpool_free(pktp, head);
 }
-
 
 /**
  * @brief API to be called before freeing a packet belongning to pktpool. This callback needs the
@@ -1533,7 +1529,6 @@ BCMPOSTTRAPFASTPATH(pktpool_free_cb)(pktpool_t *pktp, void *p, uint num_pkts)
 	}
 #endif /* URB */
 }
-
 
 void
 BCMPOSTTRAPFASTPATH(pktpool_free)(pktpool_t *pktp, void *p)

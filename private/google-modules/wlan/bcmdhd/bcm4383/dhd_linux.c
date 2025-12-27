@@ -117,7 +117,7 @@
 #include <linux/ip.h>
 #include <net/icmp.h>
 #endif /* DHD_TIMESYNC */
-
+#include <net/ieee80211_radiotap.h>
 #include <dhd_linux_sock_qos.h>
 
 #ifdef CONFIG_COMPAT
@@ -350,6 +350,11 @@ static struct notifier_block dhd_inetaddr_notifier = {
  */
 static bool dhd_inetaddr_notifier_registered = FALSE;
 #endif /* ARP_OFFLOAD_SUPPORT */
+#ifdef WL_STATIC_IF
+static bool dhd_is_static_ndev_active(dhd_pub_t *dhdp);
+static dhd_if_t *dhd_get_static_ifp_by_ndev(dhd_pub_t *dhdp, struct net_device *ndev);
+#endif /* WL_STATIC_IF */
+static void dhd_cleanup_ifp(dhd_pub_t *dhdp, dhd_if_t *ifp);
 
 #if defined(CONFIG_IPV6) && defined(IPV6_NDO_SUPPORT)
 int dhd_inet6addr_notifier_call(struct notifier_block *this,
@@ -453,6 +458,7 @@ static void dhd_debug_uart_exec_rd(void *handle, void *event_info, u8 event);
 static void dhd_debug_uart_exec(dhd_pub_t *dhdp, char *cmd);
 #endif	/* DHD_DEBUG_UART */
 
+void dhd_dump_iflist(dhd_pub_t *dhdp, bool print_ifname);
 static int dhd_reboot_callback(struct notifier_block *this, unsigned long code, void *unused);
 static struct notifier_block dhd_reboot_notifier = {
 	.notifier_call = dhd_reboot_callback,
@@ -492,6 +498,10 @@ struct netlink_kernel_cfg dhd_netlink_cfg = {
 };
 #endif /* (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 6, 0)) */
 
+
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 15, 0))
+static int dhd_ioctl_entry(struct net_device *net, struct ifreq *ifr, int cmd);
+#endif /* LINUX_VERSION_CODE < KERNEL_VERSION(5, 15, 0) */
 
 #if defined(BT_OVER_SDIO)
 /* Flag to indicate if driver is initialized */
@@ -567,6 +577,8 @@ static dhd_if_t *dhd_get_ifp_by_ndev(dhd_pub_t *dhdp, struct net_device *ndev);
 static void dhd_update_rx_pkt_chainable_state(dhd_pub_t *dhdp, uint32 idx);
 #endif /* DHD_WET || DHD_MCAST_REGEN || DHD_L2_FILTER */
 
+static int dhd_siocdevprivate(struct net_device *net, struct ifreq *ifr,
+	void __user *data, int cmd);
 /* Error bits */
 module_param(dhd_msg_level, int, 0);
 
@@ -3464,9 +3476,6 @@ dhd_set_mac_address(struct net_device *dev, void *addr)
 	struct sockaddr *sa = (struct sockaddr *)addr;
 	int ifidx;
 	dhd_if_t *dhdif;
-#ifdef WL_STATIC_IF
-	struct bcm_cfg80211 *cfg = wl_get_cfg(dev);
-#endif /* WL_STATIC_IF */
 	dhd_pub_t *dhdp = &dhd->pub;
 	bool addr_chngd = TRUE;
 
@@ -3477,8 +3486,16 @@ dhd_set_mac_address(struct net_device *dev, void *addr)
 
 	dhdif = dhd_get_ifp_by_ndev(dhdp, dev);
 	if (!dhdif) {
-		return -ENODEV;
+#ifdef WL_STATIC_IF
+		DHD_PRINT(("Checking for static if for ndev %s\n", dev->name));
+		dhdif = dhd_get_static_ifp_by_ndev(dhdp, dev);
+#endif /* WL_STATIC_IF */
+		if (!dhdif) {
+			DHD_ERROR(("No DHD If for %s\n", dev->name));
+			return -ENODEV;
+		}
 	}
+
 	ifidx = dhdif->idx;
 	dhd_net_if_lock_local(dhd);
 	if (memcmp(dhdif->mac_addr, sa->sa_data, ETHER_ADDR_LEN) == 0) {
@@ -3494,11 +3511,12 @@ dhd_set_mac_address(struct net_device *dev, void *addr)
 		/* Supplicant and certain user layer applications expect macaddress to be
 		 * set once the context returns. so set it from the same context
 		 */
-		DHD_PRINT(("%s: iftype = %d macaddr = "MACDBG"\n",
-			__FUNCTION__, dev->ieee80211_ptr->iftype, MAC2STRDBG(&dhdif->mac_addr)));
+		DHD_PRINT(("%s: iftype = %d ndev:%s macaddr = "MACDBG"\n",
+			__FUNCTION__, dev->ieee80211_ptr->iftype, dev->name,
+			MAC2STRDBG(&dhdif->mac_addr)));
 #ifdef WL_STATIC_IF
-		if (IS_CFG80211_STATIC_IF(cfg, dev) && !(dev->flags & IFF_UP)) {
-			/* In softap case, the macaddress will be applied before interface up
+		if (dhd_get_static_ifp_by_ndev(dhdp, dev) && !(dev->flags & IFF_UP)) {
+			/* In static if case, the macaddress will be applied before interface up
 			 * and hence curether_addr can't be done at this stage (no fw iface
 			 * available). Store the address and return. macaddr will be applied
 			 * from interface create context.
@@ -4555,8 +4573,19 @@ dhd_get_stats(struct net_device *net)
 
 	ifp = dhd_get_ifp_by_ndev(&dhd->pub, net);
 	if (!ifp) {
-		/* return empty stats */
-		DHD_ERROR(("%s: BAD_IF\n", __FUNCTION__));
+#ifdef WL_STATIC_IF
+		ifp = dhd_get_static_ifp_by_ndev(&dhd->pub, net);
+		if (ifp) {
+			/* return empty stats */
+			DHD_INFO(("%s: IF not initialised (%s) IFF_UP:%d\n", __FUNCTION__,
+				net->name, (net->flags & IFF_UP) ? TRUE : FALSE));
+		} else
+#endif /* WL_STATIC_IF */
+		{
+			/* return empty stats */
+			DHD_ERROR(("%s: BAD_IF (%s) IFF_UP:%d\n", __FUNCTION__, net->name,
+				(net->flags & IFF_UP) ? TRUE : FALSE));
+		}
 		goto error;
 	}
 
@@ -4779,8 +4808,12 @@ void dhd_runtime_pm_disable(dhd_pub_t *dhdp)
 
 void dhd_runtime_pm_enable(dhd_pub_t *dhdp)
 {
-	/* Enable Runtime PM except for MFG Mode */
-	if (!(dhdp->op_mode & DHD_FLAG_MFG_MODE)) {
+	/* RPM should be diabled for 1. MFG Mode 2. when ART is active */
+	if ((!(dhdp->op_mode & DHD_FLAG_MFG_MODE)) &&
+#ifdef DHD_ART
+		(!(dhdp->usr_art_enabled)) &&
+#endif /* DHD_ART */
+		TRUE) {
 		if (dhd_get_idletime(dhdp)) {
 			dhd_set_rpm_state(dhdp, TRUE);
 		}
@@ -5310,6 +5343,10 @@ dhd_80211_mon_pkt(dhd_pub_t *dhdp, host_rxbuf_cmpl_t *msg, void *pkt, int ifidx)
 	wpa_sup = !!(hdr.flags & WL_AML_F_EAPOL);
 	type = wpa_sup ? FRAME_TYPE_ETHERNET_II : FRAME_TYPE_80211_MGMT;
 
+#ifdef DHD_ART
+	dhdp->art_counters.rx_dbg_monitor_packets++;
+#endif /* DHD_ART */
+
 	if (hdr.flags & WL_AML_F_DIRECTION) {
 		bool ack = !!(hdr.flags & WL_AML_F_ACKED);
 #ifdef DHD_PKT_LOGGING
@@ -5361,13 +5398,6 @@ typedef struct dhd_mon_dev_priv {
 #define DHD_MON_DEV_INFO(dev)		(((dhd_mon_dev_priv_t *)DEV_PRIV(dev))->dhd)
 #define DHD_MON_DEV_STATS(dev)		(((dhd_mon_dev_priv_t *)DEV_PRIV(dev))->stats)
 
-static netdev_tx_t
-dhd_monitor_start(struct sk_buff *skb, struct net_device *dev)
-{
-	PKTFREE(NULL, skb, FALSE);
-	return NETDEV_TX_OK;
-}
-
 #ifdef WL_CFG80211_MONITOR
 static int
 dhd_set_monitor_ioctl(dhd_pub_t *dhdp, int ifidx, bool val)
@@ -5376,45 +5406,160 @@ dhd_set_monitor_ioctl(dhd_pub_t *dhdp, int ifidx, bool val)
 	int ret = 0;
 	uint monitor = (uint)val;
 
-	DHD_TRACE(("%s: val %d\n", __FUNCTION__, val));
-
+	DHD_PRINT(("%s: val %d ifidx: %d\n", __FUNCTION__, val, ifidx));
 	ret = dhd_wl_ioctl_cmd(dhdp, WLC_SET_MONITOR, &monitor,
-			sizeof(monitor), TRUE, 0);
+			sizeof(monitor), TRUE, ifidx);
 	if (ret != 0) {
 		DHD_ERROR(("%s Failed to set monitor mode, err %d\n",
 			__FUNCTION__, ret));
 	} else {
-		dhd_net_if_lock_local(dhd);
+		DHD_PRINT(("%s monitor mode %s\n",
+			__FUNCTION__, monitor ? "enabled" : "disabled"));
 		dhd->monitor_type[ifidx] = monitor;
-		dhd_net_if_unlock_local(dhd);
+		/* FW will send the packet on 0 interface. so set for 0 interface too */
+		dhd->monitor_type[0] = monitor;
 	}
 
 	return ret;
 }
 
+#define CMD_TX_ACTIVE 0x1
+int
+dhd_set_art_tx_active(dhd_pub_t *dhd, u8 ifidx, bool enable)
+{
+	int ret = BCME_OK;
+	bcm_xtlv_t *pxtlv = NULL;
+	uint8 mybuf[WLC_IOCTL_SMLEN];
+	uint16 mybuf_len = sizeof(mybuf);
+	pxtlv = (bcm_xtlv_t *)mybuf;
+
+	pxtlv->len = sizeof(u32);
+	pxtlv->data[0] = 0x1;
+
+	ret = bcm_pack_xtlv_entry((uint8 **)&pxtlv, &mybuf_len, CMD_TX_ACTIVE, sizeof(enable),
+			(const u8 *)&enable, BCM_XTLV_OPTION_ALIGN32);
+	if (ret != BCME_OK) {
+		ret = -EINVAL;
+		DHD_ERROR(("%s failed to pack tx enable, err: %s\n",
+				__FUNCTION__, bcmerrorstr(ret)));
+		return ret;
+	}
+
+	ret = dhd_iovar(dhd, ifidx, "art", (char *)&mybuf, sizeof(mybuf), NULL, 0, TRUE);
+	if (ret < 0) {
+		DHD_ERROR(("%s ART tx_active (%d) set failed, err: %s\n",
+				__FUNCTION__, enable, bcmerrorstr(ret)));
+	} else {
+		DHD_ERROR(("%s ART tx_active (%d) set successed\n", __FUNCTION__, enable));
+	}
+
+	return ret;
+}
+
+#define DEF_MONITOR_CHSPEC htod16(0xe09b)
+
 static int
 dhd_monitor_open(struct net_device *net)
 {
 	int ret = 0;
+#ifdef DHD_ART
+	dhd_info_t *dhd = DHD_DEV_INFO(net);
+#else
 	dhd_info_t *dhd = DHD_MON_DEV_INFO(net);
+#endif /* DHD_ART */
+	dhd_pub_t *dhdp = &dhd->pub;
+	u8 ifidx = 0;
+#ifdef DHD_ART
+	struct net_device *primary_ndev = dhd_linux_get_primary_netdev(dhdp);
+	struct bcm_cfg80211 *cfg = wl_get_cfg(primary_ndev);
+	struct wireless_dev *wdev = NULL;
+#endif /* DHD_ART */
 
 	if (!dhd) {
 		DHD_ERROR(("%s: dhd info not available \n", __FUNCTION__));
 		return BCME_ERROR;
 	}
 
-	if (!dhd->pub.monitor_enable) {
-		DHD_ERROR(("%s: Monitor mode is not enabled in FW cap\n",
-			__FUNCTION__));
-		return BCME_ERROR;
+	if (!dhd->monitor_chspec) {
+		dhd->monitor_chspec = DEF_MONITOR_CHSPEC;
 	}
 
-	ret = dhd_set_monitor_ioctl(&dhd->pub, 0, TRUE);
+	DHD_PRINT(("DHD monitor open. op_mode:%d\n", dhdp->op_mode));
+	if (dhdp->op_mode & DHD_FLAG_MONITOR_MODE) {
+		DHD_ERROR(("dhd_monitor_open: monitor mode\n"));
+		if (!dhd->pub.monitor_enable) {
+			DHD_ERROR(("%s: Monitor mode is not enabled in FW cap\n",
+				__FUNCTION__));
+			return BCME_ERROR;
+		}
+	}
+#ifdef DHD_ART
+	else {
+		u8 random_mac_addr[ETH_ALEN];
+		DHD_PRINT(("dhd_monitor_open: ART mode\n"));
+		RANDOM_BYTES(random_mac_addr, ETHER_ADDR_LEN);
+		ETHER_SET_UNICAST(random_mac_addr);
+		ETHER_SET_LOCALADDR(random_mac_addr);
+
+		wdev = wl_cfg80211_add_if(cfg, primary_ndev,
+			WL_IF_TYPE_ART, net->name, random_mac_addr);
+		if (!wdev) {
+			ret = -ENODEV;
+			goto exit;
+		}
+
+		ifidx = dhd_net2idx(dhd, net);
+		if ((ifidx == DHD_BAD_IF) || (ifidx >= DHD_MAX_IFS)) {
+			DHD_ERROR(("wrong ifidx:%d net_ptr:%p\n", ifidx, net));
+			ret = -ENODEV;
+			goto exit;
+		}
+
+		ret = dhd_iovar(dhdp, ifidx, "chanspec", (char *)&dhd->monitor_chspec,
+				sizeof(s32), NULL, 0, TRUE);
+		if (ret < 0) {
+			DHD_ERROR(("%s: Set chanspec %s. ifidx:%d ret:%d\n",
+			__FUNCTION__, (ret ? "failed" : "succeeded"), ifidx, ret));
+			goto exit;
+		}
+
+#ifdef WL_CFG80211
+		ret = wl_android_art_apply_config(net);
+		if (ret < 0) {
+			goto exit;
+		}
+#endif /* WL_CFG80211 */
+
+		ret = dhd_set_art_tx_active(dhdp, ifidx, TRUE);
+		if (ret < 0) {
+			goto exit;
+		}
+
+		dhd_update_interface_link_status(dhdp, ifidx, TRUE);
+		/*  Allow transmit calls */
+		netif_start_queue(net);
+
+		/* TODO_ART: Apply iovar on newly created ndev tx rate */
+	}
+#endif /* DHD_ART */
+	ret = dhd_set_monitor_ioctl(dhdp, ifidx, TRUE);
+#ifdef DHD_ART
+exit:
 	if (ret) {
-		DHD_ERROR(("%s: Set monitor mode IOCTL failed.\n", __FUNCTION__));
-		return ret;
+		if (wdev) {
+			dhd_set_del_in_progress(cfg->pub, wdev->netdev);
+			wl_cfg80211_static_if_close(wdev->netdev);
+		}
+	} else {
+		/* disable RPM since ART is enabled */
+		DHD_DISABLE_RUNTIME_PM(dhdp);
+		DHD_PRINT(("%s : disabled RPM\n", __FUNCTION__));
+		dhdp->usr_art_enabled = TRUE;
+		DHD_ART_WAKE_LOCK(dhdp);
 	}
-
+#endif /* DHD_ART */
+	DHD_ERROR(("%s: operation %s. ifidx:%d\n",
+		__FUNCTION__, (ret ? "failed" : "succeeded"), ifidx));
 	return ret;
 }
 
@@ -5422,8 +5567,19 @@ static int
 dhd_monitor_stop(struct net_device *net)
 {
 	int ret = 0;
+#ifdef DHD_ART
+	dhd_info_t *dhd = DHD_DEV_INFO(net);
+#else
 	dhd_info_t *dhd = DHD_MON_DEV_INFO(net);
+#endif /* DHD_ART */
+#ifdef DHD_ART
+	dhd_if_t *ifp = NULL;
+	struct net_device *primary_ndev = dhd_linux_get_primary_netdev(&dhd->pub);
+	struct bcm_cfg80211 *cfg = wl_get_cfg(primary_ndev);
+#endif /* DHD_ART */
+	u8 ifidx = 0;
 
+	DHD_PRINT(("%s: Enter \n", __FUNCTION__));
 	if (!dhd) {
 		DHD_ERROR(("%s: dhd info not available \n", __FUNCTION__));
 		return BCME_ERROR;
@@ -5435,12 +5591,40 @@ dhd_monitor_stop(struct net_device *net)
 		return BCME_ERROR;
 	}
 
-	ret = dhd_set_monitor_ioctl(&dhd->pub, 0, FALSE);
+	ifidx = dhd_net2idx(dhd, net);
+	if ((ifidx == DHD_BAD_IF) || (ifidx >= DHD_MAX_IFS)) {
+		ret = -ENODEV;
+		goto exit;
+	}
+	ret = dhd_set_monitor_ioctl(&dhd->pub, ifidx, FALSE);
 	if (ret) {
 		DHD_ERROR(("%s: Set monitor mode IOCTL failed.\n", __FUNCTION__));
-		return ret;
 	}
 
+#ifdef DHD_ART
+	dhd_update_interface_link_status(&dhd->pub, ifidx, FALSE);
+
+	ifp = dhd_get_static_ifp_by_ndev(&dhd->pub, net);
+	if (!ifp) {
+		DHD_TRACE(("non-static interface (%s)..do nothing \n", net->name));
+		return BCME_OK;
+	}
+
+	if (ifp->idx == DHD_INVALID_IFIDX) {
+		DHD_PRINT(("interface not initialised\n"));
+	} else {
+		dhd_set_del_in_progress(cfg->pub, net);
+		ret = wl_cfg80211_static_if_close(net);
+	}
+	dhd->pub.usr_art_enabled = FALSE;
+	/* enable RPM */
+	DHD_ENABLE_RUNTIME_PM(&dhd->pub);
+	DHD_PRINT(("%s : enable RPM\n", __FUNCTION__));
+	DHD_ART_WAKE_UNLOCK(&dhd->pub);
+	/* clear filter bssid after use */
+	bzero(&cfg->art_bssid, ETH_ALEN);
+#endif /* DHD_ART */
+exit:
 	return ret;
 }
 #endif /* WL_CFG80211_MONITOR */
@@ -5679,34 +5863,134 @@ dhd_monitor_ioctl(struct net_device *dev, struct ifreq *ifr, int cmd)
 	return 0;
 }
 
-static struct net_device_stats*
+struct net_device_stats*
 dhd_monitor_get_stats(struct net_device *dev)
 {
 	return &DHD_MON_DEV_STATS(dev);
 }
 
+#ifdef DHD_ART
+netdev_tx_t
+dhd_monitor_start_xmit(struct sk_buff *skb, struct net_device *ndev)
+{
+	struct ieee80211_radiotap_header *rtap_hdr;
+	int ret = 0;
+	int rtap_len;
+
+	dhd_info_t *dhdinfo = DHD_MON_DEV_INFO(ndev);
+
+	if (dhdinfo->monitor_dev == NULL) {
+		DHD_ERROR(("%s monitor_dev is null\n", __FUNCTION__));
+		goto fail;
+	}
+
+	if (unlikely(skb->len < sizeof(struct ieee80211_radiotap_header))) {
+		DHD_ERROR(("%s skblen is less than radiotap header\n", __FUNCTION__));
+		goto fail;
+	}
+	rtap_hdr = (struct ieee80211_radiotap_header *)skb->data;
+	if (unlikely(rtap_hdr->it_version)) {
+		DHD_ERROR(("%s rtap_hdr->it_version: %d\n", __FUNCTION__, rtap_hdr->it_version));
+		goto fail;
+	}
+	rtap_len = ieee80211_get_radiotap_len(skb->data);
+	if (unlikely(skb->len < rtap_len)) {
+		DHD_ERROR(("%s skblen less than rtap_len\n", __FUNCTION__));
+		goto fail;
+	}
+
+	/* clear the skb control buffer */
+	bzero(skb->cb, sizeof(skb->cb));
+	PKTSETPRIO(skb, 0);
+
+	/* Skip the ratio tap header */
+	skb_pull(skb, rtap_len);
+	PKTSETPRIO(skb, 0);
+	ret = dhd_start_xmit(skb, dhdinfo->monitor_dev);
+
+	return ret;
+fail:
+	dev_kfree_skb(skb);
+	return 0;
+}
+#else
+netdev_tx_t
+dhd_monitor_start_xmit_dummy(struct sk_buff *skb, struct net_device *dev)
+{
+	PKTFREE(NULL, skb, FALSE);
+	return NETDEV_TX_OK;
+}
+#endif /* DHD_ART */
+
 static const struct net_device_ops netdev_monitor_ops = {
-	.ndo_start_xmit = dhd_monitor_start,
+#ifdef DHD_ART
+	.ndo_start_xmit = dhd_monitor_start_xmit,
+	.ndo_get_stats = dhd_get_stats,
+#else
 	.ndo_get_stats = dhd_monitor_get_stats,
+	.ndo_start_xmit = dhd_monitor_start_xmit_dummy,
+#endif /* DHD_ART */
 #ifdef WL_CFG80211_MONITOR
 	.ndo_open = dhd_monitor_open,
 	.ndo_stop = dhd_monitor_stop,
 #endif /* WL_CFG80211_MONITOR */
-	.ndo_do_ioctl = dhd_monitor_ioctl
+#ifdef DHD_ART
+#ifdef DHD_PCIE_NATIVE_RUNTIMEPM
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 15, 0))
+	.ndo_do_ioctl = dhd_ioctl_entry_wrapper,
+#else
+	.ndo_siocdevprivate = dhd_siocdevprivate_wrapper,
+#endif /* LINUX_VERSION_CODE < KERNEL_VERSION(5, 15, 0) */
+#else
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 15, 0))
+	.ndo_do_ioctl = dhd_ioctl_entry,
+#else
+	.ndo_siocdevprivate = dhd_siocdevprivate,
+#endif /* LINUX_VERSION_CODE < KERNEL_VERSION(5, 15, 0) */
+#endif /* DHD_PCIE_NATIVE_RUNTIMEPM */
+#endif /* DHD_ART */
 };
+
+chanspec_t
+dhd_get_monitor_chspec(dhd_pub_t *dhdp)
+{
+	struct dhd_info *dhd = dhdp->info;
+	return dhd->monitor_chspec;
+}
+
+void
+dhd_set_monitor_chspec(dhd_pub_t *dhdp, chanspec_t chspec)
+{
+	struct dhd_info *dhd = dhdp->info;
+
+	dhd->monitor_chspec = chspec;
+}
+
+struct net_device *
+dhd_get_monitor_ndev(dhd_pub_t *dhd_pub)
+{
+	struct dhd_info *dhd = dhd_pub->info;
+
+	return dhd->monitor_dev;
+}
 
 static void
 dhd_add_monitor_if(dhd_info_t *dhd)
 {
-	struct net_device *dev;
-	char *devname;
-#ifdef HOST_RADIOTAP_CONV
-	dhd_pub_t *dhdp = (dhd_pub_t *)&dhd->pub;
-#endif /* HOST_RADIOTAP_CONV */
+	struct net_device *dev = NULL;
 	uint32 scan_suppress = FALSE;
 	int ret = BCME_OK;
 	dhd_mon_dev_priv_t *dev_priv;
+	char *devname;
+	dhd_pub_t *dhdp = (dhd_pub_t *)&dhd->pub;
+#ifdef DHD_ART
+	struct ether_addr ea_addr;
+	struct wireless_dev *wdev;
+	struct net_device *primary_ndev = dhd_linux_get_primary_netdev(dhdp);
+	struct bcm_cfg80211 *cfg = wl_get_cfg(primary_ndev);
+#endif /* DHD_ART */
 
+	DHD_ERROR(("%s: Enter \n", __FUNCTION__));
 	BCM_REFERENCE(dev_priv);
 	if (!dhd) {
 		DHD_ERROR(("%s: dhd info not available\n", __FUNCTION__));
@@ -5718,14 +6002,20 @@ dhd_add_monitor_if(dhd_info_t *dhd)
 		return;
 	}
 
+	devname = "radiotap";
+
+#ifdef DHD_ART
+	RANDOM_BYTES(ea_addr.octet, ETHER_ADDR_LEN);
+	ETHER_SET_UNICAST(ea_addr.octet);
+	ETHER_SET_LOCALADDR(ea_addr.octet);
+	dev = dhd_allocate_static_if(dhdp, devname, ea_addr.octet, NULL, FALSE);
+#else
 	dev = alloc_etherdev(DHD_MON_DEV_PRIV_SIZE);
+#endif /* DHD_ART */
 	if (!dev) {
 		DHD_ERROR(("%s: alloc wlif failed\n", __FUNCTION__));
 		return;
 	}
-
-	devname = "radiotap";
-
 	snprintf(dev->name, sizeof(dev->name), "%s%u", devname, dhd->unit);
 
 #ifndef ARPHRD_IEEE80211_PRISM  /* From Linux 2.4.18 */
@@ -5739,6 +6029,20 @@ dhd_add_monitor_if(dhd_info_t *dhd)
 	dev->type = ARPHRD_IEEE80211_RADIOTAP;
 
 	dev->netdev_ops = &netdev_monitor_ops;
+
+#ifdef DHD_ART
+	wdev = (struct wireless_dev *)MALLOCZ(dhdp->osh, sizeof(*wdev));
+	if (unlikely(!wdev)) {
+		DHD_ERROR(("Failed to allocate wdev for static_if\n"));
+		ret = -ENOMEM;
+		goto exit;
+	}
+	wdev->wiphy = cfg->wdev->wiphy;
+	wdev->iftype = NL80211_IFTYPE_MONITOR;
+	dev->ieee80211_ptr = wdev;
+	SET_NETDEV_DEV(dev, wiphy_dev(wdev->wiphy));
+	wdev->netdev = dev;
+#endif /* DHD_ART */
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 11, 9))
 	/* as priv_destructor calls free_netdev, no need to set need_free_netdev */
@@ -5756,15 +6060,23 @@ dhd_add_monitor_if(dhd_info_t *dhd)
 	 * cfg80211_register_netdevice version. Otherwise will hit a kernel panic
 	 * since the wdev pointer is null.
 	 */
+#if defined(DHD_ART)
+	if (dhd_register_static_if(dhdp, dev, FALSE) != BCME_OK) {
+		DHD_ERROR(("%s ndev registration failed!\n", __FUNCTION__));
+		ret = -ENODEV;
+		goto exit;
+	}
+#else
 	ret = register_netdevice(dev);
 	if (ret) {
 		DHD_ERROR(("%s, register_netdev failed for %s\n",
 			__FUNCTION__, dev->name));
 		free_netdev(dev);
-		return;
+		goto exit;
 	}
+#endif /* DHD_ART */
 
-	if (FW_SUPPORTED((&dhd->pub), monitor)) {
+	if (dhdp->op_mode & DHD_FLAG_MONITOR_MODE) {
 #ifdef DHD_PCIE_RUNTIMEPM
 		/* Disable RuntimePM in monitor mode */
 		DHD_STOP_RPM_TIMER(&dhd->pub);
@@ -5785,11 +6097,21 @@ dhd_add_monitor_if(dhd_info_t *dhd)
 	bcmwifi_set_corerev_minor(dhd->monitor_info, dhdpcie_get_corerev_minor(dhdp));
 #endif /* HOST_RADIOTAP_CONV */
 	dhd->monitor_dev = dev;
-#ifdef WL_CFG80211_MONITOR
+#if defined(WL_CFG80211_MONITOR) && !defined(DHD_ART)
 	dev_priv = DHD_MON_DEV_PRIV(dev);
 	dev_priv->dhd = dhd;
 	memset(&dev_priv->stats, 0, sizeof(dev_priv->stats));
-#endif /* WL_CFG80211_MONITOR */
+#endif /* WL_CFG80211_MONITOR && !DHD_ART */
+exit:
+
+	if (ret) {
+#ifdef DHD_ART
+		if (dev) {
+			dhd_remove_static_if(dhdp, dev, TRUE);
+		}
+#endif /* DHD_ART */
+		DHD_ERROR(("%s: failed. Exit\n", __FUNCTION__));
+	}
 }
 
 static void
@@ -5799,6 +6121,7 @@ dhd_del_monitor_if(dhd_info_t *dhd)
 	uint32 scan_suppress = FALSE;
 	dhd_mon_dev_priv_t *dev_priv;
 
+	DHD_PRINT(("%s: Enter\n", __FUNCTION__));
 	BCM_REFERENCE(dev_priv);
 	if (!dhd) {
 		DHD_ERROR(("%s: dhd info not available\n", __FUNCTION__));
@@ -5809,11 +6132,18 @@ dhd_del_monitor_if(dhd_info_t *dhd)
 		DHD_ERROR(("%s: monitor i/f doesn't exist\n", __FUNCTION__));
 		return;
 	}
-#ifdef WL_CFG80211_MONITOR
+#if defined(WL_CFG80211_MONITOR)
+	if (dhd->monitor_dev->flags & IFF_UP) {
+		DHD_ERROR(("%s: monitor i/f UP. stopping ops\n", __FUNCTION__));
+		dhd_monitor_stop(dhd->monitor_dev);
+	}
+
+#if !defined(DHD_ART)
 	dev_priv = DHD_MON_DEV_PRIV(dhd->monitor_dev);
 	dev_priv->dhd = (dhd_info_t *)NULL;
 	memset(&dev_priv->stats, 0, sizeof(dev_priv->stats));
 	memset(dhd->monitor_type, 0, DHD_MAX_IFS);
+#endif /* !DHD_ART */
 #endif /* WL_CFG80211_MONITOR */
 
 	if (FW_SUPPORTED((&dhd->pub), monitor)) {
@@ -5831,23 +6161,26 @@ dhd_del_monitor_if(dhd_info_t *dhd)
 		}
 	}
 
-	if (dhd->monitor_dev) {
-		if (dhd->monitor_dev->reg_state == NETREG_UNINITIALIZED) {
-			free_netdev(dhd->monitor_dev);
+#ifdef DHD_ART
+	 dhd_remove_static_if(&dhd->pub, dhd->monitor_dev, FALSE);
+#else
+	if (dhd->monitor_dev->reg_state == NETREG_UNINITIALIZED) {
+		free_netdev(dhd->monitor_dev);
+	} else {
+		/* Since the dhd monitor is called from an ioctl and not the cfg80211 API
+		 * interface, we need to directly use register_netdevice and not the
+		 * cfg80211_register_netdevice version. Otherwise will hit a kernel panic
+		 * since the wdev pointer is null.
+		 */
+		if (!rtnl_is_locked()) {
+			unregister_netdev(dhd->monitor_dev);
 		} else {
-			/* Since the dhd monitor is called from an ioctl and not the cfg80211 API
-			 * interface, we need to directly use register_netdevice and not the
-			 * cfg80211_register_netdevice version. Otherwise will hit a kernel panic
-			 * since the wdev pointer is null.
-			 */
-			if (!rtnl_is_locked()) {
-				unregister_netdev(dhd->monitor_dev);
-			} else {
-				unregister_netdevice(dhd->monitor_dev);
-			}
+			unregister_netdevice(dhd->monitor_dev);
 		}
-		dhd->monitor_dev = NULL;
 	}
+#endif /* DHD_ART */
+
+	dhd->monitor_dev = NULL;
 #ifdef HOST_RADIOTAP_CONV
 	if (dhd->monitor_info) {
 		bcmwifi_monitor_delete(dhd->monitor_info);
@@ -5856,12 +6189,12 @@ dhd_del_monitor_if(dhd_info_t *dhd)
 #endif /* HOST_RADIOTAP_CONV */
 }
 
-static void
+void
 dhd_set_monitor(dhd_pub_t *pub, int ifidx, int val)
 {
 	dhd_info_t *dhd = pub->info;
 
-	DHD_TRACE(("%s: val %d\n", __FUNCTION__, val));
+	DHD_TRACE(("%s: val %d ifidx %d\n", __FUNCTION__, val, ifidx));
 
 	dhd_net_if_lock_local(dhd);
 	if (!val) {
@@ -5872,6 +6205,11 @@ dhd_set_monitor(dhd_pub_t *pub, int ifidx, int val)
 		dhd_add_monitor_if(dhd);
 	}
 	dhd->monitor_type[ifidx] = val;
+	/* FW always sends monitor packets on interface zero
+	 * so set the interface zero irrespective of the interface
+	 * on which the monotor command is fired
+	 */
+	dhd->monitor_type[0] = val;
 	dhd_net_if_unlock_local(dhd);
 }
 #endif /* WL_MONITOR */
@@ -6104,7 +6442,7 @@ int dhd_ioctl_process(dhd_pub_t *pub, int ifidx, dhd_ioctl_t *ioc, void *data_bu
 	}
 #endif  /* REPORT_FATAL_TIMEOUTS */
 
-#ifdef WL_MONITOR
+#if defined(WL_MONITOR) && !defined(DHD_ART)
 	/* Intercept monitor ioctl here, add/del monitor if */
 	if (bcmerror == BCME_OK && ioc->cmd == WLC_SET_MONITOR) {
 		int val = 0;
@@ -6117,6 +6455,7 @@ int dhd_ioctl_process(dhd_pub_t *pub, int ifidx, dhd_ioctl_t *ioc, void *data_bu
 				val = *(char *)data_buf;
 			}
 		}
+		/* monitor I/F will be controlled by radiotap */
 		dhd_set_monitor(pub, ifidx, val);
 	}
 #ifdef HOST_RADIOTAP_CONV
@@ -6127,7 +6466,7 @@ int dhd_ioctl_process(dhd_pub_t *pub, int ifidx, dhd_ioctl_t *ioc, void *data_bu
 		*(int32 *)data_buf &= ~(HOST_RADIOTAP_CONV_BIT);
 	}
 #endif /* HOST_RADIOTAP_CONV */
-#endif /* WL_MONITOR */
+#endif /* WL_MONITOR && !DHD_ART */
 
 done:
 
@@ -6285,20 +6624,24 @@ static int dhd_siocdevprivate(struct net_device *net, struct ifreq *ifr,
 		ret = OSL_ERROR(BCME_NOTUP);
 		goto done;
 	}
+
 	ifidx = dhd_net2idx(dhd, net);
 	DHD_TRACE(("%s: ifidx %d, cmd 0x%04x\n", __func__, ifidx, cmd));
 
-#if defined(WL_STATIC_IF)
-	/* skip for static ndev when it is down */
-	if (dhd_is_static_ndev(&dhd->pub, net) && !(net->flags & IFF_UP)) {
-		DHD_INFO(("%s: exit: static ndev\n", __func__));
-		ret = -1;
-		goto done;
-	}
-#endif /* WL_STATIC_iF */
-
 	if (ifidx == DHD_BAD_IF) {
-		DHD_ERROR(("%s: BAD IF\n", __func__));
+#ifdef WL_STATIC_IF
+		/* check whether its an unitialised I/F case. The I/F can
+		 * take commands only after FW I/F initialisiation.
+		 */
+		dhd_if_t *ifp = dhd_get_static_ifp_by_ndev(&dhd->pub, net);
+		if (ifp) {
+			DHD_INFO(("%s: interface unitiliased ifname:%s cmd:%d\n",
+				__func__, net->name, cmd));
+		} else
+#endif /* WL_STATIC_IF */
+		{
+			DHD_ERROR(("%s: BAD IF cmd:%d\n", __func__, cmd));
+		}
 		ret = -1;
 		goto done;
 	}
@@ -6582,7 +6925,7 @@ dhd_stop(struct net_device *net)
 
 #if defined(WL_STATIC_IF) && defined(WL_CFG80211)
 	/* If static if is operational, don't reset the chip */
-	if (IS_CFG80211_STATIC_IF_ACTIVE(cfg) ||
+	if (dhd_is_static_ndev_active(&dhd->pub) ||
 		(wl_cfgvif_get_iftype_count(cfg, WL_IF_TYPE_AP) > 0)) {
 		DHD_ERROR(("static/ap if operational. skip chip reset.\n"));
 		skip_reset = true;
@@ -6629,8 +6972,9 @@ dhd_stop(struct net_device *net)
 #endif /* DHD_PKTDUMP_ROAM */
 
 				dhd_net_if_lock_local(dhd);
-				for (i = 1; i < DHD_MAX_IFS; i++)
+				for (i = 1; i < DHD_MAX_IFS; i++) {
 					dhd_remove_if(&dhd->pub, i, FALSE);
+				}
 
 				if (ifp && ifp->net) {
 					dhd_if_del_sta_list(ifp);
@@ -6843,36 +7187,16 @@ dhd_verify_firmware_mode_change(dhd_info_t *dhd)
 	 * current mode - update fw/nv path, get current FW  mode from dhd->fw_path
 	 */
 	dhd_update_fw_nv_path(dhd);
-#ifdef WL_MONITOR
-	DHD_INFO(("%s : check monitor mode with fw_path : %s\n", __FUNCTION__, dhd->fw_path));
 
-	if (strstr(dhd->fw_path, "_mon") != NULL) {
-		DHD_PRINT(("%s : monitor mode is enabled, set force reg on "
-			"and big hammer\n", __FUNCTION__));
-		dhd->wl_accel_force_reg_on = TRUE;
-		dhd->pub.fw_mode_changed = TRUE;
-		dhd->pub.do_chip_bighammer = TRUE;
-		return;
-	} else if (dhd->pub.monitor_enable == TRUE) {
-		DHD_PRINT(("%s : monitor was enabled, changed to other fw_mode, "
-			"set force reg on and big hammer\n", __FUNCTION__));
-		dhd->wl_accel_force_reg_on = TRUE;
-		dhd->pub.fw_mode_changed = TRUE;
-		dhd->pub.do_chip_bighammer = TRUE;
-		return;
-	}
-#endif /* WL_MONITOR */
 	current_mode = dhd_get_fw_mode(dhd);
 
 	DHD_PRINT(("%s: current_mode 0x%x, prev_opmode 0x%x\n", __FUNCTION__,
 		current_mode, dhd->pub.op_mode));
 
 	if (!(dhd->pub.op_mode & current_mode)) {
-		DHD_PRINT(("%s: firmware path has changed, set force reg on "
-			"and big hammer\n", __FUNCTION__));
+		DHD_PRINT(("%s: firmware path has changed, set force reg on\n", __FUNCTION__));
 		dhd->wl_accel_force_reg_on = TRUE;
 		dhd->pub.fw_mode_changed = TRUE;
-		dhd->pub.do_chip_bighammer = TRUE;
 	}
 }
 #endif /* WLAN_ACCEL_BOOT */
@@ -6964,7 +7288,13 @@ dhd_open(struct net_device *net)
 
 	DHD_PRINT(("%s: ENTER\n", __FUNCTION__));
 
+#ifdef DHD_ART
+	/* Initialize ART counters */
+	bzero(&dhd->pub.art_counters, sizeof(dhd_art_counters_t));
+#endif /* DHD_ART */
+
 	dhd->pub.open_in_progress = TRUE;
+
 	OSL_SMP_WMB();
 #if defined(PREVENT_REOPEN_DURING_HANG)
 	/* WAR : to prevent calling dhd_open abnormally in quick succession after hang event */
@@ -7438,13 +7768,13 @@ dhd_static_if_open(struct net_device *net)
 	cfg = wl_get_cfg(net);
 	primary_netdev = bcmcfg_to_prmry_ndev(cfg);
 
-	if (!IS_CFG80211_STATIC_IF(cfg, net)) {
+	if (!dhd_get_static_ifp_by_ndev(&dhd->pub, net)) {
 		DHD_TRACE(("non-static interface (%s)..do nothing \n", net->name));
 		ret = BCME_OK;
 		goto done;
 	}
 
-	DHD_INFO(("[%s][STATIC_IF] Enter \n", net->name));
+	DHD_PRINT(("%s: Enter iface:%s\n", __FUNCTION__, net->name));
 	/* Ensure fw is initialized. If it is already initialized,
 	 * dhd_open will return success.
 	 */
@@ -7454,13 +7784,20 @@ dhd_static_if_open(struct net_device *net)
 		goto done;
 	}
 
-	/* enable network offload features like CSO RCO */
-	dhd_enable_net_offloads(dhd, net);
-
 	ret = wl_cfg80211_static_if_open(net);
 	if (ret == BCME_OK) {
-		/* Allow transmit calls */
-		netif_start_queue(net);
+#ifdef WL_STATIC_NMI_IF
+		if (IS_NMI_IFACE(net->name)) {
+			/* ensure there is no data Tx */
+			netif_stop_queue(net);
+		} else
+#endif /* WL_STATIC_NMI_IF */
+		{
+			/* enable network offload features like CSO RCO */
+			dhd_enable_net_offloads(dhd, net);
+			/* Allow transmit calls */
+			netif_start_queue(net);
+		}
 	}
 	dhd_clear_del_in_progress(cfg->pub, net);
 done:
@@ -7474,19 +7811,26 @@ dhd_static_if_stop(struct net_device *net)
 	struct net_device *primary_netdev = NULL;
 	int ret = BCME_OK;
 	dhd_info_t *dhd = DHD_DEV_INFO(net);
-
-	DHD_INFO(("[%s][STATIC_IF] Enter \n", net->name));
+	dhd_if_t *ifp = NULL;
 
 	cfg = wl_get_cfg(net);
-	if (!IS_CFG80211_STATIC_IF(cfg, net)) {
+	ifp = dhd_get_static_ifp_by_ndev(&dhd->pub, net);
+	if (!ifp) {
 		DHD_TRACE(("non-static interface (%s)..do nothing \n", net->name));
 		return BCME_OK;
 	}
 
+	DHD_PRINT(("%s: Enter iface:%s\n", __FUNCTION__, net->name));
+
 	dhd_set_del_in_progress(cfg->pub, net);
 	/* Ensure queue is disabled */
 	netif_tx_disable(net);
-	ret = wl_cfg80211_static_if_close(net);
+	if (ifp->idx == DHD_INVALID_IFIDX) {
+		DHD_PRINT(("interface not initialised\n"));
+	} else {
+		dhd_set_del_in_progress(cfg->pub, net);
+		ret = wl_cfg80211_static_if_close(net);
+	}
 
 	if (dhd->pub.up == 0) {
 		/* If fw is down, return */
@@ -7710,29 +8054,68 @@ dhd_natoe_ct_ioctl_schedule_work(dhd_pub_t *dhd, dhd_ct_ioc_t *ioc)
 }
 #endif /* WL_NATOE */
 
-/* This API maps ndev to ifp inclusive of static IFs */
+#ifdef WL_STATIC_IF
+static bool
+dhd_is_static_ndev_active(dhd_pub_t *dhdp)
+{
+	dhd_if_t *ifp = NULL;
+	u32 ifidx = 0;
+	dhd_info_t *dhdinfo = (dhd_info_t *)dhdp->info;
+
+	while (ifidx < DHD_MAX_STATIC_IFS) {
+		ifp = dhdinfo->static_iflist[ifidx];
+		if (ifp && ifp->net && (ifp->net->flags & IFF_UP)) {
+			DHD_TRACE(("%s iface active \n", ifp->net->name));
+			return TRUE;
+		}
+		ifidx++;
+	}
+
+	return FALSE;
+}
+#endif /* WL_STATIC_IF */
+
+/* This API maps ndev to ifp from the static_iflist */
+static dhd_if_t *
+dhd_get_static_ifp_by_ndev(dhd_pub_t *dhdp, struct net_device *ndev)
+{
+	dhd_if_t *ifp = NULL;
+	u32 ifidx = 0;
+	dhd_info_t *dhdinfo = (dhd_info_t *)dhdp->info;
+
+	while (ifidx < DHD_MAX_STATIC_IFS) {
+		ifp = dhdinfo->static_iflist[ifidx];
+		if (ifp && (ifp->net == ndev)) {
+			DHD_TRACE(("match found for %s in static_iflist ifidx:%d\n",
+				ndev->name, ifidx));
+			return ifp;
+		}
+		ifidx++;
+	}
+
+	return NULL;
+}
+
+/* This API maps ndev to ifp */
 static dhd_if_t *
 dhd_get_ifp_by_ndev(dhd_pub_t *dhdp, struct net_device *ndev)
 {
 	dhd_if_t *ifp = NULL;
-#ifdef WL_STATIC_IF
-	u32 ifidx = (DHD_MAX_IFS + DHD_MAX_STATIC_IFS - 1);
-#else
-	u32 ifidx = (DHD_MAX_IFS - 1);
-#endif /* WL_STATIC_IF */
-
+	u32 ifidx = 0;
 	dhd_info_t *dhdinfo = (dhd_info_t *)dhdp->info;
-	do {
+
+	while (ifidx < DHD_MAX_IFS) {
 		ifp = dhdinfo->iflist[ifidx];
 		if (ifp && (ifp->net == ndev)) {
-			DHD_TRACE(("match found for %s. ifidx:%d\n",
-				ndev->name, ifidx));
+			DHD_TRACE(("%s: match found for %s in iflist ifidx:%d\n",
+				__FUNCTION__, ifp->net->name, ifidx));
 			return ifp;
 		}
-	} while (ifidx--);
+		ifidx++;
+	}
 
 	/* if match not found, ndev may be freed. so avoid dereference */
-	DHD_ERROR(("no entry found for ndev ptr\n"));
+	DHD_TRACE(("no iflist entry found for ndev ptr\n"));
 	return NULL;
 }
 
@@ -7744,147 +8127,111 @@ dhd_is_static_ndev(dhd_pub_t *dhdp, struct net_device *ndev)
 	if (!dhdp || !ndev) {
 		DHD_ERROR(("wrong input\n"));
 		ASSERT(0);
-		return false;
+		return FALSE;
 	}
 
-	ifp = dhd_get_ifp_by_ndev(dhdp, ndev);
-	return (ifp && (ifp->static_if == true));
+	ifp = dhd_get_static_ifp_by_ndev(dhdp, ndev);
+	if (ifp) {
+		return TRUE;
+	}
+	return FALSE;
 }
 
 #ifdef WL_STATIC_IF
-/* In some cases, while registering I/F, the actual ifidx, bssidx and dngl_name
- * are not known. For e.g: static i/f case. This function lets to update it once
- * it is known.
+/* While registering static I/F, the actual ifidx, bssidx and dngl_name are not known.
+ * This function lets to update the dhdinfo->iflist after the firmware interface is initialised.
  */
 s32
 dhd_update_iflist_info(dhd_pub_t *dhdp, struct net_device *ndev, int ifidx,
 	uint8 *mac, uint8 bssidx, const char *dngl_name, int if_state)
 {
 	dhd_info_t *dhdinfo = (dhd_info_t *)dhdp->info;
-	dhd_if_t *ifp, *ifp_new;
-	s32 cur_idx;
-	dhd_dev_priv_t *dev_priv;
+	dhd_if_t *ifp = NULL;
+	dhd_if_t *static_ifp, *ifp_new;
 
-	DHD_TRACE(("[STATIC_IF] update ifinfo for state:%d ifidx:%d\n",
-			if_state, ifidx));
+	DHD_PRINT(("update ifinfo for state:%d ifidx:%d ifname:%s\n",
+			if_state, ifidx, ndev->name));
 
-	ASSERT(dhdinfo && (ifidx < (DHD_MAX_IFS + DHD_MAX_STATIC_IFS)));
-	if (ifidx < 0 || ifidx >= (DHD_MAX_IFS + DHD_MAX_STATIC_IFS)) {
-		return -EINVAL;
-	}
-
-	ifp = dhd_get_ifp_by_ndev(dhdp, ndev);
-	if (ifp == NULL) {
+	/* static_ifp entry is created on attach. */
+	static_ifp = dhd_get_static_ifp_by_ndev(dhdp, ndev);
+	if (!static_ifp) {
+		DHD_ERROR(("update_iflist_info. no entry found for %s\n", ndev->name));
 		return -ENODEV;
 	}
-	cur_idx = ifp->idx;
 
+	/* static ndev attach context */
 	if (if_state == NDEV_STATE_OS_IF_CREATED) {
-		/* mark static if */
-		ifp->static_if = TRUE;
+		/* During OS attach, ifidx will not be allocated for static_if */
+		DHD_TRACE(("OS IF created for %s\n", ndev->name));
 		return BCME_OK;
+	} else {
+		/* validate sanity of ifidx for ifadd/del operations. */
+		ASSERT(dhdinfo && (ifidx < DHD_MAX_IFS));
+		if (ifidx < 0 || (ifidx >= DHD_MAX_IFS)) {
+			DHD_ERROR(("invalid ifidx:%d\n", ifidx));
+			return -EINVAL;
+		}
+		/* Check for entry in the initialised iface list */
+		ifp = dhd_get_ifp_by_ndev(dhdp, ndev);
 	}
 
-	ifp_new = dhdinfo->iflist[ifidx];
-	if (ifp_new && (ifp_new != ifp)) {
-		/* There should be only one entry for a given ifidx. */
-		DHD_ERROR(("ifp ptr already present for ifidx:%d\n", ifidx));
-		ASSERT(0);
-		dhdp->hang_reason = HANG_REASON_IFACE_ADD_FAILURE;
-		net_os_send_hang_message(ifp->net);
-		return -EINVAL;
+	/* update iflist from FW interface creation context */
+	if (if_state == NDEV_STATE_FW_IF_CREATED) {
+		/* There shouldn't be an active entry for given ifidx/ndev */
+		ifp_new = dhdinfo->iflist[ifidx];
+		if (ifp || ifp_new) {
+			DHD_ERROR(("ifp ptr already present for ifidx:%d\n", ifidx));
+			ASSERT(0);
+			dhdp->hang_reason = HANG_REASON_IFACE_ADD_FAILURE;
+			net_os_send_hang_message(ifp->net);
+			return -EINVAL;
+		} else if (ifp_new == NULL) {
+			/* Put a reference in the active iflist */
+			dhdinfo->iflist[ifidx] = ifp_new = static_ifp;
+		}
+		DHD_PRINT(("iflist update [old] ifidx:%d bssidx:%d [new] ifidx:%d bssidx:%d\n",
+			ifp_new->idx, ifp_new->bssidx, ifidx, bssidx));
+		ifp_new->idx = ifidx;
+		ifp_new->bssidx = bssidx;
+		dhd_dev_priv_save(ndev, dhdinfo, ifp_new, ifidx);
+		/* initialize the dongle provided if name */
+		if (dngl_name) {
+			strncpy(ifp_new->dngl_name, dngl_name, IFNAMSIZ);
+		} else if (ndev->name[0] != '\0') {
+			strncpy(ifp_new->dngl_name, ndev->name, IFNAMSIZ);
+		}
+		if (mac != NULL) {
+			eacopy(mac, &ifp_new->mac_addr);
+		}
 	}
 
 	/* For static if delete case, cleanup the if before ifidx update */
-	if ((if_state == NDEV_STATE_FW_IF_DELETED) ||
-		(if_state == NDEV_STATE_FW_IF_FAILED)) {
-		dhd_cleanup_if(ifp->net);
-		dev_priv = DHD_DEV_PRIV(ndev);
-		dev_priv->ifidx = ifidx;
-	}
-
-	/* update the iflist ifidx slot with cached info */
-	dhdinfo->iflist[ifidx] = ifp;
-	dhdinfo->iflist[cur_idx] = NULL;
-
-	/* update the values */
-	ifp->idx = ifidx;
-	ifp->bssidx = bssidx;
-
-	if (if_state == NDEV_STATE_FW_IF_CREATED) {
-		dhd_dev_priv_save(ndev, dhdinfo, ifp, ifidx);
-		/* initialize the dongle provided if name */
-		if (dngl_name) {
-			strncpy(ifp->dngl_name, dngl_name, IFNAMSIZ);
-		} else if (ndev->name[0] != '\0') {
-			strncpy(ifp->dngl_name, ndev->name, IFNAMSIZ);
-		}
-		if (mac != NULL) {
-			/* To and fro locations have same size - ETHER_ADDR_LEN */
-			(void)memcpy_s(&ifp->mac_addr, ETHER_ADDR_LEN, mac, ETHER_ADDR_LEN);
+	if ((if_state == NDEV_STATE_FW_IF_DELETED) || (if_state == NDEV_STATE_FW_IF_FAILED)) {
+		if (ifp) {
+			dhdinfo->iflist[ifp->idx] = NULL;
+			DHD_PRINT(("active iflist reference cleared for %s ifidx:%d\n",
+				ifp->net->name, ifp->idx));
+			/* Actual ifp cleanup would happen from dhd_remove_if */
+		} else {
+			DHD_ERROR(("ifp not found for %s\n", ndev->name));
 		}
 	}
-	DHD_INFO(("[STATIC_IF] ifp ptr updated for ifidx:%d curidx:%d if_state:%d\n",
-		ifidx, cur_idx, if_state));
+
 	return BCME_OK;
 }
 #endif /* WL_STATIC_IF */
 
-/* unregister and free the existing net_device interface (if any) in iflist and
- * allocate a new one. the slot is reused. this function does NOT register the
- * new interface to linux kernel. dhd_register_if does the job
- */
-struct net_device*
-dhd_allocate_if(dhd_pub_t *dhdpub, int ifidx, const char *name,
+dhd_if_t *
+_dhd_alloc_if(dhd_pub_t *dhdpub, int ifidx, const char *name,
 	uint8 *mac, uint8 bssidx, bool need_rtnl_lock, const char *dngl_name)
 {
 	dhd_info_t *dhdinfo = (dhd_info_t *)dhdpub->info;
-	dhd_if_t *ifp;
+	dhd_if_t *ifp = NULL;
 
-	ASSERT(dhdinfo && (ifidx < (DHD_MAX_IFS + DHD_MAX_STATIC_IFS)));
-	if (!dhdinfo || ifidx < 0 || ifidx >= (DHD_MAX_IFS + DHD_MAX_STATIC_IFS)) {
+	ifp = MALLOC(dhdinfo->pub.osh, sizeof(dhd_if_t));
+	if (ifp == NULL) {
+		DHD_ERROR(("%s: OOM - dhd_if_t(%zu)\n", __FUNCTION__, sizeof(dhd_if_t)));
 		return NULL;
-	}
-
-	ifp = dhdinfo->iflist[ifidx];
-
-	if (ifp != NULL) {
-		if (ifp->net != NULL) {
-			DHD_PRINT(("%s: free existing IF %s ifidx:%d \n",
-				__FUNCTION__, ifp->net->name, ifidx));
-
-			if (ifidx == 0) {
-				/* For primary ifidx (0), there shouldn't be
-				 * any netdev present already.
-				 */
-				DHD_ERROR(("Primary ifidx populated already\n"));
-				ASSERT(0);
-				return NULL;
-			}
-
-			dhd_dev_priv_clear(ifp->net); /* clear net_device private */
-
-			/* in unregister_netdev case, the interface gets freed by net->destructor
-			 * (which is set to free_netdev)
-			 */
-#if defined(CONFIG_TIZEN)
-			net_stat_tizen_unregister(ifp->net);
-#endif /* CONFIG_TIZEN */
-
-			if (ifp->net->reg_state == NETREG_UNINITIALIZED) {
-				free_netdev(ifp->net);
-			} else {
-				dhd_tx_stop_queues(ifp->net);
-				dhd_unregister_net(ifp->net, need_rtnl_lock);
-			}
-			ifp->net = NULL;
-		}
-	} else {
-		ifp = MALLOC(dhdinfo->pub.osh, sizeof(dhd_if_t));
-		if (ifp == NULL) {
-			DHD_ERROR(("%s: OOM - dhd_if_t(%zu)\n", __FUNCTION__, sizeof(dhd_if_t)));
-			return NULL;
-		}
 	}
 
 	bzero(ifp, sizeof(dhd_if_t));
@@ -7946,10 +8293,9 @@ dhd_allocate_if(dhd_pub_t *dhdpub, int ifidx, const char *name,
 	ifp->net->destructor = free_netdev;
 #endif /* WL_CFG80211 */
 #endif /* LINUX_VERSION_CODE >= KERNEL_VERSION(4, 11, 9) */
-	strlcpy(ifp->name, ifp->net->name, sizeof(ifp->name));
-	dhdinfo->iflist[ifidx] = ifp;
 
-/* initialize the dongle provided if name */
+	strlcpy(ifp->name, ifp->net->name, sizeof(ifp->name));
+	/* initialize the dongle provided if name */
 	if (dngl_name) {
 		strlcpy(ifp->dngl_name, dngl_name, sizeof(ifp->dngl_name));
 	} else if (name) {
@@ -7988,7 +8334,7 @@ dhd_allocate_if(dhd_pub_t *dhdpub, int ifidx, const char *name,
 	dhd_reset_tcpsync_info_by_ifp(ifp);
 #endif /* DHDTCPSYNC_FLOOD_BLK */
 
-	return ifp->net;
+	return ifp;
 
 fail:
 	if (ifp != NULL) {
@@ -8007,6 +8353,115 @@ fail:
 		}
 		MFREE(dhdinfo->pub.osh, ifp, sizeof(*ifp));
 	}
+	return NULL;
+}
+
+struct net_device *
+dhd_allocate_static_if(dhd_pub_t *dhdpub, const char *name,
+	uint8 *mac, bool need_rtnl_lock, const char *dngl_name)
+{
+	s32 i;
+	dhd_info_t *dhdinfo = (dhd_info_t *)dhdpub->info;
+	dhd_if_t *ifp;
+	u8 static_idx = DHD_INVALID_STATIC_IDX;
+
+
+	for (i = 0; i < DHD_MAX_STATIC_IFS; i++) {
+		if (dhdinfo->static_iflist[i] == NULL) {
+			static_idx = i;
+		}
+	}
+
+	if (static_idx == DHD_INVALID_STATIC_IDX) {
+		DHD_ERROR(("%s: no free idx\n", __FUNCTION__));
+		return NULL;
+	}
+
+	ifp = _dhd_alloc_if(dhdpub, DHD_INVALID_IFIDX,
+			name, mac, 0, need_rtnl_lock, dngl_name);
+	if (!ifp) {
+		DHD_ERROR(("%s: _dhd_alloc_if failed\n", __FUNCTION__));
+		return NULL;
+	}
+
+	ifp->static_if = TRUE;
+	dhdinfo->static_iflist[static_idx] = ifp;
+	DHD_PRINT(("%s: updated ifp @ static_iflist index:%d\n", __FUNCTION__, static_idx));
+	return ifp->net;
+}
+
+/* unregister and free the existing net_device interface (if any) in iflist and
+ * allocate a new one. the slot is reused. this function does NOT register the
+ * new interface to linux kernel. dhd_register_if does the job
+ */
+struct net_device*
+dhd_allocate_if(dhd_pub_t *dhdpub, int ifidx, const char *name,
+	uint8 *mac, uint8 bssidx, bool need_rtnl_lock, const char *dngl_name)
+{
+	dhd_info_t *dhdinfo = (dhd_info_t *)dhdpub->info;
+	dhd_if_t *ifp;
+
+	/* For legacy component compatibility. Needs to remove after component code
+	 * is updated
+	 */
+	if ((ifidx >= DHD_MAX_IFS) && (ifidx < (DHD_MAX_IFS + DHD_MAX_STATIC_IFS))) {
+		DHD_ERROR(("allocate stat_if for ifidx:%d\n", (ifidx - DHD_MAX_IFS)));
+		return dhd_allocate_static_if(dhdpub, name, mac, need_rtnl_lock, dngl_name);
+	}
+
+	ASSERT(dhdinfo && (ifidx < DHD_MAX_IFS));
+	if (!dhdinfo || ifidx < 0 || ifidx >= DHD_MAX_IFS) {
+		return NULL;
+	}
+
+	ifp = dhdinfo->iflist[ifidx];
+	if (ifp != NULL) {
+		if (ifp->net != NULL) {
+			DHD_PRINT(("%s: free existing IF %s ifidx:%d \n",
+				__FUNCTION__, ifp->net->name, ifidx));
+
+			if (ifidx == 0) {
+				/* For primary ifidx (0), there shouldn't be
+				 * any netdev present already.
+				 */
+				DHD_ERROR(("Primary ifidx populated already\n"));
+				ASSERT(0);
+				return NULL;
+			}
+
+			dhd_dev_priv_clear(ifp->net); /* clear net_device private */
+
+			/* in unregister_netdev case, the interface gets freed by net->destructor
+			 * (which is set to free_netdev)
+			 */
+#if defined(CONFIG_TIZEN)
+			net_stat_tizen_unregister(ifp->net);
+#endif /* CONFIG_TIZEN */
+
+			if (ifp->net->reg_state == NETREG_UNINITIALIZED) {
+				free_netdev(ifp->net);
+			} else {
+				dhd_tx_stop_queues(ifp->net);
+				dhd_unregister_net(ifp->net, need_rtnl_lock);
+			}
+			ifp->net = NULL;
+		}
+		/* clean up and instantiate freshly */
+		dhd_cleanup_ifp(dhdpub, ifp);
+		MFREE(dhdpub->osh, ifp, sizeof(*ifp));
+	}
+
+	ifp = _dhd_alloc_if(dhdpub, ifidx, name, mac, bssidx, need_rtnl_lock, dngl_name);
+	if (!ifp) {
+		goto fail;
+	}
+
+	DHD_PRINT(("%s: ifp entry added for %s @ idx:%d\n",
+		__FUNCTION__, ifp->net->name, ifidx));
+	dhdinfo->iflist[ifidx] = ifp;
+	return ifp->net;
+
+fail:
 	dhdinfo->iflist[ifidx] = NULL;
 	return NULL;
 }
@@ -8061,7 +8516,8 @@ dhd_cleanup_ifp(dhd_pub_t *dhdp, dhd_if_t *ifp)
 #endif /* PCIE_FULL_DONGLE */
 
 	if (ifp != NULL) {
-		if ((ifp->idx < 0) || (ifp->idx >= DHD_MAX_IFS)) {
+		if (!ifp->static_if && ((ifp->idx < 0) || (ifp->idx >= DHD_MAX_IFS))) {
+			/* static_ifp would be set to DHD_INVALID_IFIDX in unitialised state */
 			DHD_ERROR(("Wrong idx:%d \n", ifp->idx));
 			ASSERT(0);
 			return;
@@ -8083,7 +8539,7 @@ dhd_cleanup_ifp(dhd_pub_t *dhdp, dhd_if_t *ifp)
 #ifdef PCIE_FULL_DONGLE
 		/* Delete flowrings of virtual interface */
 		ifidx = ifp->idx;
-		if ((ifidx != 0) && if_flow_lkup &&
+		if ((ifidx != 0) && if_flow_lkup && ifidx < DHD_MAX_IFS &&
 			(if_flow_lkup[ifidx].role != WLC_E_IF_ROLE_AP)) {
 			dhd_flow_rings_delete(dhdp, ifidx);
 		}
@@ -8109,88 +8565,144 @@ dhd_cleanup_if(struct net_device *net)
 	}
 }
 
+#define DHD_TX_COMPLETION_TIMEOUT 5000
+static int
+_dhd_remove_if(dhd_pub_t *dhdpub, dhd_if_t *ifp, bool need_rtnl_lock)
+{
+	dhd_info_t *dhdinfo = (dhd_info_t *)dhdpub->info;
+	unsigned long flags;
+	long timeout;
+
+#ifdef DHD_4WAYM4_FAIL_DISCONNECT
+	dhd_cancel_delayed_work_sync(&ifp->m4state_work);
+#endif /* DHD_4WAYM4_FAIL_DISCONNECT */
+
+#ifdef DHDTCPSYNC_FLOOD_BLK
+	dhd_cancel_work_sync(&ifp->blk_tsfl_work);
+#endif /* DHDTCPSYNC_FLOOD_BLK */
+
+	dhd_cleanup_ifp(dhdpub, ifp);
+	if (ifp->net != NULL) {
+		DHD_PRINT(("deleting interface '%s' idx %d\n", ifp->net->name, ifp->idx));
+
+		DHD_GENERAL_LOCK(dhdpub, flags);
+		ifp->del_in_progress = TRUE;
+		DHD_GENERAL_UNLOCK(dhdpub, flags);
+
+		/* If TX is in progress, hold the if del */
+		if (DHD_IF_IS_TX_ACTIVE(ifp)) {
+			DHD_INFO(("TX in progress. Wait for it to be complete."));
+			timeout = wait_event_timeout(dhdpub->tx_completion_wait,
+				((ifp->tx_paths_active & DHD_TX_CONTEXT_MASK) == 0),
+				msecs_to_jiffies(DHD_TX_COMPLETION_TIMEOUT));
+			if (!timeout) {
+				/* Tx completion timeout. Attempt proceeding ahead */
+				DHD_ERROR(("Tx completion timed out!\n"));
+				ASSERT(0);
+			}
+		} else {
+			DHD_TRACE(("No outstanding TX!\n"));
+		}
+
+		if (!ifp->static_if) {
+			/* static_if entry will be removed from dhd_update_iflist_info context */
+			dhdinfo->iflist[ifp->idx] = NULL;
+		}
+
+		/* in unregister_netdev case, the interface gets freed by net->destructor
+		 * (which is set to free_netdev)
+		 */
+		if (ifp->net->reg_state == NETREG_UNINITIALIZED) {
+			free_netdev(ifp->net);
+		} else {
+			netif_tx_disable(ifp->net);
+
+#if (defined(BCM_ROUTER_DHD) && defined(HNDCTF))
+			if (dhdinfo->cih)
+				ctf_dev_unregister(dhdinfo->cih, ifp->net);
+#endif /* BCM_ROUTER_DHD && HNDCTF */
+
+#if (defined(DHDTCPACK_SUPPRESS) && defined(BCMPCIE))
+			dhd_tcpack_suppress_set(dhdpub, TCPACK_SUP_OFF);
+#endif /* DHDTCPACK_SUPPRESS && BCMPCIE */
+			dhd_unregister_net(ifp->net, need_rtnl_lock);
+		}
+		ifp->net = NULL;
+	}
+#ifdef DHD_WMF
+	dhd_wmf_cleanup(dhdpub, ifp);
+#endif /* DHD_WMF */
+	DHD_CUMM_CTR_INIT(&ifp->cumm_ctr);
+
+	MFREE(dhdinfo->pub.osh, ifp, sizeof(*ifp));
+	ifp = NULL;
+	return BCME_OK;
+}
+
+#ifdef WL_STATIC_IF
+void
+dhd_remove_static_ifp_ref(dhd_pub_t *dhdpub, dhd_if_t *static_ifp)
+{
+	dhd_info_t *dhdinfo = (dhd_info_t *)dhdpub->info;
+	s32 i = 0;
+
+	for (i = 0; i < DHD_MAX_STATIC_IFS; i++) {
+		if (static_ifp == dhdinfo->static_iflist[i]) {
+			DHD_PRINT(("%s: removed static_iflist reference for static_idx:%d\n",
+				__FUNCTION__, i));
+			dhdinfo->static_iflist[i] = NULL;
+		}
+	}
+}
+
+/*
+ * Removes reference from the active iflist and static iflist
+ */
+int
+dhd_remove_static_if(dhd_pub_t *dhdpub, struct net_device *ndev, bool need_rtnl_lock)
+{
+	s32 ret = BCME_OK;
+	dhd_if_t *static_ifp, *ifp;
+
+	static_ifp = dhd_get_static_ifp_by_ndev(dhdpub, ndev);
+	if (static_ifp != NULL) {
+		ifp = dhd_get_ifp_by_ndev(dhdpub, static_ifp->net);
+		if (ifp) {
+			/* remove the reference from the active iflist */
+			DHD_PRINT(("%s: ifp found in dhd->iflist for %s. clean up\n",
+					__FUNCTION__, static_ifp->net->name));
+			dhd_update_iflist_info(dhdpub, ifp->net, ifp->idx,
+				NULL, ifp->bssidx, ifp->net->name, NDEV_STATE_FW_IF_DELETED);
+		}
+
+		/* deinitialise and free up ifp */
+		ret = _dhd_remove_if(dhdpub, static_ifp, need_rtnl_lock);
+		if (ret) {
+			DHD_ERROR(("%s: static if removal failed. ret:%d\n",
+				__FUNCTION__, ret));
+		} else {
+			/* Once ifp is freed via _dhd_remove_if, update static_iflist array */
+			dhd_remove_static_ifp_ref(dhdpub, static_ifp);
+		}
+	}
+	return ret;
+}
+#endif /* WL_STATIC_IF */
+
 /* unregister and free the the net_device interface associated with the indexed
  * slot, also free the slot memory and set the slot pointer to NULL
  */
-#define DHD_TX_COMPLETION_TIMEOUT 5000
 int
 dhd_remove_if(dhd_pub_t *dhdpub, int ifidx, bool need_rtnl_lock)
 {
-	dhd_info_t *dhdinfo = (dhd_info_t *)dhdpub->info;
 	dhd_if_t *ifp;
-	unsigned long flags;
-	long timeout;
+	dhd_info_t *dhdinfo = (dhd_info_t *)dhdpub->info;
 
 	ifp = dhdinfo->iflist[ifidx];
 
 	if (ifp != NULL) {
-#ifdef DHD_4WAYM4_FAIL_DISCONNECT
-		dhd_cancel_delayed_work_sync(&ifp->m4state_work);
-#endif /* DHD_4WAYM4_FAIL_DISCONNECT */
-
-#ifdef DHDTCPSYNC_FLOOD_BLK
-		dhd_cancel_work_sync(&ifp->blk_tsfl_work);
-#endif /* DHDTCPSYNC_FLOOD_BLK */
-
-		dhd_cleanup_ifp(dhdpub, ifp);
-#ifdef WL_STATIC_IF
-		if (ifp->static_if) {
-			/* static IF will be handled in detach */
-			DHD_TRACE(("Skip del iface for static interface\n"));
-			return BCME_OK;
-		}
-#endif /* WL_STATIC_IF */
-		if (ifp->net != NULL) {
-			DHD_PRINT(("deleting interface '%s' idx %d\n", ifp->net->name, ifp->idx));
-
-			DHD_GENERAL_LOCK(dhdpub, flags);
-			ifp->del_in_progress = TRUE;
-			DHD_GENERAL_UNLOCK(dhdpub, flags);
-
-			/* If TX is in progress, hold the if del */
-			if (DHD_IF_IS_TX_ACTIVE(ifp)) {
-				DHD_INFO(("TX in progress. Wait for it to be complete."));
-				timeout = wait_event_timeout(dhdpub->tx_completion_wait,
-					((ifp->tx_paths_active & DHD_TX_CONTEXT_MASK) == 0),
-					msecs_to_jiffies(DHD_TX_COMPLETION_TIMEOUT));
-				if (!timeout) {
-					/* Tx completion timeout. Attempt proceeding ahead */
-					DHD_ERROR(("Tx completion timed out!\n"));
-					ASSERT(0);
-				}
-			} else {
-				DHD_TRACE(("No outstanding TX!\n"));
-			}
-			dhdinfo->iflist[ifidx] = NULL;
-			/* in unregister_netdev case, the interface gets freed by net->destructor
-			 * (which is set to free_netdev)
-			 */
-			if (ifp->net->reg_state == NETREG_UNINITIALIZED) {
-				free_netdev(ifp->net);
-			} else {
-				netif_tx_disable(ifp->net);
-
-#if (defined(BCM_ROUTER_DHD) && defined(HNDCTF))
-				if (dhdinfo->cih)
-					ctf_dev_unregister(dhdinfo->cih, ifp->net);
-#endif /* BCM_ROUTER_DHD && HNDCTF */
-
-#if (defined(DHDTCPACK_SUPPRESS) && defined(BCMPCIE))
-				dhd_tcpack_suppress_set(dhdpub, TCPACK_SUP_OFF);
-#endif /* DHDTCPACK_SUPPRESS && BCMPCIE */
-				dhd_unregister_net(ifp->net, need_rtnl_lock);
-			}
-			ifp->net = NULL;
-		}
-#ifdef DHD_WMF
-		dhd_wmf_cleanup(dhdpub, ifidx);
-#endif /* DHD_WMF */
-		DHD_CUMM_CTR_INIT(&ifp->cumm_ctr);
-
-		MFREE(dhdinfo->pub.osh, ifp, sizeof(*ifp));
-		ifp = NULL;
+		return _dhd_remove_if(dhdpub, ifp, need_rtnl_lock);
 	}
-
 	return BCME_OK;
 }
 
@@ -9177,6 +9689,8 @@ dhd_attach(osl_t *osh, struct dhd_bus *bus, uint bus_hdrlen)
 	DHD_TRACE(("%s: Enter\n", __FUNCTION__));
 
 #ifdef PCIE_FULL_DONGLE
+	DHD_PRINT(("%s: sizeof(dhd_pkttag_fd_t):%ld sizeof(dhd_pkttag_fr_t):%ld\n",
+		__FUNCTION__, sizeof(dhd_pkttag_fd_t), sizeof(dhd_pkttag_fr_t)));
 	ASSERT(sizeof(dhd_pkttag_fd_t) <= OSL_PKTTAG_SZ);
 	ASSERT(sizeof(dhd_pkttag_fr_t) <= OSL_PKTTAG_SZ);
 #endif /* PCIE_FULL_DONGLE */
@@ -9787,6 +10301,8 @@ dhd_attach(osl_t *osh, struct dhd_bus *bus, uint bus_hdrlen)
 	}
 #endif /* EWP_EDL */
 
+	atomic_set(&dhd->pub.edl_attached, 0);
+
 	/* alloc memory for socram during init itself, newer chips
 	 * require 4M and this requires vmalloc which will fail
 	 * if called from a non sleepable context
@@ -9948,6 +10464,8 @@ int dhd_get_fw_mode(dhd_info_t *dhdinfo)
 		return DHD_FLAG_IBSS_MODE;
 	if (strstr(dhdinfo->fw_path, "_mfg") != NULL)
 		return DHD_FLAG_MFG_MODE;
+	if (strstr(dhdinfo->fw_path, "_monitor") != NULL)
+		return DHD_FLAG_MONITOR_MODE;
 
 	return DHD_FLAG_STA_MODE;
 }
@@ -11358,7 +11876,7 @@ dhd_get_fw_capabilities(dhd_pub_t *dhd)
 			FALSE);
 
 		if (ret < 0) {
-			DHD_ERROR(("%s: Get Capability failed (error=%d)\n",
+			DHD_ERROR(("%s Get Capability failed (error=%d)\n",
 			__FUNCTION__, ret));
 			return ret;
 		}
@@ -11576,9 +12094,17 @@ dhd_optimised_preinit_ioctls(dhd_pub_t *dhd)
 		goto done;
 	}
 
-	if ((!op_mode && dhd_get_fw_mode(dhd->info) == DHD_FLAG_MFG_MODE) ||
-		(op_mode == DHD_FLAG_MFG_MODE)) {
-		dhd->op_mode = DHD_FLAG_MFG_MODE;
+	if (!op_mode) {
+		/* get operating mode based on the fw type loaded */
+		dhd->op_mode = dhd_get_fw_mode(dhd->info);
+	} else {
+		dhd->op_mode = op_mode;
+	}
+	DHD_PRINT(("DHD op_mode:%d\n", dhd->op_mode));
+
+	if (dhd->op_mode == DHD_FLAG_MONITOR_MODE) {
+		DHD_PRINT(("DHD monitor mode\n"));
+	} else if (dhd->op_mode == DHD_FLAG_MFG_MODE) {
 #ifdef DHD_PCIE_NATIVE_RUNTIMEPM
 		/* disable runtimePM by default in MFG mode. */
 		pm_runtime_disable(dhd_bus_to_dev(dhd->bus));
@@ -14590,84 +15116,75 @@ dhd_attach_net(dhd_pub_t *dhdp, bool need_rtnl_lock)
 }
 
 int
-dhd_register_if(dhd_pub_t *dhdp, int ifidx, bool need_rtnl_lock)
+_dhd_register_if(dhd_pub_t *dhdp, int ifidx, bool need_rtnl_lock, dhd_if_t *ifp)
 {
 	dhd_info_t *dhd = (dhd_info_t *)dhdp->info;
-	dhd_if_t *ifp;
 	struct net_device *net = NULL;
 	int err = 0;
 	uint8 temp_addr[ETHER_ADDR_LEN] = { 0x00, 0x90, 0x4c, 0x11, 0x22, 0x33 };
 	unsigned long flags;
+	bool radiotap_if = FALSE;
 
-	DHD_TRACE(("%s: ifidx %d\n", __FUNCTION__, ifidx));
+	DHD_PRINT(("%s: enter ifidx:%d\n", __FUNCTION__, ifidx));
+	net = ifp->net;
 
-	if (dhd == NULL || dhd->iflist[ifidx] == NULL) {
-		DHD_ERROR(("%s: Invalid Interface\n", __FUNCTION__));
-		return BCME_ERROR;
+	ASSERT(net && (ifp->idx == ifidx));
+	if (!net->netdev_ops) {
+		net->netdev_ops = &dhd_ops_virt;
 	}
 
-	ASSERT(dhd && dhd->iflist[ifidx]);
-	ifp = dhd->iflist[ifidx];
-	net = ifp->net;
-	ASSERT(net && (ifp->idx == ifidx));
-
-	ASSERT(!net->netdev_ops);
-	net->netdev_ops = &dhd_ops_virt;
-
+	radiotap_if = IS_ART_IFACE(net->name);
 	/* Ok, link into the network layer... */
-	if (ifidx == 0) {
+	if (!ifp->static_if && (ifidx == 0)) {
 		/*
 		 * device functions for the primary interface only
 		 */
 		net->netdev_ops = &dhd_ops_pri;
 		if (!ETHER_ISNULLADDR(dhd->pub.mac.octet))
-			memcpy(temp_addr, dhd->pub.mac.octet, ETHER_ADDR_LEN);
+			eacopy(dhd->pub.mac.octet, temp_addr);
 	} else {
-		/*
-		 * We have to use the primary MAC for virtual interfaces
-		 */
-		memcpy(temp_addr, ifp->mac_addr, ETHER_ADDR_LEN);
-
-#if defined(OEM_ANDROID)
-		/*
-		 * Android sets the locally administered bit to indicate that this is a
-		 * portable hotspot.  This will not work in simultaneous AP/STA mode,
-		 * nor with P2P.  Need to set the Donlge's MAC address, and then use that.
-		 */
-		if (!memcmp(temp_addr, dhd->iflist[0]->mac_addr,
-			ETHER_ADDR_LEN)) {
-			DHD_PRINT(("%s interface [%s]: set locally administered bit in MAC\n",
-			__func__, net->name));
-			temp_addr[0] |= 0x02;
+		if (ETHER_ISNULLADDR(ifp->mac_addr)) {
+			/* If macaddr not specified, use primary mac with locally admin set */
+			if (!ETHER_ISNULLADDR(dhd->pub.mac.octet)) {
+				eacopy(dhd->pub.mac.octet, temp_addr);
+				temp_addr[0] |= 0x02;
+			} else {
+				/* primary mac is null, use temp_adr as is */
+				DHD_PRINT(("%s: primary mac null. use temp addr\n", __FUNCTION__));
+			}
+		} else {
+			eacopy(ifp->mac_addr, temp_addr);
 		}
-#endif /* defined(OEM_ANDROID) */
 
 		/* enable checksum offload for secondary interfaces also */
 #ifdef TX_CSO
-		if (dhd_bus_get_txcso_supported(dhdp->bus)) {
+		if (dhd_bus_get_txcso_supported(dhdp->bus) && !radiotap_if) {
 			net->features |= NETIF_F_HW_CSUM;
 			DHD_ERROR(("%s: set HW_CSUM for ifidx %u, features = 0x%llx \n",
 				__FUNCTION__, ifidx, net->features));
 		}
 #endif /* TX_CSO */
 #ifdef RX_CSO
-		if (RXCSO_ENAB(dhdp)) {
+		if (RXCSO_ENAB(dhdp) && !radiotap_if) {
 			net->features |= NETIF_F_RXCSUM;
 			DHD_PRINT(("%s: rco set RXCSUM for ifidx %u, features = 0x%llx \n",
 				__FUNCTION__, ifidx, net->features));
 		}
 #endif /* RX_CSO */
 	}
-
-	net->hard_header_len = ETH_HLEN + dhd->pub.hdrlen;
+	if (!radiotap_if) {
+		net->hard_header_len = ETH_HLEN + dhd->pub.hdrlen;
 #ifdef HOST_SFH_LLC
-	net->needed_headroom += DOT11_LLC_SNAP_HDR_LEN;
+		net->needed_headroom += DOT11_LLC_SNAP_HDR_LEN;
 #endif
+	}
 
-	net->ethtool_ops = &dhd_ethtool_ops;
+	if (!radiotap_if) {
+		net->ethtool_ops = &dhd_ethtool_ops;
 
-	/* Set up an MTU change notifier as per linux/notifier.h? */
-	dhd->pub.rxsz = DBUS_RX_BUFFER_SIZE_DHD(net);
+		/* Set up an MTU change notifier as per linux/notifier.h? */
+		dhd->pub.rxsz = DBUS_RX_BUFFER_SIZE_DHD(net);
+	}
 
 	/*
 	 * Linux 2.6.25 does not like a blank MAC address, so use a
@@ -14675,8 +15192,9 @@ dhd_register_if(dhd_pub_t *dhdp, int ifidx, bool need_rtnl_lock)
 	 */
 	NETDEV_ADDR_SET(net, ETHER_ADDR_LEN, temp_addr, ETHER_ADDR_LEN);
 
-	if (ifidx == 0)
+	if (!ifp->static_if && ifidx == 0) {
 		DHD_CONS_ONLY(("%s\n", dhd_version));
+	}
 
 	err = dhd_register_net(net, need_rtnl_lock);
 	if (err != 0) {
@@ -14705,7 +15223,7 @@ dhd_register_if(dhd_pub_t *dhdp, int ifidx, bool need_rtnl_lock)
 #endif /* CUSTOMER_HW4_DEBUG */
 
 #if defined(OEM_ANDROID) && (defined(BCMPCIE) || defined(BCMLXSDMMC))
-	if (ifidx == 0) {
+	if (!ifp->static_if && ifidx == 0) {
 #ifdef BCMLXSDMMC
 		up(&dhd_registration_sem);
 #endif /* BCMLXSDMMC */
@@ -14767,6 +15285,81 @@ dhd_register_if(dhd_pub_t *dhdp, int ifidx, bool need_rtnl_lock)
 fail:
 	net->netdev_ops = NULL;
 	return err;
+}
+
+void
+dhd_dump_iflist(dhd_pub_t *dhdp, bool print_ifname)
+{
+	dhd_info_t *dhd = (dhd_info_t *)dhdp->info;
+	int i;
+	dhd_if_t *ifp;
+
+	for (i = 0; i < DHD_MAX_IFS; i++) {
+		ifp = dhd->iflist[i];
+		if (ifp) {
+			if (ifp->net && print_ifname) {
+				DHD_ERROR(("%s: ifidx:%d ifname:%s entry non null in iflist\n",
+						__FUNCTION__, i, ifp->net->name));
+			} else {
+				DHD_ERROR(("%s: index:%d non-null in iflist\n", __FUNCTION__, i));
+			}
+		}
+	}
+}
+
+int
+dhd_register_static_if(dhd_pub_t *dhdp, struct net_device *ndev, bool need_rtnl_lock)
+{
+	dhd_if_t *ifp;
+
+	ifp = dhd_get_static_ifp_by_ndev(dhdp, ndev);
+	if (!ifp) {
+		DHD_ERROR(("%s: Invalid Interface. no ifp entry for %s\n",
+				__FUNCTION__, ndev->name));
+		return BCME_ERROR;
+	}
+
+	return _dhd_register_if(dhdp, DHD_INVALID_IFIDX, need_rtnl_lock, ifp);
+}
+
+int
+dhd_register_if(dhd_pub_t *dhdp, int ifidx, bool need_rtnl_lock)
+{
+	dhd_info_t *dhd = (dhd_info_t *)dhdp->info;
+	dhd_if_t *ifp;
+	u8 static_idx = 0;
+
+	DHD_TRACE(("%s: ifidx %d\n", __FUNCTION__, ifidx));
+	if (dhd == NULL) {
+		DHD_ERROR(("dhd info null\n"));
+		return BCME_ERROR;
+	}
+
+	/* For legacy component compatibility. Needs to be removed after component code
+	 * is updated
+	 */
+	if ((ifidx >= DHD_MAX_IFS) && (ifidx < (DHD_MAX_IFS + DHD_MAX_STATIC_IFS))) {
+		static_idx = (ifidx - DHD_MAX_IFS);
+		ifp = dhd->static_iflist[static_idx];
+		if (!ifp) {
+			DHD_ERROR(("ifp entry not found for static_idx:%d\n", static_idx));
+			return BCME_ERROR;
+		} else {
+			DHD_PRINT(("%s: register I/F for static_idx:%d ifname:%s\n",
+					__FUNCTION__, static_idx, ifp->net->name));
+		}
+		return dhd_register_static_if(dhdp, ifp->net, need_rtnl_lock);
+	}
+
+	if (dhd->iflist[ifidx] == NULL) {
+		DHD_ERROR(("%s: Invalid Interface ifidx:%d\n", __FUNCTION__, ifidx));
+		return BCME_ERROR;
+	}
+
+	ASSERT(dhd && dhd->iflist[ifidx]);
+	ifp = dhd->iflist[ifidx];
+
+	return _dhd_register_if(dhdp, ifidx, need_rtnl_lock, ifp);
 }
 
 void
@@ -14958,12 +15551,20 @@ void dhd_detach(dhd_pub_t *dhdp)
 		/* Cleanup virtual interfaces */
 		dhd_net_if_lock_local(dhd);
 		for (i = 1; i < DHD_MAX_IFS; i++) {
-			if (dhd->iflist[i]) {
+			if (dhd->iflist[i] && !(dhd->static_iflist[i])) {
 				dhd_remove_if(&dhd->pub, i, TRUE);
 			}
 		}
-		dhd_net_if_unlock_local(dhd);
 
+#if defined(WL_STATIC_IF)
+		for (i = 0; i < DHD_MAX_STATIC_IFS; i++) {
+			dhd_if_t *static_ifp = dhd->static_iflist[i];
+			if (static_ifp && static_ifp->net) {
+				dhd_remove_static_if(&dhd->pub, static_ifp->net, TRUE);
+			}
+		}
+#endif /* WL_STATIC_IF */
+		dhd_net_if_unlock_local(dhd);
 		/* 'ifp' indicates primary interface 0, clean it up. */
 		if (ifp && ifp->net) {
 #if (defined(BCM_ROUTER_DHD) && defined(HNDCTF))
@@ -14996,7 +15597,7 @@ void dhd_detach(dhd_pub_t *dhdp)
 #endif /* BCMSDIO && !OEM_ANDROID */
 
 #ifdef DHD_WMF
-			dhd_wmf_cleanup(dhdp, 0);
+			dhd_wmf_cleanup(dhdp, ifp);
 #endif /* DHD_WMF */
 #ifdef DHD_L2_FILTER
 			bcm_l2_filter_arp_table_update(dhdp->osh, ifp->phnd_arp_table, TRUE,
@@ -15791,8 +16392,6 @@ dhd_os_d3ack_wait(dhd_pub_t *pub, uint *condition)
 #endif /* BCMSLTGT */
 
 	timeout = wait_event_timeout(dhd->d3ack_wait, (*condition), timeout);
-	DHD_ERROR(("d3ack_wait %d\n", timeout));
-	dhd_plat_check_msi();
 
 	return timeout;
 }
@@ -16722,8 +17321,6 @@ dhd_dev_get_feature_set(struct net_device *dev)
 		feature_set |= WIFI_FEATURE_INFRA_5G;
 	if (FW_SUPPORTED(dhd, p2p))
 		feature_set |= WIFI_FEATURE_P2P;
-	if (dhd->op_mode & DHD_FLAG_HOSTAP_MODE)
-		feature_set |= WIFI_FEATURE_SOFT_AP;
 	if (FW_SUPPORTED(dhd, tdls))
 		feature_set |= WIFI_FEATURE_TDLS;
 	if (FW_SUPPORTED(dhd, vsdb))
@@ -16794,7 +17391,12 @@ dhd_dev_get_feature_set(struct net_device *dev)
 #endif /* ROAMEXP_SUPPORT */
 #ifdef WL_LATENCY_MODE
 	feature_set |= WIFI_FEATURE_SET_LATENCY_MODE;
+	feature_set |= WIFI_FEATURE_SET_VOIP_MODE;
 #endif /* WL_LATENCY_MODE */
+
+	feature_set |= WIFI_FEATURE_SOFT_AP;
+	feature_set |= WIFI_FEATURE_CACHED_SCAN_RESULTS;
+	feature_set |= WIFI_FEATURE_DYNAMIC_SET_MAC;
 
 #ifdef WL_AGGRESSIVE_ROAM
 	feature_set |= WIFI_FEATURE_ROAMING_MODE_CONTROL;
@@ -19135,6 +19737,28 @@ int net_os_wake_lock(struct net_device *dev)
 	return ret;
 }
 
+void dhd_art_wake_lock(dhd_pub_t *pub)
+{
+	dhd_info_t *dhd = (dhd_info_t *)(pub->info);
+
+	if (dhd) {
+#ifdef CONFIG_HAS_WAKELOCK
+		dhd_wake_lock(dhd->wl_artwake);
+#endif /* CONFIG_HAS_WAKELOCK */
+	}
+}
+
+void dhd_art_wake_unlock(dhd_pub_t *pub)
+{
+	dhd_info_t *dhd = (dhd_info_t *)(pub->info);
+
+	if (dhd) {
+#ifdef CONFIG_HAS_WAKELOCK
+		dhd_wake_unlock(dhd->wl_artwake);
+#endif /* CONFIG_HAS_WAKELOCK */
+	}
+}
+
 int dhd_os_wake_unlock(dhd_pub_t *pub)
 {
 	dhd_info_t *dhd = (dhd_info_t *)(pub->info);
@@ -19248,7 +19872,7 @@ dhd_os_check_wakelock_all(dhd_pub_t *pub)
 {
 #if defined(CONFIG_HAS_WAKELOCK) || defined(BCMSDIO)
 #if defined(CONFIG_HAS_WAKELOCK)
-	int l1, l2, l3, l4, l7, l8, l9, l10;
+	int l1, l2, l3, l4, l7, l8, l9, l10, l11;
 	int l5 = 0, l6 = 0;
 	int c, lock_active;
 #endif /* CONFIG_HAS_WAKELOCK */
@@ -19283,7 +19907,8 @@ dhd_os_check_wakelock_all(dhd_pub_t *pub)
 	l8 = dhd_wake_lock_active(dhd->wl_pmwake);
 	l9 = dhd_wake_lock_active(dhd->wl_txflwake);
 	l10 = dhd_wake_lock_active(dhd->wl_nanwake);
-	lock_active = (l1 || l2 || l3 || l4 || l5 || l6 || l7 || l8 || l9 || l10);
+	l11 = dhd_wake_lock_active(dhd->wl_artwake);
+	lock_active = (l1 || l2 || l3 || l4 || l5 || l6 || l7 || l8 || l9 || l10 || l11);
 
 	/* Indicate to the Host to avoid going to suspend if internal locks are up */
 	if (lock_active) {
@@ -19515,6 +20140,7 @@ void dhd_os_wake_lock_init(struct dhd_info *dhd)
 	dhd_wake_lock_init(dhd->wl_scanwake, dhd_bus_to_dev(dhd->pub.bus), "wlan_scan_wake");
 #endif /* DHD_USE_SCAN_WAKELOCK */
 	dhd_wake_lock_init(dhd->wl_nanwake, dhd_bus_to_dev(dhd->pub.bus), "wlan_nan_wake");
+	dhd_wake_lock_init(dhd->wl_artwake, dhd_bus_to_dev(dhd->pub.bus), "wlan_art_wake");
 #endif /* CONFIG_HAS_WAKELOCK */
 #ifdef DHD_TRACE_WAKE_LOCK
 	dhd_wk_lock_trace_init(dhd);
@@ -19541,6 +20167,7 @@ void dhd_os_wake_lock_destroy(struct dhd_info *dhd)
 	dhd_wake_lock_destroy(dhd->wl_scanwake);
 #endif /* DHD_USE_SCAN_WAKELOCK */
 	dhd_wake_lock_destroy(dhd->wl_nanwake);
+	dhd_wake_lock_destroy(dhd->wl_artwake);
 #ifdef DHD_TRACE_WAKE_LOCK
 	dhd_wk_lock_trace_deinit(dhd);
 #endif /* DHD_TRACE_WAKE_LOCK */
@@ -20269,6 +20896,12 @@ void dhd_schedule_memdump(dhd_pub_t *dhdp, uint8 *buf, uint32 size)
 			(dhdp->open_in_progress || dhdp->stop_in_progress)) {
 		/* dhd_mem_dump will clear memdump_type, so cache it */
 		uint32 memdump_type = dhdp->memdump_type;
+
+		/* protects against cases where flags are missing */
+		if (dhdp->memdump_type == DUMP_TYPE_DONGLE_TRAP) {
+			dhdp->dongle_trap_occured = TRUE;
+		}
+
 		dhd_info->scheduled_memdump = FALSE;
 		DHD_PRINT(("%s:Collecting mem_dump in same context\n ", __FUNCTION__));
 		dhd_mem_dump((void *)dhdp->info, (void *)dump, 0);
@@ -25145,7 +25778,7 @@ dhd_check_dhcp_request_pending(struct net_device *net)
 		return FALSE;
 
 	ifidx = dhd_net2idx(dhd, net);
-	if ((ifidx < 0) || (ifidx >= DHD_MAX_IFS)) {
+	if (ifidx == DHD_BAD_IF) {
 		DHD_ERROR(("%s: invalid ifidx %d\n", __FUNCTION__, ifidx));
 		return FALSE;
 	}
@@ -25162,4 +25795,43 @@ dhd_initilize_idsup(uint16 chipid)
 	 *  Once offload of 4-way HS to FW is ready this will be removed.
 	 */
 #endif /* BCMSUP_4WAY_HANDSHAKE */
+}
+
+#ifdef DHD_ART
+bool
+dhd_is_art_iface(dhd_pub_t *dhdp, int ifidx)
+{
+	dhd_info_t *dhdinfo = (dhd_info_t *)dhdp->info;
+	dhd_if_t *ifp = NULL;
+
+	if (ifidx < 0 || ifidx >= DHD_MAX_STATIC_IFS ||
+		!dhdinfo->iflist[ifidx] ||
+		!dhdinfo->monitor_dev) {
+		return FALSE;
+	}
+
+	ifp = dhdinfo->iflist[ifidx];
+	if (!ifp || !ifp->net || (ifp->net->name[0] == '\0')) {
+		return FALSE;
+	}
+
+	if (IS_ART_IFACE(ifp->net->name)) {
+		return TRUE;
+	} else {
+		return FALSE;
+	}
+}
+#endif /* DHD_ART */
+
+bool
+dhd_is_art_skb(struct sk_buff *skb)
+{
+	if (!skb || !skb->dev || (skb->dev->name[0] == '\0')) {
+		return FALSE;
+	}
+	if (IS_ART_IFACE(skb->dev->name)) {
+		return TRUE;
+	} else {
+		return FALSE;
+	}
 }

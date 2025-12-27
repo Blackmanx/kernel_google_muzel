@@ -8510,14 +8510,6 @@ int wl_update_ml_link_stat(struct bcm_cfg80211 *cfg, struct net_device *inet_nde
 		}
 	}
 
-	err = wldev_link_get_rssi(inet_ndev, link_idx, &scbval);
-	if (unlikely(err)) {
-		WL_ERR(("get_rssi error (%d)\n", err));
-		goto exit;
-	}
-
-	COMPAT_ASSIGN_VALUE(iface, rssi_mgmt, scbval.val);
-
 	/* Update duty cycle info based on RSDB/VSDB */
 	if (wl_cfg80211_determine_rsdb_scc_mode(cfg, link_idx)) {
 		COMPAT_ASSIGN_VALUE(iface, time_slicing_duty_cycle_percent,
@@ -8534,7 +8526,13 @@ int wl_update_ml_link_stat(struct bcm_cfg80211 *cfg, struct net_device *inet_nde
 		goto exit;
 	}
 
-	COMPAT_ASSIGN_VALUE(iface, num_peers, NUM_PEER);
+	err = wldev_link_get_rssi(inet_ndev, link_idx, &scbval);
+	if (unlikely(err)) {
+		WL_ERR(("get_rssi error (%d)\n", err));
+		goto exit;
+	}
+
+	COMPAT_ASSIGN_VALUE(iface, rssi_mgmt, scbval.val);
 
 	err = wldev_link_iovar_getbuf(inet_ndev, link_idx, "bss_peer_info",
 		NULL, 0, iovar_buf, WLC_IOCTL_MAXLEN, NULL);
@@ -8544,12 +8542,13 @@ int wl_update_ml_link_stat(struct bcm_cfg80211 *cfg, struct net_device *inet_nde
 			(void)memcpy_s(&iface.peer_info->peer_mac_address, ETH_ALEN,
 				peer_list_info->peer_info->ea.octet, ETH_ALEN);
 		}
-	} else if (err == BCME_UNSUPPORTED) {
-		WL_ERR(("bss_peer_info is unsupported \n"));
-	} else if (err == BCME_NOTASSOCIATED) {
-		WL_ERR(("bss_peer_info IOVAR failed. STA is not associated.\n"));
 	} else {
-		WL_ERR(("error (%d) - size = %zu\n", err, sizeof(bss_peer_list_info_t)));
+		if (err == BCME_UNSUPPORTED) {
+			WL_ERR(("bss_peer_info is unsupported \n"));
+		} else if (err == BCME_NOTASSOCIATED) {
+			WL_ERR(("bss_peer_info IOVAR failed. STA is not associated.\n"));
+			err = BCME_OK;
+		}
 		goto exit;
 	}
 
@@ -8565,7 +8564,6 @@ int wl_update_ml_link_stat(struct bcm_cfg80211 *cfg, struct net_device *inet_nde
 			num_rate = NUM_RATE_NONBE;
 		}
 		WL_INFORM_MEM(("num_rate %d\n", num_rate));
-		COMPAT_ASSIGN_VALUE(iface, peer_info->num_rate, num_rate);
 	}
 
 	err = wldev_link_iovar_getbuf(inet_ndev, link_idx, "bssload_report", NULL,
@@ -8587,6 +8585,8 @@ int wl_update_ml_link_stat(struct bcm_cfg80211 *cfg, struct net_device *inet_nde
 		goto exit;
 	}
 
+	COMPAT_ASSIGN_VALUE(iface, peer_info->num_rate, num_rate);
+	COMPAT_ASSIGN_VALUE(iface, num_peers, NUM_PEER);
 	COMPAT_MEMCOPY_IFACE(*output, *total_len, wifi_link_stat, iface, wifi_rate_stat_v1);
 
 	if ((err == BCME_OK) && (peer_list_info && peer_list_info->count > 0)) {
@@ -8623,12 +8623,6 @@ int wl_update_ml_link_stat(struct bcm_cfg80211 *cfg, struct net_device *inet_nde
 		*total_len = *total_len -
 			sizeof(wifi_rate_stat_v1) +
 			(NUM_PEER * num_rate * sizeof(wifi_rate_stat_v1));
-	} else if (err == BCME_NOTASSOCIATED || err == BCME_UNSUPPORTED) {
-		/* Skipping to read the rate stat for not associated case,
-		 * as cca stats are still needed, not returning the err code
-		 */
-		WL_DBG(("not associated. peer_info skipped\n"));
-		err = BCME_OK;
 	}
 
 exit:

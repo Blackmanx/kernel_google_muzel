@@ -1364,6 +1364,42 @@ dhd_dump_txrx_stats(dhd_pub_t *dhdp, struct bcmstrbuf *strbuf)
 #endif /* RX_CSO */
 	dhd_print_if_stats(dhdp, strbuf);
 	bcm_bprintf(strbuf, "\n");
+
+#ifdef DHD_ART
+	/* ART counters */
+	bcm_bprintf(strbuf, "\nART Interface Statistics:\n");
+	bcm_bprintf(strbuf, "=======================\n");
+
+	/* TX/RX/Control Stats */
+	bcm_bprintf(strbuf, "TX packets: %llu\n", dhdp->art_counters.tx_packets);
+	bcm_bprintf(strbuf, "TX errors: %llu\n", dhdp->art_counters.tx_errors);
+	bcm_bprintf(strbuf, "TX tot_txcpl: %llu\n", dhdp->art_counters.tot_txcpl);
+	bcm_bprintf(strbuf, "RX packets: %llu\n", dhdp->art_counters.rx_packets);
+	bcm_bprintf(strbuf, "RX errors: %llu\n", dhdp->art_counters.rx_errors);
+	bcm_bprintf(strbuf, "Control packets: %llu\n", dhdp->art_counters.ctrl_packets);
+	bcm_bprintf(strbuf, "Control errors: %llu\n", dhdp->art_counters.ctrl_errors);
+
+	/* Detailed RX Error Stats */
+	bcm_bprintf(strbuf, "\nDetailed RX Error Counters:\n");
+	bcm_bprintf(strbuf, "RX dbg monitor packets: %llu\n",
+		dhdp->art_counters.rx_dbg_monitor_packets);
+	bcm_bprintf(strbuf, "No monitor device errors: %llu\n",
+		dhdp->art_counters.rx_no_monitor_dev_errors);
+	bcm_bprintf(strbuf, "SKB realloc headroom errors: %llu\n",
+		dhdp->art_counters.rx_skb_realloc_headroom_errors);
+	bcm_bprintf(strbuf, "SKB headroom < ether header: %llu\n",
+		dhdp->art_counters.rx_skb_headroom_lt_etherheader);
+	bcm_bprintf(strbuf, "BSSID mismatch: %llu\n",
+		dhdp->art_counters.rx_bssid_mismatch);
+	bcm_bprintf(strbuf, "First packet dropped: %llu\n",
+		dhdp->art_counters.rx_first_pkt_dropped);
+	bcm_bprintf(strbuf, "First/prev packet dropped: %llu\n",
+		dhdp->art_counters.rx_first_or_prev_pkt_dropped);
+	bcm_bprintf(strbuf, "Memory copy errors: %llu\n",
+		dhdp->art_counters.rx_memcpy_errors);
+	bcm_bprintf(strbuf, "SKB length too small: %llu\n",
+		dhdp->art_counters.skb_len_too_less);
+#endif /* DHD_ART */
 #ifdef DHD_PKTDUMP_ROAM
 	dhd_dump_pktcnt_stats(dhdp, strbuf);
 #endif /* DHD_PKTDUMP_ROAM */
@@ -1865,7 +1901,22 @@ dhd_wl_ioctl(dhd_pub_t *dhd_pub, int ifidx, wl_ioctl_t *ioc, void *buf, int len)
 		}
 #endif /* REPORT_FATAL_TIMEOUTS */
 
+#ifdef DHD_ART
+		/* Check if we're using an ART interface */
+		if (dhd_is_art_iface(dhd_pub, ifidx)) {
+			dhd_pub->art_counters.ctrl_packets++;
+		}
+#endif /* DHD_ART */
 		ret = dhd_prot_ioctl(dhd_pub, ifidx, ioc, buf, len);
+
+#ifdef DHD_ART
+		if (ret != BCME_OK) {
+			/* Check if we're using an ART interface */
+			if (dhd_is_art_iface(dhd_pub, ifidx)) {
+				dhd_pub->art_counters.ctrl_errors++;
+			}
+		}
+#endif /* DHD_ART */
 
 #ifdef DUMP_IOCTL_IOV_LIST
 		if (ret == -ETIMEDOUT) {
@@ -2777,6 +2828,9 @@ dhd_doiovar(dhd_pub_t *dhd_pub, const bcm_iovar_t *vi, uint32 actionid, const ch
 #if defined(DHD_LB_STATS)
 		DHD_LB_STATS_RESET(dhd_pub);
 #endif /* DHD_LB_STATS */
+#ifdef DHD_ART
+		bzero(&dhd_pub->art_counters, sizeof(dhd_art_counters_t));
+#endif /* DHD_ART */
 		break;
 
 #ifdef BCMPERFSTATS

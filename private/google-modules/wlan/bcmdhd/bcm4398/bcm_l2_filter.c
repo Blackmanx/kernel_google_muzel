@@ -1,7 +1,7 @@
 /*
  * L2 Filter handling functions
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -42,7 +42,6 @@
 #else
 #define	L2_FILTER_ERROR(args)
 #endif	/* BCMDBG_ERR */
-
 
 #ifdef BCMDBG_MSG
 #define	L2_FILTER_MSG(args)	printf args
@@ -773,7 +772,6 @@ bcm_l2_filter_block_tdls(osl_t *osh, void *pktbuf)
 
 	if ((action_field == TDLS_SETUP_REQ) || (action_field == TDLS_DISCOVERY_REQ))
 		return BCME_OK;
-
 
 	return BCME_ERROR;
 }

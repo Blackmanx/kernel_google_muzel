@@ -6869,34 +6869,6 @@ hdd_sap_nan_check_and_disable_unsupported_ndi(struct wlan_objmgr_psoc *psoc,
 }
 #endif
 
-#if defined(WLAN_SUPPORT_TWT) && \
-	(LINUX_VERSION_CODE >= KERNEL_VERSION(5, 3, 0))
-static void
-wlan_hdd_update_twt_responder(struct hdd_context *hdd_ctx,
-			      struct cfg80211_ap_settings *params)
-{
-	bool twt_res_svc_cap, enable_twt;
-	uint32_t reason;
-
-	enable_twt = ucfg_mlme_is_twt_enabled(hdd_ctx->psoc);
-	ucfg_mlme_get_twt_res_service_cap(hdd_ctx->psoc, &twt_res_svc_cap);
-	ucfg_mlme_set_twt_responder(hdd_ctx->psoc, QDF_MIN(
-					twt_res_svc_cap,
-					(enable_twt && params->twt_responder)));
-	if (params->twt_responder) {
-		hdd_send_twt_responder_enable_cmd(hdd_ctx);
-	} else {
-		reason = HOST_TWT_DISABLE_REASON_NONE;
-		hdd_send_twt_responder_disable_cmd(hdd_ctx, reason);
-	}
-}
-#else
-static inline void
-wlan_hdd_update_twt_responder(struct hdd_context *hdd_ctx,
-			      struct cfg80211_ap_settings *params)
-{}
-#endif
-
 #ifdef CFG80211_SINGLE_NETDEV_MULTI_LINK_SUPPORT
 static inline uint32_t
 wlan_util_get_centre_freq(struct wireless_dev *wdev, unsigned int link_id)
@@ -7220,12 +7192,6 @@ static int __wlan_hdd_cfg80211_start_ap(struct wiphy *wiphy,
 		}
 		adapter->session.ap.sap_config.ch_width_orig =
 						chandef->width;
-
-		/*
-		 * Enable/disable TWT responder based on
-		 * the twt_responder flag
-		 */
-		wlan_hdd_update_twt_responder(hdd_ctx, params);
 
 		hdd_place_marker(adapter, "TRY TO START", NULL);
 		status =

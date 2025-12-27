@@ -118,7 +118,6 @@ BWL_PRE_PACKED_STRUCT struct bcm_nd_msg {
 	struct	ipv6_addr	target;
 } BWL_POST_PACKED_STRUCT;
 
-
 /* Neighibor Solicitation/Advertisement Optional Structure */
 BWL_PRE_PACKED_STRUCT struct nd_msg_opt {
 	uint8 type;

@@ -2,7 +2,7 @@
  * Linux-specific abstractions to gain some independence from linux kernel versions.
  * Pave over some 2.2 versus 2.4 versus 2.6 kernel differences.
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -199,7 +199,6 @@ typedef irqreturn_t(*FN_ISR) (int irq, void *dev_id, struct pt_regs *ptregs);
 #include <net/ieee80211.h>
 #endif
 #endif /* LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 30) */
-
 
 #ifndef __exit
 #define __exit
@@ -621,7 +620,6 @@ typedef struct {
 	spinlock_t	spinlock;
 	int		up_cnt;
 } tsk_ctl_t;
-
 
 /* ANDREY: new MACROs to start stop threads(OLD kthread API STYLE) */
 /* requires  tsk_ctl_t tsk  argument, the caller's priv data is passed in owner ptr */

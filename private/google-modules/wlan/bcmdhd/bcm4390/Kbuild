@@ -360,6 +360,7 @@ ifneq ($(CONFIG_BCMDHD_PCIE),)
   ifneq ($(CONFIG_ARCH_HISI),)
     DHDCFLAGS += -DDHD_PKTID_AUDIT_ENABLED
   endif
+
   # STBTPUT: Not enabled for the STB platform due to overhead
   ifeq ($(CONFIG_ARCH_BRCMSTB),)
     # Enable pktid logging
@@ -385,11 +386,6 @@ ifneq ($(CONFIG_BCMDHD_PCIE),)
   # GRO (Generic Receive Offload) feature
   DHDCFLAGS += -DENABLE_DHD_GRO
 
-  #STBTPUT: Not enabled for the STB platform due to overhead
-  ifeq ($(CONFIG_ARCH_BRCMSTB),)
-    # Support Monitor Mode
-    DHDCFLAGS += -DWL_MONITOR
-  endif
   # WLAN-BT Regon coordinator
   DHDCFLAGS += -DWBRC
   DHDCFLAGS += -DWBRC_WLAN_ON_FIRST_ALWAYS
@@ -501,12 +497,10 @@ DHDCFLAGS += -DUSE_WL_TXBF
 DHDCFLAGS += -DSOFTAP_UAPSD_OFF
 DHDCFLAGS += -DVSDB
 DHDCFLAGS += -DWL_CFG80211_STA_EVENT
-#STBTPUT: Disabled for tput in STB platform
-ifeq ($(CONFIG_ARCH_BRCMSTB),)
-  DHDCFLAGS += -DWL_CFG80211_MONITOR
-  # Active Radio tap
-  DHDCFLAGS += -DDHD_ART
-endif
+DHDCFLAGS += -DWL_MONITOR
+DHDCFLAGS += -DWL_CFG80211_MONITOR
+# Active Radio tap
+DHDCFLAGS += -DDHD_ART
 ifneq ($(CONFIG_CFG80211_FILS_BKPORT),)
   DHDCFLAGS += -DWL_FILS
 endif

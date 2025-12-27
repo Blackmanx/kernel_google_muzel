@@ -25,7 +25,6 @@
 #ifndef _osl_ext_h_
 #define _osl_ext_h_
 
-
 /* ---- Include Files ---------------------------------------------------- */
 
 #if defined(THREADX)
@@ -79,7 +78,6 @@ typedef enum
 typedef void* osl_ext_timer_arg_t;
 typedef void (*osl_ext_timer_callback)(osl_ext_timer_arg_t arg);
 
-
 /* -----------------------------------------------------------------------
  * Tasks.
  */
@@ -106,12 +104,10 @@ typedef enum
 	OSL_EXT_TASK_NUM_PRIORITES
 } osl_ext_task_priority_t;
 
-
 #ifndef OSL_EXT_DISABLED
 
 /* ---- Variable Externs ------------------------------------------------- */
 /* ---- Function Prototypes ---------------------------------------------- */
-
 
 /* --------------------------------------------------------------------------
 ** Semaphore
@@ -180,7 +176,6 @@ osl_ext_status_t osl_ext_sem_give(osl_ext_sem_t *sem);
 */
 osl_ext_status_t osl_ext_sem_take(osl_ext_sem_t *sem, osl_ext_time_ms_t timeout_msec);
 
-
 /* --------------------------------------------------------------------------
 ** Mutex
 */
@@ -242,7 +237,6 @@ osl_ext_status_t osl_ext_mutex_acquire(osl_ext_mutex_t *mutex, osl_ext_time_ms_t
 *****************************************************************************
 */
 osl_ext_status_t osl_ext_mutex_release(osl_ext_mutex_t *mutex);
-
 
 /* --------------------------------------------------------------------------
 ** Timers
@@ -423,7 +417,6 @@ osl_ext_status_t osl_ext_task_change_priority(osl_ext_task_t *task,
 */
 osl_ext_status_t osl_ext_task_delete(osl_ext_task_t *task);
 
-
 /****************************************************************************
 * Function:   osl_ext_task_is_running
 *
@@ -435,7 +428,6 @@ osl_ext_status_t osl_ext_task_delete(osl_ext_task_t *task);
 *****************************************************************************
 */
 osl_ext_task_t *osl_ext_task_current(void);
-
 
 /****************************************************************************
 * Function:   osl_ext_task_yield
@@ -487,7 +479,6 @@ osl_ext_status_t osl_ext_task_resume(osl_ext_task_t *task);
 *****************************************************************************
 */
 osl_ext_status_t osl_ext_task_enable_stack_check(void);
-
 
 /* --------------------------------------------------------------------------
 ** Queue
@@ -587,7 +578,6 @@ osl_ext_status_t osl_ext_queue_receive(osl_ext_queue_t *queue,
 */
 osl_ext_status_t osl_ext_queue_count(osl_ext_queue_t *queue, int *count);
 
-
 /* --------------------------------------------------------------------------
 ** Event
 */
@@ -653,7 +643,6 @@ osl_ext_status_t osl_ext_event_get(osl_ext_event_t *event,
 osl_ext_status_t osl_ext_event_set(osl_ext_event_t *event,
 	osl_ext_event_bits_t event_bits);
 
-
 /* --------------------------------------------------------------------------
 ** Interrupt
 */
@@ -669,7 +658,6 @@ osl_ext_status_t osl_ext_event_set(osl_ext_event_t *event,
 *****************************************************************************
 */
 osl_ext_interrupt_state_t osl_ext_interrupt_disable(void);
-
 
 /****************************************************************************
 * Function:   osl_ext_interrupt_restore

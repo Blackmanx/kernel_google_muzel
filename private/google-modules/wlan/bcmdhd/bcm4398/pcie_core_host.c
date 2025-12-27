@@ -1,7 +1,7 @@
 /*
  * Contains PCIe related functions that are required for host builds.
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -102,7 +102,6 @@ void pcie_watchdog_reset(osl_t *osh, si_t *sih, uint32 wd_mask, uint32 wd_val)
 	}
 	si_setcoreidx(sih, origidx);
 }
-
 
 /* CRWLPCIEGEN2-117 pcie_pipe_Iddq should be controlled
  * by the L12 state from MAC to save power by putting the

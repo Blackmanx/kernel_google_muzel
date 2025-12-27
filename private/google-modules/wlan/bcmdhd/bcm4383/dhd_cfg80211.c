@@ -565,7 +565,7 @@ int dhd_cfgvendor_priv_string_handler(struct bcm_cfg80211 *cfg, struct wireless_
 	dhd_pub_t *dhd;
 	dhd_ioctl_t ioc = { 0, NULL, 0, 0, 0, 0, 0};
 	int ret = 0;
-	int8 index;
+	int index;
 
 	WL_TRACE(("entry: cmd = %d\n", nlioc->cmd));
 

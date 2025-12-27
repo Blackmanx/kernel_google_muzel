@@ -2,7 +2,7 @@
  * Broadcom Dongle Host Driver (DHD), Generic work queue framework
  * Generic interface to handle dhd deferred work events
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -179,7 +179,6 @@ void
 dhd_deferred_work_deinit(void *work)
 {
 	struct dhd_deferred_wq *deferred_work = work;
-
 
 	if (!deferred_work) {
 		DHD_ERROR(("%s: deferred work has been freed already\n",

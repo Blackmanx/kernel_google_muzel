@@ -2,7 +2,7 @@
  * Broadcom Dongle Host Driver (DHD), Linux-specific network interface
  * Basically selected code segments from usb-cdc.c and usb-rndis.c
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -697,7 +697,6 @@ update_sock_qos_maxfl(struct dhd_info *dev, const char *buf, size_t count)
 
 	return count;
 }
-
 
 static ssize_t
 show_sock_qos_stats(struct dhd_info *dev, char *buf)
@@ -2395,6 +2394,36 @@ static struct dhd_attr dhd_attr_control_he_enab=
 __ATTR(control_he_enab, 0660, show_control_he_enab, set_control_he_enab);
 #endif /* CUSTOM_CONTROL_HE_ENAB */
 
+#ifdef DHD_DUMP_RXPKTIDMAP
+static ssize_t
+show_dump_rxpktidmap(struct dhd_info *dhd, char *buf)
+{
+	ssize_t ret = 0;
+	if (!dhd) {
+		DHD_ERROR(("%s: dhd is NULL\n", __FUNCTION__));
+		return ret;
+	}
+
+	DHD_PRINT(("%s: read not implemented for dump_rxpktidmap\n", __FUNCTION__));
+	return ret;
+}
+
+static ssize_t
+set_dump_rxpktidmap(struct dhd_info *dhd, const char *buf, size_t count)
+{
+	if (!dhd) {
+		DHD_ERROR(("%s: dhd is NULL\n", __FUNCTION__));
+		return count;
+	}
+
+	dhd_dump_rxpktidmap(&dhd->pub);
+	DHD_PRINT(("%s: dump_rxpktidmap done\n", __FUNCTION__));
+	return count;
+}
+static struct dhd_attr dhd_attr_dump_rxpktidmap =
+__ATTR(dump_rxpktidmap, 0660, show_dump_rxpktidmap, set_dump_rxpktidmap);
+#endif /* DHD_DUMP_RXPKTIDMAP */
+
 #if defined(WLAN_ACCEL_BOOT)
 static ssize_t
 show_wl_accel_force_reg_on(struct dhd_info *dhd, char *buf)
@@ -2707,7 +2736,6 @@ set_wl_debug_level(struct dhd_info *dhd, const char *buf, size_t count)
 			       "SUBMODULE:LEVEL (%d tokens)\n",
 			       tbuf, token, tokens));
 
-
 	}
 	DHD_INFO(("changed wl_dbg_level %d \n", wl_dbg_level));
 	return count;
@@ -2936,6 +2964,9 @@ static struct attribute *default_file_attrs[] = {
 #if defined(WLAN_ACCEL_BOOT)
 	&dhd_attr_wl_accel_force_reg_on.attr,
 #endif /* WLAN_ACCEL_BOOT */
+#ifdef DHD_DUMP_RXPKTIDMAP
+	&dhd_attr_dump_rxpktidmap.attr,
+#endif /* DHD_DUMP_RXPKTIDMAP */
 #ifdef PWRSTATS_SYSFS
 	&dhd_attr_pwrstats_path.attr,
 #endif /* PWRSTATS_SYSFS */
@@ -3318,7 +3349,6 @@ write_cpumask_set8(struct dhd_info *dev, const char *buf, size_t count)
 
 static struct dhd_attr dhd_cpumask_set8 =
 __ATTR(cpumask_set8, 0660, read_cpumask_set8, write_cpumask_set8);
-
 
 static ssize_t
 read_cpumask_set4(struct dhd_info *dev, char *buf)

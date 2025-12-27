@@ -775,11 +775,14 @@ typedef struct wl_event_data_natoe {
 #define WLC_E_IF_ROLE_WDS		2	/* WDS link */
 #define WLC_E_IF_ROLE_P2P_GO		3	/* P2P Group Owner */
 #define WLC_E_IF_ROLE_P2P_CLIENT	4	/* P2P Client */
+#define WLC_E_IF_ROLE_ART		5	/* Active Radiotap */
 
 #define WLC_E_IF_ROLE_IBSS		8	/* IBSS */
 #define WLC_E_IF_ROLE_NAN		9	/* NAN */
 
 #define WLC_E_IF_ROLE_MESH		10u	/* identifies the role as MESH */
+
+#define WLC_E_IF_ROLE_NAN_NMI		11u	/* identifies the interface role as NAN NMI */
 
 /* WLC_E_RSSI event data */
 typedef struct wl_event_data_rssi {

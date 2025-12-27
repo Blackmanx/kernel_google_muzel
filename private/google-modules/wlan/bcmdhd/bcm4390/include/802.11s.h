@@ -133,7 +133,6 @@ BWL_PRE_PACKED_STRUCT struct mesh_targetinfo {
 } BWL_POST_PACKED_STRUCT;
 typedef struct mesh_targetinfo mesh_targetinfo_t;
 
-
 /* Mesh PREP IE */
 BWL_PRE_PACKED_STRUCT struct mesh_prep_ie {
 	uint8	id;
@@ -163,7 +162,6 @@ BWL_PRE_PACKED_STRUCT struct mesh_prep_ie {
 	} u;
 } BWL_POST_PACKED_STRUCT;
 typedef struct mesh_prep_ie mesh_prep_ie_t;
-
 
 /* Mesh PERR IE */
 struct mesh_perr_ie {

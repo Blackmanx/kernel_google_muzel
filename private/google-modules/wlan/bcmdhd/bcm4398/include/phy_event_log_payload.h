@@ -4,7 +4,7 @@
  * This file describes the payloads of PHY related event log entries that are data buffers
  * rather than formatted string entries.
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -86,7 +86,6 @@ typedef struct {
 	uint32 txbar;
 	uint32 rxbar;
 	uint32 rxbeaconbss;
-
 
 	uint32 txrts;
 	uint32	txucast;	/**< number of unicast tx expecting response other than cts/cwcts */
@@ -4948,7 +4947,6 @@ typedef struct phy_periodic_log_v29 {
 	/* Logs ucode counters and NAVs */
 	phy_periodic_counters_v12_t counters_peri_log;
 } phy_periodic_log_v29_t;
-
 
 /* ************************************************** */
 /* The version 255 for the logging data structures    */

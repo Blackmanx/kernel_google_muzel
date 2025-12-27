@@ -839,7 +839,6 @@ BWL_PRE_PACKED_STRUCT struct dot11_rmreq_pause_time {
 typedef struct dot11_rmreq_pause_time dot11_rmreq_pause_time_t;
 #define DOT11_RMREQ_PAUSE_LEN	7
 
-
 /* Neighbor Report subelements ID (11k & 11v) */
 #define DOT11_NGBR_TSF_INFO_SE_ID	1
 #define DOT11_NGBR_CCS_SE_ID		2
@@ -922,7 +921,6 @@ BWL_PRE_PACKED_STRUCT struct dot11_neighbor_rep_ie {
 } BWL_POST_PACKED_STRUCT;
 typedef struct dot11_neighbor_rep_ie dot11_neighbor_rep_ie_t;
 #define DOT11_NEIGHBOR_REP_IE_FIXED_LEN	13u
-
 
 /** Link Measurement */
 BWL_PRE_PACKED_STRUCT struct dot11_lmreq {

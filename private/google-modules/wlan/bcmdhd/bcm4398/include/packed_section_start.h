@@ -15,7 +15,7 @@
  * #include <packed_section_end.h>
  *
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -75,7 +75,6 @@ VARIABLE_IS_NOT_USED alignment_test(void)
 	STATIC_ASSERT(sizeof(T4_t) == 12);
 }
 #endif /* _alignment_test_ */
-
 
 /* Error check - BWL_PACKED_SECTION is defined in packed_section_start.h
  * and undefined in packed_section_end.h. If it is already defined at this

@@ -21,7 +21,6 @@
  * <<Broadcom-WL-IPTag/Dual:>>
  */
 
-
 #include <linux/vmalloc.h>
 #include <net/rtnetlink.h>
 

@@ -42,7 +42,6 @@ extern size_t strlcpy(char *dest, const char *src, size_t size);
 #endif /* !defined(FREEBSD) && !defined(MACOSX) && !defined(BCM_USE_PLATFORM_STRLCPY) */
 extern size_t strlcat_s(char *dest, const char *src, size_t size);
 
-
 /* Remap xxx_s() APIs to use compiler builtin functions for C standard library functions.
  * The intent is to identify buffer overflow at compile-time for the safe stdlib APIs when
  * the user-specified destination buffer-size is incorrect.

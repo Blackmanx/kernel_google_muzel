@@ -6,7 +6,7 @@
  * FTM - Fine Timing Measuremant
  * PASN - Preassociation security negotiation
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -617,7 +617,6 @@ BWL_PRE_PACKED_STRUCT union pasn_params_cbinfo_field {
 	pasn_params_sta_cbinfo_field_t sta_cbinfo;
 } BWL_POST_PACKED_STRUCT;
 typedef union pasn_params_cbinfo_field pasn_params_cbinfo_field_t;
-
 
 BWL_PRE_PACKED_STRUCT struct pasn_params_group_key {
 	uint16 group_id;	/* IANA id of Finite Cyclic Group */

@@ -31,7 +31,6 @@
 /* This marks the start of a packed structure section. */
 #include <packed_section_start.h>
 
-
 #define ICMP_TYPE_ECHO_REQUEST	8	/* ICMP type echo request */
 #define ICMP_TYPE_ECHO_REPLY		0	/* ICMP type echo reply */
 

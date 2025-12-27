@@ -1,7 +1,7 @@
 /*
  * Neighbor Awareness Networking
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -245,7 +245,6 @@ typedef enum nan_range_role {
 	NAN_RANGING_ROLE_INITIATOR = 1,
 	NAN_RANGING_ROLE_RESPONDER = 2
 } nan_range_role_t;
-
 
 typedef struct nan_svc_inst {
 	uint8  inst_id;      /* publisher/subscriber id */
@@ -696,7 +695,6 @@ typedef struct wl_nan_iov {
 	uint16 nan_iov_len;
 	uint8 *nan_iov_buf;
 } wl_nan_iov_t;
-
 
 #ifdef WL_NAN_DISC_CACHE
 

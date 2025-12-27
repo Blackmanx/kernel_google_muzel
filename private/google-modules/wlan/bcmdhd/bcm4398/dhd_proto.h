@@ -4,7 +4,7 @@
  * Provides type definitions and function prototypes used to link the
  * DHD OS, bus, and protocol modules.
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -292,7 +292,6 @@ extern uint32 dhd_prot_rxdur_scale(dhd_pub_t *dhd, bool set, uint32 val);
 extern int dhd_prot_mdring_link_unlink(dhd_pub_t *dhd, int idx, bool link);
 extern int dhd_prot_mdring_linked_ring(dhd_pub_t *dhd);
 extern int dhd_prot_init_md_rings(dhd_pub_t *dhd);
-
 
 #ifdef DHD_MAP_LOGGING
 extern void dhd_prot_smmu_fault_dump(dhd_pub_t *dhdp);

@@ -78,7 +78,6 @@ struct dot3_mac_llc_snapvlan_header {
 
 #define	ETHERVLAN_HDR_LEN	(ETHER_HDR_LEN + VLAN_TAG_LEN)
 
-
 /* This marks the end of a packed structure section. */
 #include <packed_section_end.h>
 

@@ -124,6 +124,7 @@
 #define DHD_IF_ROLE_WDS(pub, idx)	(DHD_IF_ROLE(pub, idx) == WLC_E_IF_ROLE_WDS)
 #define DHD_IF_ROLE_IBSS(pub, idx)	(DHD_IF_ROLE(pub, idx) == WLC_E_IF_ROLE_IBSS)
 #define DHD_IF_ROLE_NAN(pub, idx)	(DHD_IF_ROLE(pub, idx) == WLC_E_IF_ROLE_NAN)
+#define DHD_IF_ROLE_ART(pub, idx)	(DHD_IF_ROLE(pub, idx) == WLC_E_IF_ROLE_ART)
 
 #define DHD_IF_ROLE_GENERIC_STA(pub, idx) \
 	(DHD_IF_ROLE_STA(pub, idx) || DHD_IF_ROLE_P2PGC(pub, idx) || DHD_IF_ROLE_WDS(pub, idx))

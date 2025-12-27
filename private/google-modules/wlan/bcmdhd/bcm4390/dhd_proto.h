@@ -300,7 +300,6 @@ extern int dhd_prot_mdring_link_unlink(dhd_pub_t *dhd, int idx, bool link);
 extern int dhd_prot_mdring_linked_ring(dhd_pub_t *dhd);
 extern int dhd_prot_init_md_rings(dhd_pub_t *dhd);
 
-
 #ifdef DHD_MAP_LOGGING
 extern void dhd_prot_smmu_fault_dump(dhd_pub_t *dhdp);
 #endif /* DHD_MAP_LOGGING */

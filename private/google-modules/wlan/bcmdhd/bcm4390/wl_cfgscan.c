@@ -165,12 +165,17 @@ wl_escan_get_buf(struct bcm_cfg80211 *cfg, bool aborted)
 }
 
 static int
-wl_escan_check_sync_id(struct bcm_cfg80211 *cfg, s32 status, u16 result_id, u16 wl_id)
+wl_escan_check_sync_id(struct bcm_cfg80211 *cfg, s32 status, u16 result_id, u16 stored_id)
 {
-	if (result_id != wl_id) {
-		WL_ERR(("ESCAN sync id mismatch :status :%d "
+	if (stored_id > result_id) {
+		 WL_ERR(("ESCAN sync id mismatch :status :%d, FW sent a stale sync-id "
 			"cur_sync_id:%d coming sync_id:%d\n",
-			status, wl_id, result_id));
+			status, stored_id, result_id));
+		return -1;
+	} else if (result_id > stored_id) {
+		 WL_ERR(("ESCAN sync id mismatch :status :%d, FW sent an invalid sync-id "
+			"cur_sync_id:%d coming sync_id:%d\n",
+			status, stored_id, result_id));
 #ifdef DHD_SEND_HANG_ESCAN_SYNCID_MISMATCH
 		if (cfg->escan_info.prev_escan_aborted == FALSE) {
 			wl_cfg80211_handle_hang_event(bcmcfg_to_prmry_ndev(cfg),
@@ -1212,7 +1217,6 @@ wl_escan_handler(struct bcm_cfg80211 *cfg, bcm_struct_cfgdev *cfgdev,
 			cfg->bss_list = wl_escan_get_buf(cfg, FALSE);
 #endif /* USE_CACHED_SCANRESULT_FOR_ABORT */
 
-
 			if (!scan_req_match(cfg)) {
 				WL_TRACE_HW4(("SCAN ABORTED: scanned AP count=%d\n",
 					cfg->bss_list->count));
@@ -1709,7 +1713,6 @@ wl_cfgscan_populate_scan_channels(struct bcm_cfg80211 *cfg,
 #ifdef P2P_SKIP_DFS
 	int is_printed = false;
 #endif /* P2P_SKIP_DFS */
-
 
 	if (!channels || !n_channels) {
 		/* Do full channel scan */
@@ -3049,6 +3052,7 @@ static void _wl_cfgscan_cancel_scan(struct bcm_cfg80211 *cfg)
 
 		/* Indicate escan completion to upper layer */
 		wl_notify_escan_complete(cfg, ndev, true);
+		wl_escan_increment_sync_id(cfg, SCAN_BUF_NEXT);
 	}
 	WL_INFORM_MEM(("Scan aborted! \n"));
 }
@@ -3180,7 +3184,6 @@ wl_notify_escan_complete(struct bcm_cfg80211 *cfg,
 	/* clear scan enq time on complete */
 	CLR_TS(cfg, scan_enq);
 	CLR_TS(cfg, scan_start);
-
 
 	if (!cfg->bss_list) {
 		/* bss_list could be null in pre-emption/abort cases */
@@ -4240,7 +4243,6 @@ wl_cfgscan_sched_scan_stop_work(struct work_struct *work)
 	GCC_DIAGNOSTIC_PUSH_SUPPRESS_CAST();
 	cfg = container_of(dw, struct bcm_cfg80211, sched_scan_stop_work);
 	GCC_DIAGNOSTIC_POP();
-
 
 	/* Hold rtnl_lock -> scan_sync lock to be in sync with cfg80211_ops path */
 	rtnl_lock();
@@ -6132,7 +6134,6 @@ wl_convert_freqlist_to_chspeclist(struct bcm_cfg80211 *cfg,
 	drv_acs_params_t safe_param = { 0 };
 	bool safe_success = FALSE;
 #endif /* WL_CELLULAR_CHAN_AVOID */
-
 
 	if (freq_list_len > MAX_ACS_FREQS) {
 		WL_ERR(("invalid len:%d\n", freq_list_len));

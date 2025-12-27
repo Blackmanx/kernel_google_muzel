@@ -38,7 +38,6 @@
 #include <hnd_cons.h>
 #endif
 
-
 /* We use explicit sizes here since this gets included from different
  * systems.  The sizes must be the size of the creating system
  * (currently 32 bit ARM) since this is gleaned from  dump.
@@ -91,7 +90,6 @@ typedef struct hnd_debug_reloc {
 
 /* Total MMU relocation table size for v2 */
 #define HND_DEBUG_RELOC_PTR_SIZE	(RELOC_NUM_ENTRIES * sizeof(hnd_debug_reloc_entry_t))
-
 
 #define HND_DEBUG_VERSION_1	1u	/* Legacy, version 1 */
 #define HND_DEBUG_VERSION_2	2u	/* Version 2 contains the MMU information

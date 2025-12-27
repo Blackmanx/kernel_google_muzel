@@ -2,7 +2,7 @@
  * Broadcom Dongle Host Driver (DHD),
  * Linux-specific network interface for receive(rx) path
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -454,7 +454,6 @@ dhd_rx_frame(dhd_pub_t *dhdp, int ifidx, void *pktbuf, int numpkt, uint8 chan)
 			pkt_wake = 0;
 		}
 #endif /* DHD_WAKE_STATUS */
-
 
 		if (dhd->pub.tput_data.tput_test_running &&
 			dhd->pub.tput_data.direction == TPUT_DIR_RX &&
@@ -1027,6 +1026,7 @@ dhd_rx_frame(dhd_pub_t *dhdp, int ifidx, void *pktbuf, int numpkt, uint8 chan)
 			ifp->stats.rx_bytes += skb->len;
 			ifp->stats.rx_packets++;
 			ifp->rx_pkts++;
+			dhd_plat_rx_pktcount(dhdp->plat_info, dhdp->rx_packets);
 		}
 #if defined(DHD_TCP_WINSIZE_ADJUST)
 		if (dhd_use_tcp_window_size_adjust) {
@@ -1035,7 +1035,10 @@ dhd_rx_frame(dhd_pub_t *dhdp, int ifidx, void *pktbuf, int numpkt, uint8 chan)
 			}
 		}
 #endif /* DHD_TCP_WINSIZE_ADJUST */
-
+#ifdef DHD_PRINT_RXPKTS_TRACE
+		DHD_ERROR(("dhd_rx_frame: netif_rx p=%p pdata=%p len=%d\n", skb,
+			skb->data, skb->len));
+#endif /* DHD_PRINT_RXPKTS_TRACE */
 		/* WL here makes sure data is 4-byte aligned? */
 		if (in_interrupt()) {
 			bcm_object_trace_opr(skb, BCM_OBJDBG_REMOVE,

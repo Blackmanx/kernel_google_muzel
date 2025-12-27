@@ -5,7 +5,7 @@
  * JTAG, 0/1/2 UARTs, clock frequency control, a watchdog interrupt timer,
  * GPIO interface, extbus, and support for serial and parallel flashes.
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -1048,7 +1048,6 @@ typedef volatile struct chipcregs chipcregs_t;
 /* Fields in otplayoutextension */
 #define OTPLAYOUTEXT_FUSE_MASK	0x3FF
 
-
 /* Jtagm characteristics that appeared at a given corerev */
 #define	JTAGM_CREV_OLD		10	/**< Old command set, 16bit max IR */
 #define	JTAGM_CREV_IRP		22	/**< Able to do pause-ir */
@@ -1415,7 +1414,6 @@ typedef volatile struct chipcregs chipcregs_t;
 #define	CC_EB_PCMCIA1_IO	0x1aa00000	/**< PCMCIA 1 I/O base address */
 #define	CC_EB_PCMCIA1_CFG	0x1ac00000	/**< PCMCIA 1 config base address */
 #define	CC_EB_PROGIF		0x1b000000	/**< ProgIF Async/Sync base address */
-
 
 /* Start/busy bit in flashcontrol */
 #define SFLASH_OPCODE		0x000000ff
@@ -1948,7 +1946,6 @@ typedef volatile struct chipcregs chipcregs_t;
 #define PMU_CC13_4387_ENAB_RADIO_REG_CLK	(1u << 9u)
 #define PMU_CC13_4387_LHL_TIMER_SELECT		(1u << 23u)
 
-
 #define PMU_CC13_4397_ENAB_RADIO_REG_CLK	(1u << 9u)
 #define PMU_CC13_4397_LHL_TIMER_SELECT		(1u << 11u)
 #define PMU_CC13_ENABLE_PCIE_RETENTION		(1 << 30)
@@ -2432,7 +2429,6 @@ typedef volatile struct chipcregs chipcregs_t;
 
 // Please leave this UNRELEASEDCHIP MOG wrapper in place even if there is nothing inside it
 
-
 #define PMU_4387_VREG1_CSR_OVERI_DIS_MASK		(1u << 22u)
 #define PMU_4387_VREG6_WL_PMU_LV_MODE_MASK		(0x00000002u)
 #define PMU_4387_VREG6_MEMLDO_PU_MASK			(0x00000008u)
@@ -2477,7 +2473,6 @@ typedef volatile struct chipcregs chipcregs_t;
 
 #define FORCE_CLK_ON                                                    1
 #define FORCE_CLK_OFF                                                   0
-
 
 /*
  * PMU VREG Definitions:
@@ -3089,7 +3084,6 @@ typedef volatile struct chipcregs chipcregs_t;
 #define CC_GCI_CHIPCTRL_29_WLSC_ANT1_5G_RFEM_DISABLE_MASK (1u <<\
 				CC_GCI_CHIPCTRL_29_WLSC_ANT1_5G_RFEM_DISABLE_NBIT)
 
-
 #define CC_GCI_CHIPCTRL_23_MAIN_WLSC_PRISEL_FORCE_NBIT		16u
 #define CC_GCI_CHIPCTRL_23_MAIN_WLSC_PRISEL_VAL_NBIT		17u
 #define CC_GCI_CHIPCTRL_23_AUX_WLSC_PRISEL_FORCE_NBIT		18u
@@ -3286,7 +3280,6 @@ typedef volatile struct chipcregs chipcregs_t;
 #define CC_GCI_RESET_OVERRIDE_MASK	(0x1u << \
 				CC_GCI_RESET_OVERRIDE_NBIT)
 
-
 /*	2G core0/core1  register (offset : 0x81C) */
 /*
 cncb2rdig_scan2G_dedicated_path_en_core0_ovr	10
@@ -3307,7 +3300,6 @@ cncb2rdig_scan2G_dedicated_path_en_core1_ovr_en	13
 #define CC_GCI_dedicated_path_en_core1_ovr_en_NBIT (13u)
 #define CC_GCI_dedicated_path_en_core1_ovr_en_MASK (1u <<\
 		CC_GCI_dedicated_path_en_core1_ovr_en_NBIT)
-
 
 #define CC_GCI_06_JTAG_SEL_SHIFT	4u
 #define CC_GCI_06_JTAG_SEL_MASK		(1u << 4u)
@@ -3462,7 +3454,6 @@ cncb2rdig_scan2G_dedicated_path_en_core1_ovr_en	13
 #define CC_GCI_GPIO_14			(14)
 #define CC_GCI_GPIO_15			(15)
 
-
 /* indicates Invalid GPIO, e.g. when PAD GPIO doesn't map to GCI GPIO */
 #define CC_GCI_GPIO_INVALID		0xFF
 
@@ -3473,7 +3464,6 @@ cncb2rdig_scan2G_dedicated_path_en_core1_ovr_en	13
 #define GCIPOSVAL(val, pos)  ((((uint32)val) << pos) & GCIMASK(pos))
 /* Extract nibble from a given position */
 #define GCIGETNBL(val, pos)	((val >> pos) & 0xF)
-
 
 /* find the 8 bit mask given the bit position */
 #define GCIMASK_8B(pos)  (((uint32)0xFF) << pos)
@@ -3488,7 +3478,6 @@ cncb2rdig_scan2G_dedicated_path_en_core1_ovr_en	13
 #define GCIPOSVAL_4B(val, pos)  ((((uint32)val) << pos) & GCIMASK_4B(pos))
 /* Extract nibble from a given position */
 #define GCIGETNBL_4B(val, pos)	((val >> pos) & 0xF)
-
 
 /* GCI Intstatus(Mask)/WakeMask Register bits. */
 #define GCI_INTSTATUS_RBI	(1 << 0)	/**< Rx Break Interrupt */
@@ -3634,7 +3623,6 @@ cncb2rdig_scan2G_dedicated_path_en_core1_ovr_en	13
 						LHL_PWRDN2_RSRC6_DN_CN |\
 						LHL_PWRDN2_RSRC7_DN_CN)
 #define LHL_PWRDN2_CTL_MASK			(0x3F3F3F3F)
-
 
 #define LHL_FAST_WRITE_EN			(1 << 14)
 
@@ -3944,7 +3932,6 @@ cncb2rdig_scan2G_dedicated_path_en_core1_ovr_en	13
 #define LTECX_MUX_MODE_WCI2		0x0
 #define LTECX_MUX_MODE_GPIO		0x1
 
-
 /* LTECX GPIO Information Index */
 #define LTECX_NVRAM_FSYNC_IDX	0
 #define LTECX_NVRAM_LTERX_IDX	1
@@ -4173,7 +4160,6 @@ cncb2rdig_scan2G_dedicated_path_en_core1_ovr_en	13
 #define CC_GCI_scan5G_dedicated_path_en_core1_ovr_en_NBIT (17u)
 #define CC_GCI_scan5G_dedicated_path_en_core1_ovr_en_MASK (1u <<\
 		CC_GCI_scan5G_dedicated_path_en_core1_ovr_en_NBIT)
-
 
 #ifndef BCMCHIPID
 /* Enable linker error only when BCMCHIPID is defined.

@@ -60,13 +60,6 @@
 	WL_NAN_CTRL2_FLAG1_BIGTK | WL_NAN_CTRL2_FLAG1_BIP_GMAC_256 | \
 	WL_NAN_CTRL2_FLAG1_BIP_CMAC_128)
 
-#ifdef DISABLE_NAN_PAIRING
-uint nan_pairing_enable = FALSE;
-#else
-uint nan_pairing_enable = TRUE;
-#endif /* DISABLE_NAN_PAIRING */
-module_param(nan_pairing_enable, uint, 0660);
-
 #ifdef WL_NAN_DISC_CACHE
 /* Disc Cache Parameters update Flags */
 #define NAN_DISC_CACHE_PARAM_SDE_CONTROL	0x0001
@@ -1307,7 +1300,6 @@ fail:
 	}
 	return ret;
 }
-
 
 /* Based on each case of tlv type id, fill into tlv data */
 static int
@@ -3299,7 +3291,6 @@ wl_cfgnan_build_execute_ioctl(struct net_device *ndev, struct bcm_cfg80211 *cfg,
 	wl_nan_iov_t *nan_iov_data = NULL;
 	uint8 resp_buf[NAN_IOCTL_BUF_SIZE];
 
-
 	nan_buf = MALLOCZ(cfg->osh, nan_buf_size);
 	if (!nan_buf) {
 		WL_ERR(("%s: memory allocation failed\n", __func__));
@@ -4344,10 +4335,12 @@ wl_cfgnan_bootstrapping_request_n_response(struct bcm_cfg80211 *cfg,
 	bs_entry->txs_token = cmd_data->token;
 	cfg->nancfg->bs_txs_pend_token++;
 
+	WL_TRACE(("Bootstrapping Transmit follow-up: cmd_data->token %d, pend_token %d,"
+		" bs_inst_id %d\n",
+		cmd_data->token, cfg->nancfg->bs_txs_pend_token, bs_entry->bs_inst_id));
 	ret = wl_cfgnan_transmit_handler(ndev, cfg, cmd_data);
 	if (ret) {
 		WL_ERR(("Bootstrapping Transmit follow-up failed \n"));
-
 		ret = BCME_NOMEM;
 		goto fail;
 	}
@@ -4393,6 +4386,7 @@ wl_cfgnan_add_bootstrapping_entry(struct bcm_cfg80211 *cfg, struct ether_addr *n
 		}
 		if (ETHER_ISNULLADDR(&bs_entry[i].peer_nmi) &&
 				ETHER_ISNULLADDR(&bs_entry[i].lcl_nmi)) {
+			/* Valid free slot found, add new entry */
 			bs_entry[i].bs_inst_id = cfg->nancfg->cur_bs_instance_id++;
 			bs_entry[i].role = role;
 			if (cfg->nancfg->cur_bs_instance_id == NAN_ID_MAX) {
@@ -4428,7 +4422,7 @@ wl_cfgnan_add_bootstrapping_entry(struct bcm_cfg80211 *cfg, struct ether_addr *n
 				}
 			}
 			if (j == NAN_MAX_CACHE_DISC_RESULT) {
-				WL_ERR(("Unable to find peer service"));
+				WL_ERR(("Unable to find peer service\n"));
 			} else {
 				bs_entry[i].peer_csia = disc_res[j].csia_cap;
 			}
@@ -4436,6 +4430,10 @@ wl_cfgnan_add_bootstrapping_entry(struct bcm_cfg80211 *cfg, struct ether_addr *n
 			if (npba->dlen) {
 				bs_entry[i].npba_info.dlen = npba->dlen;
 				bs_entry[i].npba_info.data = MALLOCZ(cfg->osh, npba->dlen);
+				if (!bs_entry[i].npba_info.data) {
+					WL_ERR(("Memory allocation failed for NPBA info\n"));
+					goto fail;
+				}
 				ret = memcpy_s(bs_entry[i].npba_info.data,
 						bs_entry[i].npba_info.dlen,
 						npba->data, npba->dlen);
@@ -4448,8 +4446,15 @@ wl_cfgnan_add_bootstrapping_entry(struct bcm_cfg80211 *cfg, struct ether_addr *n
 			return &bs_entry[i];
 		}
 	}
+
+	/* No free slot found */
+	WL_ERR(("No free bootstrapping entry available\n"));
+	return NULL;
 fail:
-	wl_cfgnan_clear_bootstrapping_entry(cfg, &bs_entry[i]);
+	/* Only clear if i is valid */
+	if (i >= 0 && i < NAN_MAX_BOOTSTRAPPING_ENTRIES) {
+		wl_cfgnan_clear_bootstrapping_entry(cfg, &bs_entry[i]);
+	}
 	return NULL;
 }
 
@@ -4512,8 +4517,8 @@ wl_cfgnan_get_bootstrapping_entry_by_txs_token(struct bcm_cfg80211 *cfg, uint16 
 	for (i = 0; i < NAN_MAX_BOOTSTRAPPING_ENTRIES; i++) {
 		if (bs_entry[i].bs_inst_id && (bs_entry[i].txs_token == txs_token)) {
 			/* BS entry found with txs token */
-			WL_INFORM_MEM(("BS instance ID match found %d txs_token %d \n",
-					bs_entry[i].bs_inst_id, txs_token));
+			WL_INFORM_MEM(("BS instance ID match found %d txs_token %d at index[%d] \n",
+					bs_entry[i].bs_inst_id, txs_token, i));
 			return &bs_entry[i];
 		}
 	}
@@ -4564,18 +4569,25 @@ wl_cfgnan_clear_bootstrapping_entry(struct bcm_cfg80211 *cfg, nan_bootstrapping_
 
 	if (bs_entry->npba_info.data) {
 		MFREE(cfg->osh, bs_entry->npba_info.data, bs_entry->npba_info.dlen);
+		bs_entry->npba_info.data = NULL;
+		bs_entry->npba_info.dlen = 0;
 	}
 
 	pairing_data = bs_entry->pairing;
 	if (pairing_data) {
 		if (pairing_data->local_nik.data) {
 			MFREE(cfg->osh, pairing_data->local_nik.data, pairing_data->local_nik.dlen);
+			pairing_data->local_nik.data = NULL;
+			pairing_data->local_nik.dlen = 0;
 		}
 		if (pairing_data->npk.data) {
 			MFREE(cfg->osh, pairing_data->npk.data, pairing_data->npk.dlen);
+			pairing_data->npk.data = NULL;
+			pairing_data->npk.dlen = 0;
 		}
 		if (pairing_data->cmd_data) {
 			MFREE(cfg->osh, pairing_data->cmd_data, sizeof(nan_discover_cmd_data_t));
+			pairing_data->cmd_data = NULL;
 		}
 		MFREE(cfg->osh, pairing_data, sizeof(nan_pairing_event_data_t));
 		bs_entry->pairing = NULL;
@@ -6554,7 +6566,9 @@ wl_cfgnan_terminate_all_obsolete_ranging_sessions(
 	for (i = 0; i < NAN_MAX_RANGING_INST; i++) {
 		ranging_inst = &cfg->nancfg->nan_ranging_info[i];
 		if (ranging_inst->in_use &&
-			ranging_inst->range_role == NAN_RANGING_ROLE_INITIATOR) {
+				(ranging_inst->range_role == NAN_RANGING_ROLE_INITIATOR) &&
+				(ranging_inst->range_type == RTT_TYPE_NAN_GEOFENCE) &&
+				(ranging_inst->num_svc_ctx == 0)) {
 			wl_cfgnan_terminate_ranging_session(cfg, ranging_inst);
 		}
 	}
@@ -8686,8 +8700,7 @@ wl_cfgnan_get_capability(struct net_device *ndev,
 	if (fw_cap->flags1 & WL_NAN_FW_CAP_FLAG1_6G) {
 		cfg->nancfg->is_6g_nan_supported = true;
 	}
-	if ((fw_cap->flags1 & WL_NAN_FW_CAP_FLAG1_PAIRING) &&
-			(nan_pairing_enable == TRUE)) {
+	if (fw_cap->flags1 & WL_NAN_FW_CAP_FLAG1_PAIRING) {
 		capabilities->is_pairing_supported = true;
 	}
 
@@ -11118,6 +11131,8 @@ wl_cfgnan_cache_pairing_confirm_data_n_send_fup(struct bcm_cfg80211 *cfg,
 	cmd_data->token = bs_entry->txs_token;
 	cfg->nancfg->bs_txs_pend_token++;
 
+	WL_TRACE(("Pairing Transmit follow-up: cmd_data->token %d, pend_token %d, bs_inst_id %d\n",
+		cmd_data->token, cfg->nancfg->bs_txs_pend_token, bs_entry->bs_inst_id));
 	ret = wl_cfgnan_transmit_handler(ndev, cfg, cmd_data);
 	if (ret) {
 		WL_ERR(("Transmit follow-up for Peer NIK failed \n"));
@@ -11127,6 +11142,10 @@ wl_cfgnan_cache_pairing_confirm_data_n_send_fup(struct bcm_cfg80211 *cfg,
 		goto exit;
 	}
 	bs_entry->state = NAN_STATE_PAIRING_CONFIRM_FUP_SENT;
+	/* cache the token to ignore the delayed txs follow up event which
+	 * if it is received post sending the pairing confirm event
+	 */
+	cfg->nancfg->pending_txs_token = bs_entry->txs_token;
 	return ret;
 exit:
 	if (bs_entry) {
@@ -11441,8 +11460,17 @@ wl_cfgnan_notify_nan_status(struct bcm_cfg80211 *cfg,
 						 */
 						WL_INFORM_MEM(("[NAN] Pairing NIK txs rcvd for BS"
 								"id: %d\n", bs_entry->bs_inst_id));
+						cfg->nancfg->pending_txs_token = 0;
 						goto exit;
 					}
+				} else if (cfg->nancfg->pending_txs_token == txs->host_seq) {
+					/* Post sending pairing confirm event,
+					 * cleared the bs_entry matching the txs_pend_token
+					 */
+					cfg->nancfg->pending_txs_token = 0;
+					WL_DBG_MEM(("TXS received with token %d after RXS FUP\n",
+						txs->host_seq));
+					goto exit;
 				} else {
 					WL_ERR(("Could not find bs cache for txs_pend_token %d\n",
 							txs->host_seq));
@@ -11902,8 +11930,8 @@ wl_cfgnan_notify_nan_status(struct bcm_cfg80211 *cfg,
 			bs_entry = wl_cfgnan_add_bootstrapping_entry(cfg,
 					(struct ether_addr *)cfg->nancfg->nan_nmi_mac,
 					&nan_event_data->remote_nmi, NAN_PAIRING_BS_ROLE_RESPONDER,
-					nan_event_data->requestor_id,
 					nan_event_data->local_inst_id,
+					nan_event_data->requestor_id,
 					&nan_event_data->npba_info);
 			if (bs_entry == NULL) {
 				WL_ERR(("Could not add BS cache entry for BS REQ event \n"));

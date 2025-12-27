@@ -1,7 +1,7 @@
 /*
  * Customer HW 2 dependant file
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -43,6 +43,10 @@
 #include <linux/exynos-pci-ctrl.h>
 #endif /* CONFIG_SOC_GOOGLE */
 
+#ifdef DHD_HOST_CPUFREQ_BOOST
+#include <linux/cpufreq.h>
+#endif /* DHD_HOST_CPUFREQ_BOOST */
+
 #ifdef DHD_COREDUMP
 #include <linux/platform_data/sscoredump.h>
 #endif /* DHD_COREDUMP */
@@ -72,6 +76,13 @@ static int wlan_host_wake_up = -1;
 static int wlan_host_wake_irq = 0;
 #endif /* CONFIG_BCMDHD_OOB_HOST_WAKE */
 #define WIFI_WLAN_HOST_WAKE_PROPNAME    "wl_host_wake"
+
+static uint64 tx_pkt_cnt = 0;
+static uint64 rx_pkt_cnt = 0;
+static uint64 tx_pkt_timestamp = 0;
+static uint64 rx_pkt_timestamp = 0;
+static uint64 tx_pkt_delta = 0;
+static uint64 rx_pkt_delta = 0;
 
 static int resched_streak = 0;
 static int resched_streak_max = 0;
@@ -269,8 +280,10 @@ enum {
 #define HW_MAJOR  "major"
 #define HW_MINOR  "minor"
 
-char val_revision[MAX_HW_INFO_LEN] = "NA";
-char val_sku[MAX_HW_INFO_LEN] = "NA";
+#define DEFAULT_VAL "DEFAULT"
+
+char val_revision[MAX_HW_INFO_LEN] = DEFAULT_VAL;
+char val_sku[MAX_HW_INFO_LEN] = DEFAULT_VAL;
 
 enum hw_stage_attr {
 	DEV = 1,
@@ -292,8 +305,8 @@ dhd_set_platform_ext_name(char *hw_rev, char* hw_sku)
 {
 	bzero(&platform_hw_info, sizeof(platform_hw_info_t));
 
-	if (strncmp(hw_rev, "NA", MAX_HW_INFO_LEN) != 0) {
-		if (strncmp(hw_sku, "NA", MAX_HW_INFO_LEN) != 0) {
+	if (strncmp(hw_rev, DEFAULT_VAL, MAX_HW_INFO_LEN) != 0) {
+		if (strncmp(hw_sku, DEFAULT_VAL, MAX_HW_INFO_LEN) != 0) {
 			snprintf(platform_hw_info.ext_name[REV_SKU], MAX_HW_EXT_LEN, "_%s_%s",
 				hw_rev, hw_sku);
 			setbit(&platform_hw_info.avail_bmap, REV_SKU);
@@ -302,7 +315,7 @@ dhd_set_platform_ext_name(char *hw_rev, char* hw_sku)
 		setbit(&platform_hw_info.avail_bmap, REV_ONLY);
 	}
 
-	if (strncmp(hw_sku, "NA", MAX_HW_INFO_LEN) != 0) {
+	if (strncmp(hw_sku, DEFAULT_VAL, MAX_HW_INFO_LEN) != 0) {
 		snprintf(platform_hw_info.ext_name[SKU_ONLY], MAX_HW_EXT_LEN, "_%s", hw_sku);
 		setbit(&platform_hw_info.avail_bmap, SKU_ONLY);
 	}
@@ -317,8 +330,8 @@ dhd_set_platform_ext_name(char *hw_rev, char* hw_sku)
 void
 dhd_set_platform_ext_name_for_chip_version(char* chip_version)
 {
-	if (strncmp(val_revision, "NA", MAX_HW_INFO_LEN) != 0) {
-		if (strncmp(val_sku, "NA", MAX_HW_INFO_LEN) != 0) {
+	if (strncmp(val_revision, DEFAULT_VAL, MAX_HW_INFO_LEN) != 0) {
+		if (strncmp(val_sku, DEFAULT_VAL, MAX_HW_INFO_LEN) != 0) {
 			snprintf(platform_hw_info.ext_name[CHIP_REV_SKU], MAX_HW_EXT_LEN,
 				"%s_%s_%s", chip_version, val_revision, val_sku);
 			setbit(&platform_hw_info.avail_bmap, CHIP_REV_SKU);
@@ -328,7 +341,7 @@ dhd_set_platform_ext_name_for_chip_version(char* chip_version)
 			chip_version, val_revision);
 		setbit(&platform_hw_info.avail_bmap, CHIP_REV);
 	}
-	if (strncmp(val_sku, "NA", MAX_HW_INFO_LEN) != 0) {
+	if (strncmp(val_sku, DEFAULT_VAL, MAX_HW_INFO_LEN) != 0) {
 		snprintf(platform_hw_info.ext_name[CHIP_SKU], MAX_HW_EXT_LEN, "%s_%s",
 			chip_version, val_sku);
 		setbit(&platform_hw_info.avail_bmap, CHIP_SKU);
@@ -502,7 +515,7 @@ dhd_wlan_init_hardware_info(void)
 					hw_major, hw_minor);
 				break;
 			default:
-				strcpy(val_revision, "NA");
+				strcpy(val_revision, DEFAULT_VAL);
 				break;
 		}
 	}
@@ -764,6 +777,199 @@ set_affinity(unsigned int irq, const struct cpumask *cpumask)
 #endif
 }
 
+#ifdef DHD_HOST_CPUFREQ_BOOST
+#ifdef DHD_HOST_CPUFREQ_BOOST_DEFAULT_ENAB
+uint32 dhd_cpufreq_boost = true;
+#else
+uint32 dhd_cpufreq_boost = false;
+#endif /* DHD_HOST_CPUFREQ_BOOST_DEFAULT_ENAB */
+module_param(dhd_cpufreq_boost, uint, 0660);
+
+#define DHD_CPUFREQ_LITTLE      0u
+#define DHD_CPUFREQ_BIG         4u
+#define DHD_CPUFREQ_BIGGER      8u
+#define DHD_LITTLE_CORE_PERF_FREQ   1548000u
+#define DHD_MID_CORE_PERF_FREQ      1549000u
+#define DHD_BIG_CORE_PERF_FREQ      2363000u
+
+enum core_idx {
+	LITTLE = 0,
+	MID = 1,
+	BIG = 2,
+	CORE_IDX_MAX
+};
+
+typedef struct _dhd_host_cpufreq {
+	uint32 cpuid;
+	uint32 orig_min_freq;
+	uint32 target_freq;
+} dhd_host_cpufreq;
+
+static dhd_host_cpufreq dhd_host_cpufreq_tbl[] = {
+	/* Little Core, 0-3 */
+	{DHD_CPUFREQ_LITTLE, 0, DHD_LITTLE_CORE_PERF_FREQ},
+	/* Big Core, 4-7 */
+	{DHD_CPUFREQ_BIG, 0, DHD_MID_CORE_PERF_FREQ},
+	/* Bigger Core, 8-11 */
+	{DHD_CPUFREQ_BIGGER, 0, DHD_BIG_CORE_PERF_FREQ}
+};
+
+/*
+ * orig_min_freq can be used to backup original min freq per policy.
+ * set to original min freq when boost mode is enabled.
+ * set to zero when boost mode is disabled.
+ * If any cpufreq policy is in boost mode, returns TRUE
+ */
+bool dhd_is_cpufreq_boosted(void)
+{
+	int i, arr_len;
+
+	arr_len = sizeof(dhd_host_cpufreq_tbl) / sizeof(dhd_host_cpufreq_tbl[0]);
+	for (i = 0; i < arr_len; i++) {
+		if (dhd_host_cpufreq_tbl[i].orig_min_freq != 0) {
+			return TRUE;
+		}
+	}
+	return FALSE;
+}
+
+void dhd_restore_cpufreq(void)
+{
+	struct cpufreq_policy *policy;
+	int i, arr_len;
+	int num_cpus = num_possible_cpus();
+	uint32 cpuid, orig_min_freq;
+
+	arr_len = sizeof(dhd_host_cpufreq_tbl) / sizeof(dhd_host_cpufreq_tbl[0]);
+
+	for (i = 0; i < arr_len; i++) {
+		cpuid = dhd_host_cpufreq_tbl[i].cpuid;
+		orig_min_freq = dhd_host_cpufreq_tbl[i].orig_min_freq;
+
+		/* cpuid check logic */
+		if (cpuid >= num_cpus) {
+			continue;
+		}
+
+		/* Not in boost mode */
+		if (!orig_min_freq) {
+			continue;
+		}
+
+		policy = cpufreq_cpu_get(cpuid);
+		if (policy) {
+			policy->min = orig_min_freq;
+			DHD_PRINT(("%s: restore cpufreq policy%d cur:%u min:%u max:%u\n",
+				__FUNCTION__, cpuid, policy->cur, policy->min, policy->max));
+			cpufreq_cpu_put(policy);
+
+			/* initialize */
+			dhd_host_cpufreq_tbl[i].orig_min_freq = 0;
+		}
+	}
+}
+
+void dhd_set_all_cpufreq(void)
+{
+	struct cpufreq_policy *policy;
+	int i, arr_len;
+	int num_cpus = num_possible_cpus();
+	uint32 cpuid, orig_min_freq;
+
+	arr_len = sizeof(dhd_host_cpufreq_tbl) / sizeof(dhd_host_cpufreq_tbl[0]);
+
+	for (i = 0; i < arr_len; i++) {
+		cpuid = dhd_host_cpufreq_tbl[i].cpuid;
+		orig_min_freq = dhd_host_cpufreq_tbl[i].orig_min_freq;
+
+		/* cpuid check logic */
+		if (cpuid >= num_cpus) {
+			DHD_ERROR(("%s: cpuid not available cpuid:%d num_cpus:%d\n",
+				__FUNCTION__, cpuid, num_cpus));
+			continue;
+		}
+
+		/* already in boost mode */
+		if (orig_min_freq) {
+			continue;
+		}
+
+		policy = cpufreq_cpu_get(cpuid);
+		if (policy) {
+			/* backup min freq */
+			dhd_host_cpufreq_tbl[i].orig_min_freq = policy->min;
+
+			if (policy->max < dhd_host_cpufreq_tbl[i].target_freq) {
+				policy->min = policy->max;
+			} else {
+				policy->min = dhd_host_cpufreq_tbl[i].target_freq;
+			}
+			DHD_PRINT(("%s: min to max. policy%d cur:%u orig_min:%u min:%u max:%u\n",
+				__FUNCTION__, cpuid, policy->cur,
+				dhd_host_cpufreq_tbl[i].orig_min_freq,
+				policy->min, policy->max));
+			cpufreq_cpu_put(policy);
+		}
+	}
+}
+
+void dhd_set_cpufreq(enum core_idx idx)
+{
+	struct cpufreq_policy *policy;
+	int arr_len;
+	int num_cpus = num_possible_cpus();
+	uint32 cpuid, orig_min_freq;
+
+	arr_len = sizeof(dhd_host_cpufreq_tbl) / sizeof(dhd_host_cpufreq_tbl[0]);
+
+	if (idx >= arr_len) {
+		DHD_ERROR(("%s: Invalid core index(%d)\n", __FUNCTION__, idx));
+	}
+
+	cpuid = dhd_host_cpufreq_tbl[idx].cpuid;
+	orig_min_freq = dhd_host_cpufreq_tbl[idx].orig_min_freq;
+
+	/* cpuid check logic */
+	if (cpuid >= num_cpus) {
+		DHD_ERROR(("%s: cpuid not available cpuid:%d num_cpus:%d\n",
+		__FUNCTION__, cpuid, num_cpus));
+		return;
+	}
+
+	/* already in boost mode */
+
+	if (orig_min_freq) {
+		return;
+	}
+
+	policy = cpufreq_cpu_get(cpuid);
+	if (policy) {
+		/* backup min freq */
+		dhd_host_cpufreq_tbl[idx].orig_min_freq = policy->min;
+		if (policy->max < dhd_host_cpufreq_tbl[idx].target_freq) {
+			policy->min = policy->max;
+		} else {
+			policy->min = dhd_host_cpufreq_tbl[idx].target_freq;
+		}
+		DHD_PRINT(("%s: min to max. policy%d cur:%u orig_min:%u min:%u max:%u\n",
+			__FUNCTION__, cpuid, policy->cur,
+			dhd_host_cpufreq_tbl[idx].orig_min_freq,
+			policy->min, policy->max));
+		cpufreq_cpu_put(policy);
+	}
+}
+
+void dhd_plat_reset_trx_pktcount(void)
+{
+	tx_pkt_cnt = 0;
+	rx_pkt_cnt = 0;
+	tx_pkt_timestamp = 0;
+	rx_pkt_timestamp = 0;
+	tx_pkt_delta = 0;
+	rx_pkt_delta = 0;
+}
+#endif /* DHD_HOST_CPUFREQ_BOOST */
+
 static void
 irq_affinity_hysteresis_control(struct pci_dev *pdev, int resched_streak_max,
 	uint64 curr_time_ns)
@@ -775,33 +981,120 @@ irq_affinity_hysteresis_control(struct pci_dev *pdev, int resched_streak_max,
 		DHD_ERROR(("%s : pdev is NULL\n", __FUNCTION__));
 		return;
 	}
-
-	if (!is_irq_on_big_core && (resched_streak_max >= RESCHED_STREAK_MAX_HIGH) &&
-		!has_recent_affinity_update) {
+#ifdef DHD_HOST_CPUFREQ_BOOST
+	if (!is_irq_on_big_core && !dhd_is_cpufreq_boosted() &&
+	    (((tx_pkt_delta < PKT_COUNT_HIGH) && (tx_pkt_delta > PKT_COUNT_MID)) ||
+	     ((rx_pkt_delta < PKT_COUNT_HIGH) && (rx_pkt_delta > PKT_COUNT_MID)))) {
+		if (dhd_cpufreq_boost) {
+			dhd_set_cpufreq(MID);
+		}
+	}
+#endif /* DHD_HOST_CPUFREQ_BOOST */
+	if (!is_irq_on_big_core &&
+	   ((tx_pkt_delta > PKT_COUNT_HIGH) || (rx_pkt_delta > PKT_COUNT_HIGH))) {
 		err = set_affinity(pdev->irq, cpumask_of(IRQ_AFFINITY_BIG_CORE));
 		if (!err) {
 			is_irq_on_big_core = TRUE;
 			last_affinity_update_time_ns = curr_time_ns;
+#ifdef DHD_HOST_CPUFREQ_BOOST
+			if (dhd_cpufreq_boost) {
+				dhd_set_all_cpufreq();
+			}
+#endif /* DHD_HOST_CPUFREQ_BOOST */
 			DHD_INFO(("%s switches to big core successfully\n", __FUNCTION__));
 		} else {
 			DHD_ERROR(("%s switches to big core unsuccessfully!\n", __FUNCTION__));
 		}
 	}
 	if (is_plat_pcie_resume ||
-		(is_irq_on_big_core && (resched_streak_max <= RESCHED_STREAK_MAX_LOW) &&
+		(is_irq_on_big_core &&
+		((tx_pkt_delta < PKT_COUNT_LOW) && (rx_pkt_delta < PKT_COUNT_LOW)) &&
 		!has_recent_affinity_update)) {
 		err = set_affinity(pdev->irq, cpumask_of(IRQ_AFFINITY_SMALL_CORE));
 		if (!err) {
 			is_irq_on_big_core = FALSE;
 			is_plat_pcie_resume = FALSE;
 			last_affinity_update_time_ns = curr_time_ns;
+#ifdef DHD_HOST_CPUFREQ_BOOST
+			if (dhd_is_cpufreq_boosted()) {
+				dhd_restore_cpufreq();
+			}
+#endif /* DHD_HOST_CPUFREQ_BOOST */
 			DHD_INFO(("%s switches to all cores successfully\n", __FUNCTION__));
 		} else {
 			DHD_ERROR(("%s switches to all cores unsuccessfully\n", __FUNCTION__));
 		}
 	}
 }
+#ifdef DHD_HOST_CPUFREQ_BOOST
+void dhd_plat_tx_pktcount(void *plat_info, uint cnt)
+{
+	uint64 time_delta_s = 0;
 
+	if (!tx_pkt_cnt || cnt < tx_pkt_cnt) {
+		tx_pkt_cnt = cnt;
+		tx_pkt_timestamp = OSL_SYSUPTIME_US();
+		return;
+	}
+
+	/* covert time unit from usec to sec, and use bit shift to
+	 * approximate the operation of divide 10^6
+	 * BIT20 = 1048576
+	 * This way we can reduce computations in isr
+	 */
+	time_delta_s = (OSL_SYSUPTIME_US() - tx_pkt_timestamp) >> 20;
+	if (time_delta_s > 1) {
+
+	/*
+	 * When Tput goes up, pkt will be fired more frequently, then
+	 * we only update intr_freq every 2 sec
+	 * So we divide pkt_delta by 2 and shift 1 bit right
+	 * When Tput is low, then time_delta_s might be longer than 2 sec
+	 * Which means pkt_delta won't reach reach PKT_COUNT_HIGH anyway
+	 * In this case, we don't need the actual pkt_delta,
+	 * so if we keep pkt_delta divided by 2 for simplicity
+	 *
+	 */
+		tx_pkt_delta = (cnt - tx_pkt_cnt) >> 1;
+		tx_pkt_cnt = cnt;
+		tx_pkt_timestamp = OSL_SYSUPTIME_US();
+	}
+}
+
+void dhd_plat_rx_pktcount(void *plat_info, uint cnt)
+{
+	uint64 time_delta_s = 0;
+
+	if (!rx_pkt_cnt || cnt < rx_pkt_cnt) {
+		rx_pkt_cnt = cnt;
+		rx_pkt_timestamp = OSL_SYSUPTIME_US();
+		return;
+	}
+
+	/* covert time unit from usec to sec, and use bit shift to
+	 * approximate the operation of divide 10^6
+	 * BIT20 = 1048576
+	 * This way we can reduce computations in isr
+	 */
+	time_delta_s = (OSL_SYSUPTIME_US() - rx_pkt_timestamp) >> 20;
+	if (time_delta_s > 1) {
+
+	/*
+	 * When Tput goes up, pkt will be fired more frequently, then
+	 * we only update intr_freq every 2 sec
+	 * So we divide pkt_delta by 2 and shift 1 bit right
+	 * When Tput is low, then time_delta_s might be longer than 2 sec
+	 * Which means pkt_delta won't reach reach PKT_COUNT_HIGH anyway
+	 * In this case, we don't need the actual pkt_delta,
+	 * so if we keep pkt_delta divided by 2 for simplicity
+	 *
+	 */
+		rx_pkt_delta = (cnt - rx_pkt_cnt) >> 1;
+		rx_pkt_cnt = cnt;
+		rx_pkt_timestamp = OSL_SYSUPTIME_US();
+	}
+}
+#endif /* DHD_HOST_CPUFREQ_BOOST */
 /*
  * DHD Core layer reports whether the bottom half is getting rescheduled or not
  * resched = 1, BH is getting rescheduled.
@@ -986,6 +1279,9 @@ int dhd_plat_pcie_resume(void *plat_info)
 	int ret = 0;
 	ret = exynos_pcie_pm_resume(pcie_ch_num);
 	is_plat_pcie_resume = TRUE;
+#ifdef DHD_HOST_CPUFREQ_BOOST
+	dhd_plat_reset_trx_pktcount();
+#endif
 	return ret;
 }
 

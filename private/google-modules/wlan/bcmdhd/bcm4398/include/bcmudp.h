@@ -1,7 +1,7 @@
 /*
  * Fundamental constants relating to UDP Protocol
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -30,7 +30,6 @@
 
 /* This marks the start of a packed structure section. */
 #include <packed_section_start.h>
-
 
 /* UDP header */
 #define UDP_DEST_PORT_OFFSET	2	/* UDP dest port offset */

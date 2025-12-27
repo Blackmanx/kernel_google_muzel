@@ -1,7 +1,7 @@
 /*
  * HND arm trap handling.
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -23,7 +23,6 @@
 
 #ifndef	_hnd_armtrap_h_
 #define	_hnd_armtrap_h_
-
 
 /* ARM trap handling */
 

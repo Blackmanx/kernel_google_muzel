@@ -44,7 +44,6 @@
 #endif /* RTT_SUPPORT */
 #include <bcmstdlib_s.h>
 
-
 #ifdef WL_TWT_HAL_IF
 int wl_cfgtwt_cmd_reply(struct wiphy *wiphy, twt_hal_resp_t *twt_hal_resp)
 {

@@ -1,7 +1,7 @@
 /*
  * PMU support interface private to hndpmu.c and hndpmu_dhd.c.
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -273,7 +273,6 @@ enum xtaltab0_960 {
 	XTALTAB0_960_52000K,
 	XTALTAB0_960_59970K
 };
-
 
 /* Indices into array pmu1_xtaltab0_960[]. Keep array and these defines synchronized. */
 #define PMU1_XTALTAB0_960_12000K	0

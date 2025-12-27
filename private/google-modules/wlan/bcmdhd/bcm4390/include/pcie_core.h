@@ -398,7 +398,6 @@ typedef volatile struct pcie_serdes_regs {
 #define MDIODATA2_MASK			0x7FFFFFFF	/* rd/wr transaction data */
 #define MDIODATA2_DEVADDR_SHF		4		/* Physmedia devaddr shift */
 
-
 /* MDIO devices (SERDES modules)
  *  unlike old pcie cores (rev < 10), rev10 pcie serde organizes registers into a few blocks.
  *  two layers mapping (blockidx, register offset) is required
@@ -414,7 +413,6 @@ typedef volatile struct pcie_serdes_regs {
 #define MDIO_DEV_TXCTRL0	0x820
 #define MDIO_DEV_SERDESID	0x831
 #define MDIO_DEV_RXCTRL0	0x840
-
 
 /* XgxsBlk1_A Register Offsets */
 #define BLK1_PWR_MGMT0		0x16
@@ -505,7 +503,6 @@ typedef volatile struct pcie_serdes_regs {
  * #define PCIE_CAP_RTCAP           30      // Root Capabilities
  * #define PCIE_CAP_RTSTA           32      // Root Status
  */
-
 
 /* Linkcapability reg offset in PCIE Cap */
 #define PCIE_CAP_LINKCAP_OFFSET         12      /* linkcap offset in pcie cap */
@@ -1077,7 +1074,6 @@ void pcie_coherent_accenable(osl_t *osh, si_t *sih);
 
 #define PD_DEV0_DMA_INTMASK       0x80
 
-
 #define PD_FUNC0_MB_INTSHIFT		8u
 #define PD_FUNC0_MB_INTMASK		(0x3 << PD_FUNC0_MB_INTSHIFT)
 
@@ -1153,7 +1149,6 @@ void pcie_coherent_accenable(osl_t *osh, si_t *sih);
 #define PD_ERR_ATTN_INTMASK		(1u << 29)
 #define PD_LINK_DOWN_INTMASK	(1u << 27)
 
-
 #define PD_ERR_TTX_REQ_DURING_D3	(1u << 31)	/* Tx mem req on iface when in non-D0 */
 #define PD_PRI_SIG_TARGET_ABORT_F1	(1u << 19)	/* Rcvd target Abort Err Status (CA) F1 */
 #define PD_ERR_UNSPPORT_F1		(1u << 18)	/* Unsupported Request Error Status. F1 */
@@ -1202,7 +1197,6 @@ void pcie_coherent_accenable(osl_t *osh, si_t *sih);
 #define PWI_HOST_RINGIDX_MASK	(0xFFu) /* Host Ring Index Number[19:12] */
 #define PWI_HOST_RINGIDX_SHIFT	(12u)
 
-
 /* DMA_TYPE Values */
 #define PD_DB_DMA_TYPE_NO_IDMA	(0u)
 #define PD_DB_DMA_TYPE_IDMA	(1u)
@@ -1210,7 +1204,6 @@ void pcie_coherent_accenable(osl_t *osh, si_t *sih);
 #define PD_DB_DMA_TYPE_RXPOST(rev)	(REV_GE_73((rev)) ? (1u) : (5u))
 #define PD_DB_DMA_TYPE_TXCPL(rev)	(REV_GE_73((rev)) ? (2u) : (6u))
 #define PD_DB_DMA_TYPE_RXCPL(rev)	(REV_GE_73((rev)) ? (3u) : (7u))
-
 
 /* All ERR_ATTN of F0 */
 #define PD_ERR_FUNCTION0	\

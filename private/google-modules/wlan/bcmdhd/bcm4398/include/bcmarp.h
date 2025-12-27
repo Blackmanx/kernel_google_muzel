@@ -1,7 +1,7 @@
 /*
  * Fundamental constants relating to ARP Protocol
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -31,7 +31,6 @@
 
 /* This marks the start of a packed structure section. */
 #include <packed_section_start.h>
-
 
 #define ARP_OPC_OFFSET		6		/* option code offset */
 #define ARP_SRC_ETH_OFFSET	8		/* src h/w address offset */

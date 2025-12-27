@@ -1,7 +1,7 @@
 /*
  * Byte order utilities
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -61,7 +61,6 @@
 #define BCMSWAP64BY32(val) \
 	((uint64)((((uint64)(val) & 0x00000000ffffffffULL) << 32) | \
 	          (((uint64)(val) & 0xffffffff00000000ULL) >> 32)))
-
 
 /* Byte swapping macros
  *    Host <=> Network (Big Endian) for 16- and 32-bit values

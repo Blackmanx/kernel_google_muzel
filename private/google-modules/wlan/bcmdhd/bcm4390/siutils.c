@@ -754,7 +754,6 @@ BCMATTACHFN(si_alloc_coresinfo)(si_info_t *sii, osl_t *osh, chipcregs_t *cc)
 		return sii->cores_info;
 	}
 
-
 }
 
 static void
@@ -1399,7 +1398,6 @@ BCMPOSTTRAPFN(si_coreregs)(const si_t *sih)
 	return sii->curmap;
 }
 
-
 /**
  * This function changes logical "focus" to the indicated core;
  * must be called with interrupts off.
@@ -1885,7 +1883,6 @@ BCMPOSTTRAPFN(si_core_devmem_protect)(const si_t *sih, bool set)
 	HND_MMU_FLUSH_TLB();
 }
 #endif /* BCM_MMU_DEVMEM_PROTECT */
-
 
 /*
  * If there is no need for fiddling with interrupts or core switches (typically silicon
@@ -3177,7 +3174,6 @@ BCMPOSTTRAPFN(si_clear_backplane_to_fiq)(si_t *sih)
 	return ret;
 }
 
-
 void
 BCMPOSTTRAPFN(si_update_backplane_timeouts)(const si_t *sih, bool enable, uint32 timeout_exp,
 	uint32 cid)
@@ -3191,7 +3187,6 @@ BCMPOSTTRAPFN(si_update_backplane_timeouts)(const si_t *sih, bool enable, uint32
 #endif /* AXI_TIMEOUTS */
 	return;
 }
-
 
 /*
  * This routine adds the AXI timeouts for

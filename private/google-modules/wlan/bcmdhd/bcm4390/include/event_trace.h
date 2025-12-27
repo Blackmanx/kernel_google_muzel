@@ -116,7 +116,6 @@ typedef union {
 	uint32 t;
 } wl_event_log_id_ver_t;
 
-
 #define ETHER_ADDR_PACK_LOW(addr)  (((addr)->octet[3])<<24 | ((addr)->octet[2])<<16 | \
 	((addr)->octet[1])<<8 | ((addr)->octet[0]))
 #define ETHER_ADDR_PACK_HI(addr)   (((addr)->octet[5])<<8 | ((addr)->octet[4]))

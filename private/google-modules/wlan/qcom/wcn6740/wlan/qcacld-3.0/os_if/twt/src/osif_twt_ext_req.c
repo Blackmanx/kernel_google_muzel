@@ -888,25 +888,13 @@ int osif_twt_send_responder_enable_cmd(struct wlan_objmgr_psoc *psoc,
 int osif_twt_send_requestor_disable_cmd(struct wlan_objmgr_psoc *psoc,
 					uint8_t pdev_id, uint32_t reason)
 {
-	struct twt_disable_param req = {0};
-
-	req.pdev_id = pdev_id;
-	req.ext_conf_present = true;
-	req.dis_reason_code = reason;
-
-	return osif_twt_requestor_disable(psoc, &req);
+	return 0;
 }
 
 int osif_twt_send_responder_disable_cmd(struct wlan_objmgr_psoc *psoc,
 					uint8_t pdev_id, uint32_t reason)
 {
-	struct twt_disable_param req = {0};
-
-	req.pdev_id = pdev_id;
-	req.ext_conf_present = true;
-	req.dis_reason_code = reason;
-
-	return osif_twt_responder_disable(psoc, &req);
+	return 0;
 }
 
 void osif_twt_teardown_in_ps_disable(struct wlan_objmgr_psoc *psoc,

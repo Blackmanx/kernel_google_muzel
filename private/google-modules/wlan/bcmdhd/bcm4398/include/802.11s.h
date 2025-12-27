@@ -2,7 +2,7 @@
  * Fundamental types and constants relating to 802.11s -
  * "Mesh Networking"
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -133,7 +133,6 @@ BWL_PRE_PACKED_STRUCT struct mesh_targetinfo {
 } BWL_POST_PACKED_STRUCT;
 typedef struct mesh_targetinfo mesh_targetinfo_t;
 
-
 /* Mesh PREP IE */
 BWL_PRE_PACKED_STRUCT struct mesh_prep_ie {
 	uint8	id;
@@ -163,7 +162,6 @@ BWL_PRE_PACKED_STRUCT struct mesh_prep_ie {
 	} u;
 } BWL_POST_PACKED_STRUCT;
 typedef struct mesh_prep_ie mesh_prep_ie_t;
-
 
 /* Mesh PERR IE */
 struct mesh_perr_ie {

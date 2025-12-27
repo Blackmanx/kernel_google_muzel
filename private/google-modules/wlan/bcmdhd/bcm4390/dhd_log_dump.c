@@ -274,7 +274,7 @@ dhd_log_dump(void *handle, void *event_info, u8 event)
 	dhdp = &dhd->pub;
 
 #if defined(WL_CFG80211)
-	if (!dhd_query_bus_erros(dhdp) || !dhd_os_proto_is_blocked(dhdp)) {
+	if (!dhd_query_bus_erros(dhdp) && !dhd_os_proto_is_blocked(dhdp)) {
 		/* flush the fw preserve logs */
 		wl_flush_fw_log_buffer(dhd_linux_get_primary_netdev(dhdp),
 			FW_LOGSET_MASK_ALL);
@@ -592,7 +592,6 @@ dhd_get_time_str_len(void)
 	return strlen(time_str);
 }
 
-
 #if defined(BCMPCIE)
 uint32
 dhd_get_ext_trap_len(void *ndev, dhd_pub_t *dhdp)
@@ -732,7 +731,6 @@ dhd_get_init_dump_len(void *ndev, dhd_pub_t *dhdp, int section)
 		length += (uint32)(strlen(EWP_HW_MOD_DUMP_LOG_HDR) +
 			sizeof(sec_hdr));
 		break;
-
 
 	case LOG_DUMP_SECTION_EWP_HW_REG_DUMP:
 		if (dhdp->ewphw_regdump_buf) {
@@ -1076,7 +1074,6 @@ exit:
 	return ret;
 }
 #endif /* DHD_FW_COREDUMP && DNGL_EVENT_SUPPORT */
-
 
 #if defined(BCMPCIE)
 int
@@ -1478,7 +1475,6 @@ dhd_print_pktid_map_log_data(void *dev, dhd_pub_t *dhdp, const void *user_buf,
 	return dhd_write_pktid_log_dump(dhdp, user_buf, fp, len, pos, is_map);
 }
 #endif /* DHD_MAP_PKTID_LOGGING */
-
 
 void
 dhd_init_sec_hdr(log_dump_section_hdr_t *sec_hdr)
@@ -2330,7 +2326,6 @@ exit:
 	dhdp->skip_memdump_map_read = FALSE;
 	return;
 }
-
 
 #ifdef DHD_DEBUGABILITY_DEBUG_DUMP
 int dhd_debug_dump_get_ring_num(int sec_type)

@@ -1305,7 +1305,6 @@ exit:
 	return ret;
 }
 
-
 static wl_cellavoid_chan_info_t *
 wl_cellavoid_find_chinfo_fromband(wl_cellavoid_info_t *cellavoid_info, int band)
 {

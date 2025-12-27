@@ -102,7 +102,6 @@ extern int dhd_bus_console_in(dhd_pub_t *dhd, uchar *msg, uint msglen);
 extern bool dhd_bus_dpc(struct dhd_bus *bus);
 extern void dhd_bus_isr(bool *InterruptRecognized, bool *QueueMiniportHandleInterrupt, void *arg);
 
-
 /* Check for and handle local prot-specific iovar commands */
 extern int dhd_bus_iovar_op(dhd_pub_t *dhdp, const char *name,
 	void *params, uint plen, void *arg, uint len, bool set);

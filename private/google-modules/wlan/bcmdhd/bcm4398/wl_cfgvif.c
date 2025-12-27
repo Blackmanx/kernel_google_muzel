@@ -1,7 +1,7 @@
 /*
  * Wifi Virtual Interface implementaion
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -101,7 +101,6 @@
 #define	MAX_VIF_OFFSET	15
 #define MAX_WAIT_TIME 1500
 
-
 #if !defined(BCMDONGLEHOST)
 #ifdef ntoh32
 #undef ntoh32
@@ -191,11 +190,9 @@ static int bw2cap[] = { 0, 0, WLC_BW_CAP_20MHZ, WLC_BW_CAP_40MHZ, WLC_BW_CAP_80M
 #define DHD_OS_WAKE_LOCK_TIMEOUT(pub)
 #endif /* defined(BCMDONGLEHOST) */
 
-
 #define IS_WPA_AKM(akm) ((akm) == RSN_AKM_NONE ||			\
 				 (akm) == RSN_AKM_UNSPECIFIED ||	\
 				 (akm) == RSN_AKM_PSK)
-
 
 #ifdef SUPPORT_AP_BWCTRL
 static void
@@ -208,7 +205,6 @@ struct chan_info {
 	int chan_type;
 };
 #endif
-
 
 #if defined(WL_FW_OCE_AP_SELECT)
 bool wl_cfg80211_is_oce_ap(struct wiphy *wiphy, const u8 *bssid_hint)
@@ -366,7 +362,6 @@ wl_validate_wps_ie(const char *wps_ie, s32 wps_ie_len, bool *pbc)
 		subel += subelt_len;
 	}
 }
-
 
 bool
 wl_cfg80211_check_vif_in_use(struct net_device *ndev)
@@ -3927,7 +3922,6 @@ wl_cfg80211_bcn_bringup_ap(
 			if (err < 0) {
 				WL_ERR(("bip set error %d\n", err));
 
-
 				{
 					goto exit;
 				}
@@ -5418,7 +5412,6 @@ wl_cfg80211_del_beacon(struct wiphy *wiphy, struct net_device *dev)
 
 	cfg->ap_oper_channel = INVCHANSPEC;
 
-
 	if ((bssidx = wl_get_bssidx_by_wdev(cfg, dev->ieee80211_ptr)) < 0) {
 		WL_ERR(("find p2p index from wdev(%p) failed\n", dev->ieee80211_ptr));
 		return BCME_ERROR;
@@ -5696,6 +5689,10 @@ wl_update_mlo_peer_info(struct bcm_cfg80211 *cfg, struct net_device *ndev, const
 				mlo_peer_info.num_links++;
 
 				match_found = true;
+				if (mlo_peer_info.num_links >= MAX_MLO_LINK) {
+					WL_INFORM_MEM(("Reached the count of max mlo link.\n"));
+					break;
+				}
 			}
 		}
 	}
@@ -6339,7 +6336,6 @@ out:
 }
 #endif /* LINUX_VERSION > VERSION(3,2,0) || WL_COMPAT_WIRELESS */
 
-
 static bool check_dev_role_integrity(struct bcm_cfg80211 *cfg, u32 dev_role)
 {
 #if defined(BCMDONGLEHOST)
@@ -6355,7 +6351,6 @@ static bool check_dev_role_integrity(struct bcm_cfg80211 *cfg, u32 dev_role)
 #endif /* defined(BCMDONGLEHOST) */
 	return true;
 }
-
 
 s32
 wl_cfg80211_dfs_ap_move(struct net_device *ndev, char *data, char *command, int total_len)
@@ -6435,7 +6430,6 @@ wl_cfg80211_dfs_ap_move(struct net_device *ndev, char *data, char *command, int 
 	}
 	return err;
 }
-
 
 #ifdef WL_CFG80211_ACL
 static int
@@ -6937,7 +6931,6 @@ const wl_event_msg_t *e, void *data)
 	return 0;
 }
 
-
 #ifdef WLTDLS
 s32
 wl_cfg80211_tdls_config(struct bcm_cfg80211 *cfg, enum wl_tdls_config state, bool auto_mode)
@@ -7086,7 +7079,6 @@ struct net_device* wl_get_ap_netdev(struct bcm_cfg80211 *cfg, char *ifname)
 
 	return ndev;
 }
-
 
 #ifdef SUPPORT_AP_HIGHER_BEACONRATE
 #define WLC_RATE_FLAG	0x80
@@ -7478,7 +7470,6 @@ wl_cfg80211_iface_count(struct net_device *dev)
 	return iface_count;
 }
 
-
 typedef struct {
 	uint16 id;
 	uint16 len;
@@ -7521,7 +7512,6 @@ wl_pack_uint_cb(void *ctx, uint16 id, uint16 len, uint8 *buf)
 			break;
 	}
 }
-
 
 int wl_cfg80211_set_he_mode(struct net_device *dev, struct bcm_cfg80211 *cfg,
 		s32 bssidx, u32 he_flag, bool set)
@@ -7571,7 +7561,6 @@ int wl_cfg80211_set_he_mode(struct net_device *dev, struct bcm_cfg80211 *cfg,
 
 	return err;
 }
-
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 12, 0))
 int
@@ -7689,7 +7678,6 @@ wl_cfg80211_channel_switch(struct wiphy *wiphy, struct net_device *dev,
 	return err;
 }
 #endif /* LINUX_VERSION_CODE >= KERNEL_VERSION(3, 12, 0) */
-
 
 #ifdef SUPPORT_AP_SUSPEND
 void
@@ -8372,7 +8360,6 @@ wl_cfgvif_roam_config(struct bcm_cfg80211 *cfg, struct net_device *dev,
 #endif /* WL_DUAL_APSTA */
 		return;
 	}
-
 
 	if (cfg->disable_fw_roam) {
 		/* Framework has disabled roam, don't change roam states within the DHD */
@@ -9158,7 +9145,6 @@ wl_cfgvif_clone_bss_info(struct bcm_cfg80211 *cfg, struct net_device *ndev,
 				MAC2STRDBG(src_bssid)));
 		return BCME_ERROR;
 	}
-
 
 	if (!src_bss->ies || !src_bss->ies->len) {
 		WL_ERR(("empty bss ies\n"));

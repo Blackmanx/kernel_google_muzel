@@ -231,7 +231,16 @@
 #define NAN_DISC_BCN_INTERVAL_2G_DEF 128u
 #define NAN_DISC_BCN_INTERVAL_5G_DEF 176u
 #define NAN_RAND_MAC_RETRIES 10
-#define IS_NDI_IFACE(ifname) strstr(ifname, "aware")
+
+/* AWARE NMI interface name */
+#ifndef CUSTOM_NMI_IFNAME
+#define NMI_IFNAME              "aware_nmi0"
+#else
+#define NMI_IFNAME              CUSTOM_NMI_IFNAME
+#endif /* !CUSTOM_NMI_IFNAME */
+
+#define IS_NDI_IFACE(ifname) strstr(ifname, "aware_data")
+#define IS_NMI_IFACE(ifname) strstr(ifname, NMI_IFNAME)
 
 typedef uint32 nan_data_path_id;
 

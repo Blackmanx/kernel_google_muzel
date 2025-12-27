@@ -368,7 +368,6 @@ const struct cntry_locales_custom translate_custom_table[] = {
 #endif /* (CUSTOMER_HW2 || BOARD_HIKEY || BOARD_STB) &&  CUSTOMER_HW5 */
 };
 
-
 /* Customized Locale convertor
 *  input : ISO 3166-1 country abbreviation
 *  output: customized cspec

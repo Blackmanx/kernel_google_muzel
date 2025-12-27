@@ -1,7 +1,7 @@
 /*
  * DHD Linux header file - contains private structure definition of the Linux specific layer
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -90,6 +90,7 @@ typedef struct dhd_info {
 	struct mutex dhd_iovar_mutex;
 
 	struct semaphore proto_sem;
+	atomic_t proto_cnt;
 #ifdef PROP_TXSTATUS
 	spinlock_t	wlfc_spinlock;
 

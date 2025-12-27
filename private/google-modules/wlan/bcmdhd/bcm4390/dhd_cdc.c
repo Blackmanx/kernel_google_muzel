@@ -72,7 +72,6 @@ typedef struct dhd_prot {
 	unsigned char buf[WLC_IOCTL_MAXLEN + ROUND_UP_MARGIN];
 } dhd_prot_t;
 
-
 uint16
 dhd_prot_get_ioctl_trans_id(dhd_pub_t *dhdp)
 {
@@ -139,7 +138,6 @@ dhdcdc_query_ioctl(dhd_pub_t *dhd, int ifidx, uint cmd, void *buf, uint len, uin
 
 	DHD_TRACE(("%s: Enter\n", __FUNCTION__));
 	DHD_CTL(("%s: cmd %d len %d\n", __FUNCTION__, cmd, len));
-
 
 	/* Respond "bcmerror" and "bcmerrorstr" with local cache */
 	if (cmd == WLC_GET_VAR && buf) {
@@ -544,7 +542,6 @@ exit:
 	return 0;
 }
 
-
 int
 dhd_prot_attach(dhd_pub_t *dhd)
 {
@@ -676,7 +673,6 @@ dhd_prot_stop(dhd_pub_t *dhd)
 {
 /* Nothing to do for CDC */
 }
-
 
 static void
 dhd_get_hostreorder_pkts(void *osh, struct reorder_info *ptr, void **pkt,
@@ -821,7 +817,6 @@ dhd_process_pkt_reorder_info(dhd_pub_t *dhd, uchar *reorder_info_buf, uint reord
 	} else if (flags & WLHOST_REORDERDATA_CURIDX_VALID) {
 		cur_idx = reorder_info_buf[WLHOST_REORDERDATA_CURIDX_OFFSET];
 		exp_idx = reorder_info_buf[WLHOST_REORDERDATA_EXPIDX_OFFSET];
-
 
 		if ((exp_idx == ptr->exp_idx) && (cur_idx != ptr->exp_idx)) {
 			/* still in the current hole */

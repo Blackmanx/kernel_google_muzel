@@ -6,7 +6,7 @@
  * Provides type definitions and function prototypes used to create, delete and manage flow rings at
  * high level.
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -127,7 +127,6 @@
 
 #define DHD_IF_ROLE_GENERIC_STA(pub, idx) \
 	(DHD_IF_ROLE_STA(pub, idx) || DHD_IF_ROLE_P2PGC(pub, idx) || DHD_IF_ROLE_WDS(pub, idx))
-
 
 #ifndef DHD_AWDL
 #define DHD_IF_ROLE_MULTI_CLIENT(pub, idx) \

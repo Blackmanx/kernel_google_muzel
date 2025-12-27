@@ -1,7 +1,7 @@
 /*
  * Broadcom Ethernettype  protocol definitions
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -77,7 +77,6 @@
 #define BCMILCP_SUBTYPE_CERT		32770
 #define BCMILCP_SUBTYPE_SES		32771
 
-
 #define BCMILCP_BCM_SUBTYPE_RESERVED		0
 #define BCMILCP_BCM_SUBTYPE_EVENT		1
 #define BCMILCP_BCM_SUBTYPE_SES			2
@@ -103,7 +102,6 @@ typedef BWL_PRE_PACKED_STRUCT struct bcmeth_hdr
 	/* user specific Data */
 	uint16	usr_subtype;
 } BWL_POST_PACKED_STRUCT bcmeth_hdr_t;
-
 
 /* This marks the end of a packed structure section. */
 #include <packed_section_end.h>

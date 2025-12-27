@@ -1,7 +1,7 @@
 /*
  * Fundamental constants relating to IP Protocol
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -30,7 +30,6 @@
 
 /* This marks the start of a packed structure section. */
 #include <packed_section_start.h>
-
 
 /* IPV4 and IPV6 common */
 #define IP_VER_OFFSET		0x0	/* offset to version field */

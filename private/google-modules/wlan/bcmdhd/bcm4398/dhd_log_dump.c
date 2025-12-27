@@ -1,7 +1,7 @@
 /*
  * log_dump - debugability support for dumping logs to file
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -255,6 +255,8 @@ dhd_log_dump(void *handle, void *event_info, u8 event)
 {
 	dhd_info_t *dhd = handle;
 	log_dump_type_t *type = (log_dump_type_t *)event_info;
+	dhd_pub_t *dhdp = NULL;
+	BCM_REFERENCE(dhdp);
 
 	if (!dhd || !type) {
 		DHD_ERROR(("%s: dhd/type is NULL\n", __FUNCTION__));
@@ -266,10 +268,16 @@ dhd_log_dump(void *handle, void *event_info, u8 event)
 		return;
 	}
 
+	dhdp = &dhd->pub;
+
 #ifdef WL_CFG80211
-	/* flush the fw preserve logs */
-	wl_flush_fw_log_buffer(dhd_linux_get_primary_netdev(&dhd->pub),
-		FW_LOGSET_MASK_ALL);
+	if (!dhd_query_bus_erros(dhdp) || !dhd_os_proto_is_blocked(dhdp)) {
+		/* flush the fw preserve logs */
+		wl_flush_fw_log_buffer(dhd_linux_get_primary_netdev(&dhd->pub),
+			FW_LOGSET_MASK_ALL);
+	} else {
+		DHD_PRINT(("%s: skip flush fw log buffer\n", __FUNCTION__));
+	}
 #endif
 
 	/* there are currently 3 possible contexts from which
@@ -581,7 +589,6 @@ dhd_get_time_str_len(void)
 	return strlen(time_str);
 }
 
-
 #if defined(BCMPCIE)
 uint32
 dhd_get_ext_trap_len(void *ndev, dhd_pub_t *dhdp)
@@ -721,7 +728,6 @@ dhd_get_init_dump_len(void *ndev, dhd_pub_t *dhdp, int section)
 			length += (uint32)(strlen(EWP_HW_MOD_DUMP_LOG_HDR) +
 				sizeof(sec_hdr));
 			break;
-
 
 		case LOG_DUMP_SECTION_EWP_HW_REG_DUMP:
 			if (dhdp->ewphw_regdump_buf) {
@@ -1065,7 +1071,6 @@ exit:
 	return ret;
 }
 #endif /* DHD_FW_COREDUMP && DNGL_EVENT_SUPPORT */
-
 
 #if defined(BCMPCIE)
 int
@@ -1467,7 +1472,6 @@ dhd_print_pktid_map_log_data(void *dev, dhd_pub_t *dhdp, const void *user_buf,
 	return dhd_write_pktid_log_dump(dhdp, user_buf, fp, len, pos, is_map);
 }
 #endif /* DHD_MAP_PKTID_LOGGING */
-
 
 void
 dhd_init_sec_hdr(log_dump_section_hdr_t *sec_hdr)
@@ -2302,7 +2306,6 @@ exit:
 	dhdp->skip_memdump_map_read = FALSE;
 	return;
 }
-
 
 #ifdef DHD_DEBUGABILITY_DEBUG_DUMP
 int dhd_debug_dump_get_ring_num(int sec_type)

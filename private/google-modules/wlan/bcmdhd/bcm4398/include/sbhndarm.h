@@ -1,7 +1,7 @@
 /*
  * Broadcom SiliconBackplane ARM definitions
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -433,7 +433,6 @@ typedef volatile struct ca7regs ca7regs_t;
 #define arm_WorkAroundReg	workaround
 #define arm_PowerControl	powerctl
 #define arm_PowerControl2	powerctl2
-
 
 #if defined(__ARM_ARCH_7M__)
 #define ARMREG(regs, reg)	ARM_CM3_REG(regs, reg)

@@ -1,7 +1,7 @@
 /*
  * Broadcom Dongle Host Driver (DHD), RTT
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -143,7 +143,6 @@ enum {
 	RTT_PREAMBLE_HT = BIT(1),
 	RTT_PREAMBLE_VHT = BIT(2)
 };
-
 
 enum {
 	RTT_BW_5 = BIT(0),
@@ -434,7 +433,6 @@ typedef struct rtt_capabilities {
 	uint8 bw_support;               /* bit mask indicate what BW is supported */
 } rtt_capabilities_t;
 
-
 /* RTT responder information */
 typedef struct wifi_rtt_responder {
 	wifi_channel_info channel;   /* channel of responder */
@@ -530,13 +528,11 @@ void dhd_rtt_schedule_rtt_work_thread(dhd_pub_t *dhd, int sched_reason);
 
 int dhd_rtt_stop(dhd_pub_t *dhd, struct ether_addr *mac_list, int mac_cnt);
 
-
 int dhd_rtt_register_noti_callback(dhd_pub_t *dhd, void *ctx, dhd_rtt_compl_noti_fn noti_fn);
 
 int dhd_rtt_unregister_noti_callback(dhd_pub_t *dhd, dhd_rtt_compl_noti_fn noti_fn);
 
 int dhd_rtt_event_handler(dhd_pub_t *dhd, wl_event_msg_t *event, void *event_data);
-
 
 int dhd_rtt_capability(dhd_pub_t *dhd, rtt_capabilities_t *capa);
 

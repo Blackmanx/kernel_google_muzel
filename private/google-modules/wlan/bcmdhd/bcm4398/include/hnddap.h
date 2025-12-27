@@ -1,7 +1,7 @@
 /*
  * DAP(Debug Access Port) interface.
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2025, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -79,7 +79,6 @@ uint32 hnd_dap_ewp_init(si_t *sih);
 #define hnd_dap_ewp_init(a) (0)
 #endif /* BCM_DAP */
 
-
 #define DAP_TMC_ETMCPU_TRACEID			0x0u
 
 /*
@@ -123,7 +122,6 @@ typedef volatile struct tmcregs {
 
 /* Magic word to access CoreSight registers */
 #define CORESIGHT_UNLOCK	0xC5ACCE55u
-
 
 /* ATB funnel registers */
 typedef volatile struct funnelregs {
