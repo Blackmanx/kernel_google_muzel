@@ -92,6 +92,8 @@
 		/* High dissipation adapter */
 		google,hda-tz-wlc;
 
+		google,wlc_qispec = <0x1201>;
+
 		p9xxx_gpio: p9xxx_gpio {
 			gpio-controller;
 			#gpio-cells = <2>;

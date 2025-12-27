@@ -1278,7 +1278,7 @@ struct exynos_panel_desc google_bigsurf = {
 	/* supported HDR format bitmask : 1(DOLBY_VISION), 2(HDR10), 3(HLG) */
 	.hdr_formats = BIT(2) | BIT(3),
 	.max_luminance = 10000000,
-	.max_avg_luminance = 1200000,
+	.max_avg_luminance = 10000000,
 	.min_luminance = 5,
 	.modes = bigsurf_modes,
 	.num_modes = ARRAY_SIZE(bigsurf_modes),

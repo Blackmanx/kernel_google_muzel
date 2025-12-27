@@ -1259,7 +1259,7 @@ static struct exynos_panel_desc google_shoreline = {
 	/* supported HDR format bitmask : 1(DOLBY_VISION), 2(HDR10), 3(HLG) */
 	.hdr_formats = BIT(2) | BIT(3),
 	.max_luminance = 10000000,
-	.max_avg_luminance = 1200000,
+	.max_avg_luminance = 10000000,
 	.min_luminance = 5,
 	.bl_range = shoreline_bl_range,
 	.bl_num_ranges = ARRAY_SIZE(shoreline_bl_range),
