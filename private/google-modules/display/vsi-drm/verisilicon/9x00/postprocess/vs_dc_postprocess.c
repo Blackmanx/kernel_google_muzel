@@ -155,7 +155,7 @@ static bool panel_crop_config_hw(struct dc_hw *hw, u8 hw_id, bool enable, const 
 {
 	const struct drm_vs_panel_crop *panel_crop = data;
 
-	dc_write(hw, VS_SET_PANEL_FIELD(DCREG_SH_PANEL, hw_id, OUT_CROP_EN_Address), !!enable);
+	dc_write(hw, VS_SET_PANEL_FIELD(DCREG_SH_PANEL, hw_id, OUT_CROP_EN_Address), enable);
 
 	if (enable) {
 		dc_write(hw, VS_SET_PANEL_FIELD(DCREG_SH_PANEL, hw_id, OUT_CROP_START_Address),
@@ -457,7 +457,7 @@ static bool free_sync_config_hw(struct dc_hw *hw, u8 hw_id, bool enable, const v
 			dc_write_immediate(hw,
 					   VS_SET_OUTPUT_FIELD(DCREG_OUTPUT, output_id,
 							       FREE_SYNC_CONFIG_Address),
-					   (!!enable) |
+					   (enable) |
 						   (free_sync->mode.free_sync_max_delay << 16));
 		}
 
@@ -1417,8 +1417,6 @@ bool vs_dc_register_postprocess_states(struct vs_dc_property_state_group *states
 		__ERR_CHECK(vs_dc_property_register_state(states, &data_trunc_proto), on_error);
 	if (display_info->data_mode)
 		__ERR_CHECK(vs_dc_property_register_state(states, &data_extend_proto), on_error);
-	if (display_info->rgb_hist)
-		__ERR_CHECK(vs_dc_register_hist_rgb_states(states, display_info), on_error);
 	return true;
 on_error:
 	return false;

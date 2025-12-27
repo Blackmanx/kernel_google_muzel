@@ -7,10 +7,12 @@
 #include "vs_g2d_reg_sc.h"
 #include "g2d_sc_hw.h"
 #include "g2d_writeback_hw.h"
+#include "g2d_pvric_hw.h"
 
-void wb_set_fb(struct sc_hw *hw, u8 hw_id, struct sc_hw_fb *fb)
+static void wb_set_fb(struct sc_hw *hw, u8 hw_id)
 {
 	u32 config = 0;
+	struct sc_hw_fb *fb = &hw->wb[hw_id].fb;
 
 	if (!fb->enable)
 		return;
@@ -36,4 +38,10 @@ void wb_set_fb(struct sc_hw *hw, u8 hw_id, struct sc_hw_fb *fb)
 	sc_write(hw, SCREG_LAYER0_WDMA_STRIDE_Address, fb->stride);
 	sc_write(hw, SCREG_LAYER0_WDMA_UPLANE_STRIDE_Address, fb->u_stride);
 	sc_write(hw, SCREG_LAYER0_WDMA_VPLANE_STRIDE_Address, fb->v_stride);
+}
+
+void wb_hw_commit(struct sc_hw *hw, u8 hw_id)
+{
+	wb_set_fb(hw, hw_id);
+	pvric_hw_wb_commit(hw, hw_id);
 }

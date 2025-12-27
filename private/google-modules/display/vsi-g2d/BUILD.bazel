@@ -52,11 +52,18 @@ ddk_module(
         "**/*.h",
     ]) + [
         "google/g2d_crtc.c",
+        "google/g2d_debugfs.c",
+        "google/g2d_drm_atomic.c",
         "google/g2d_drv.c",
         "google/g2d_fb.c",
         "google/g2d_gem.c",
+        "google/g2d_hw_constraints.c",
         "google/g2d_plane.c",
         "google/g2d_plane_hw.c",
+        "google/g2d_pvric.c",
+        "google/g2d_pvric_hw.c",
+        "google/g2d_qos.c",
+        "google/g2d_recovery.c",
         "google/g2d_sc.c",
         "google/g2d_sc_hw.c",
         "google/g2d_writeback.c",
@@ -78,6 +85,9 @@ ddk_module(
         ":ddk_headers",
         "//common:all_headers_aarch64",
         "//private/google-modules/display/common/gs_drm",
+        "//private/google-modules/perf:google_pm_qos",
+        "//private/google-modules/soc/rdo:rdo_soc_headers",
+        "//private/google-modules/soc/rdo:rdo_soc_module",
     ],
 )
 

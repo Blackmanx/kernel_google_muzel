@@ -34,7 +34,7 @@
 #include <drm/vs_drm_fourcc.h>
 #include <drm/drm_vblank.h>
 
-static inline void update_format(u32 format, struct dc_hw_fb *fb)
+static inline u8 to_vs_format(u32 format)
 {
 	u8 f = FORMAT_A8R8G8B8;
 
@@ -117,7 +117,7 @@ static inline void update_format(u32 format, struct dc_hw_fb *fb)
 		break;
 	}
 
-	fb->format = f;
+	return f;
 }
 
 static inline void update_swizzle(u32 format, struct dc_hw_fb *fb)
@@ -170,7 +170,7 @@ static inline void update_swizzle(u32 format, struct dc_hw_fb *fb)
 	}
 }
 
-static inline void update_tile_mode(const struct drm_framebuffer *fb, struct dc_hw_fb *dc_fb)
+static inline u8 to_vs_tile_mode(const struct drm_framebuffer *fb)
 {
 	u8 norm_mode, tile = TILE_MODE_LINEAR;
 
@@ -205,7 +205,7 @@ static inline void update_tile_mode(const struct drm_framebuffer *fb, struct dc_
 		break;
 	}
 
-	dc_fb->tile_mode = tile;
+	return tile;
 }
 
 bool vs_dc_is_yuv_format(u32 format)
@@ -241,11 +241,35 @@ static inline u8 to_vs_display_id(struct vs_dc *dc, struct drm_crtc *crtc)
 	return id;
 }
 
+static inline u16 get_dma_image_width(const struct dc_hw_roi *roi, const struct dc_hw_fb *fb)
+{
+	u16 width = 0, height = 0;
+
+	if (roi) {
+		switch (roi->mode) {
+		case VS_DMA_ONE_ROI:
+			width = roi->in_rect[0].w;
+			height = roi->in_rect[0].h;
+			break;
+		default:
+			width = fb->width;
+			height = fb->height;
+			break;
+		}
+	} else {
+		width = fb->width;
+		height = fb->height;
+	}
+
+	return (fb->rotation == ROT_90 || fb->rotation == ROT_270) ? height : width;
+}
+
 static void vs_dc_update_sram(struct vs_dc *dc, struct vs_plane *plane, struct dc_hw_fb *fb,
 			      struct dc_hw_plane *hw_plane, const struct dc_hw_scale *scale)
 {
 	struct device *dev = dc->hw.dev;
 	u32 sp_size = 0;
+	u16 width = 0;
 	int32_t ret = 0;
 	bool sp_dirty = false;
 	bool dma_sram_alloc = false;
@@ -256,6 +280,7 @@ static void vs_dc_update_sram(struct vs_dc *dc, struct vs_plane *plane, struct d
 	u32 hw_id = hw_plane->info->id;
 	u16 sp_alignment = dc->hw.info->dma_sram_alignment;
 	bool sp_extra_buffer = dc->hw.info->dma_sram_extra_buffer;
+
 	plane->sram.sp_unit_size = dc->hw.info->dma_sram_unit_size;
 
 	/* cursor layer doesn't use sram pool */
@@ -270,9 +295,11 @@ static void vs_dc_update_sram(struct vs_dc *dc, struct vs_plane *plane, struct d
 		enum vs_dpu_sram_pool_type type = (hw_id < 8) ? VS_DPU_SPOOL_FE0_DMA :
 								VS_DPU_SPOOL_FE1_DMA;
 
-		vs_dpu_get_dma_sram_size(fb->format, fb->tile_mode, fb->rotation, fb->width,
-					 &sp_size, sp_alignment, sp_extra_buffer,
-					 plane->sram.sp_unit_size);
+		/* b/451837126: pass (NULL, fb) to force using full FB dimensions */
+		width = get_dma_image_width(NULL, fb);
+
+		vs_dpu_get_dma_sram_size(fb->format, fb->tile_mode, fb->rotation, width, &sp_size,
+					 sp_alignment, sp_extra_buffer, plane->sram.sp_unit_size);
 		if (plane->sram.sp_handle && plane->sram.sp_size != sp_size) {
 			realloc = 1;
 			dma_sram_alloc = true;
@@ -394,9 +421,9 @@ static void update_plane_fb(struct vs_plane *plane, u8 display_id, struct dc_hw_
 	fb->zpos = vs_plane_state->blend_id;
 	fb->enable = state->visible;
 	fb->secure = is_secure;
-	update_format(drm_fb->format->format, fb);
+	fb->format = to_vs_format(drm_fb->format->format);
 	update_swizzle(drm_fb->format->format, fb);
-	update_tile_mode(drm_fb, fb);
+	fb->tile_mode = to_vs_tile_mode(drm_fb);
 
 	vs_plane_state->status.tile_mode = fb->tile_mode;
 }
@@ -465,13 +492,6 @@ static int populate_layer_scale(const struct drm_plane_state *plane_state,
 	// result in 16.16 output. Note that subtracting 1 is a HW constraint for no-stretch mode
 	scale->factor_x = (scale->src_w - (1 << 16)) / (scale->dst_w - 1);
 	scale->factor_y = (scale->src_h - (1 << 16)) / (scale->dst_h - 1);
-
-	/* Strech mode scale factors do not require -1. See b/294939884 */
-	if (scale->factor_x != scale->factor_y) {
-		scale->stretch_mode = true;
-		scale->factor_x = scale->src_w / scale->dst_w;
-		scale->factor_y = scale->src_h / scale->dst_h;
-	}
 
 	scale->enable =
 		(scale->factor_x != VS_PLANE_NO_SCALING || scale->factor_y != VS_PLANE_NO_SCALING);
@@ -989,21 +1009,135 @@ static bool vs_dc_mod_supported(const struct vs_plane_info *plane_info, u64 modi
 	return false;
 }
 
-static int check_dma_constraints(struct vs_plane_state *vs_plane_state,
-				 const struct vs_plane_info *plane_info)
+static int check_plane_sram_dma_size(const struct vs_dc_info *info,
+				     const struct dc_hw_plane *hw_plane,
+				     struct vs_plane_state *vs_plane_state,
+				     const struct vs_plane_info *plane_info)
 {
+	int ret;
 	struct device *dev = vs_plane_state->base.plane->dev->dev;
 	const struct drm_plane_state *plane_state = &vs_plane_state->base;
 	const struct drm_framebuffer *fb = plane_state->fb;
+	u32 dma_sram_unit_size = info->dma_sram_unit_size;
+	u16 dma_sram_alignment = info->dma_sram_alignment;
+	bool dma_sram_extra_buffer = info->dma_sram_extra_buffer;
+	u32 dma_sram_max_size_kb = plane_info->dma_sram_max_size_kb;
+	u32 dma_sram_max_size = dma_sram_max_size_kb << 10;
+	u32 dma_sram_size = 0;
+
+	if (!dma_sram_max_size_kb)
+		return 0;
+
+	ret = vs_dpu_get_dma_sram_size(to_vs_format(fb->format->format), to_vs_tile_mode(fb),
+				       to_vs_rotation(plane_state->rotation), fb->width,
+				       &dma_sram_size, dma_sram_alignment, dma_sram_extra_buffer,
+				       dma_sram_unit_size);
+	if (ret) {
+		dev_warn(dev, "[Reject] plane %d failed to calculate sram dma size\n",
+			 plane_info->id);
+		return ret;
+	}
+
+	dev_dbg(dev, "%s: plane %d dma_sram_size %u, dma_sram_max_size %u\n", __func__,
+		plane_info->id, dma_sram_size, dma_sram_max_size);
+
+	if (dma_sram_size > dma_sram_max_size) {
+		dev_warn(dev, "[Reject] plane %d dma_sram_size %u > %u\n", plane_info->id,
+			 dma_sram_size, dma_sram_max_size);
+		return -EINVAL;
+	}
+
+	/* save calculated plane dma sram size */
+	vs_plane_state->dma_sram_size = dma_sram_size;
+
+	return 0;
+}
+
+static int check_plane_sram_scl_size(const struct vs_dc_info *info,
+				     const struct dc_hw_plane *hw_plane,
+				     struct vs_plane_state *vs_plane_state,
+				     const struct vs_plane_info *plane_info)
+{
+	int ret;
+	struct device *dev = vs_plane_state->base.plane->dev->dev;
+	const struct drm_plane_state *plane_state = &vs_plane_state->base;
+	const struct drm_framebuffer *fb = plane_state->fb;
+	u32 scl_sram_max_size_kb = plane_info->scl_sram_max_size_kb;
+	u32 scl_sram_max_size = scl_sram_max_size_kb << 10;
+	struct dc_hw_scale scale = { 0 };
+	u32 scl_sram_size = 0;
+
+	if (!scl_sram_max_size_kb)
+		return 0;
+
+	ret = populate_layer_scale(plane_state, &scale);
+	if (ret)
+		return ret;
+
+	if (!scale.enable)
+		return 0;
+
+	ret = vs_dpu_get_fescl_sram_size(to_vs_format(fb->format->format),
+					 min(scale.src_w, scale.dst_w), &scl_sram_size);
+	if (ret) {
+		dev_warn(dev, "[Reject] plane %d failed to calculate sram scaler size\n",
+			 plane_info->id);
+		return ret;
+	}
+
+	dev_dbg(dev, "%s: plane %d scl_sram_size %u, scl_sram_max_size %u\n", __func__,
+		plane_info->id, scl_sram_size, scl_sram_max_size);
+
+	if (scl_sram_size > scl_sram_max_size) {
+		dev_warn(dev, "[Reject] plane %d scl_sram_size %u > %u\n", plane_info->id,
+			 scl_sram_size, scl_sram_max_size);
+		return -EINVAL;
+	}
+
+	/* save calculated plane scl sram size */
+	vs_plane_state->scl_sram_size = scl_sram_size;
+
+	return 0;
+}
+
+static int check_plane_sram(const struct vs_dc_info *info, const struct dc_hw_plane *hw_plane,
+			    struct vs_plane_state *vs_plane_state,
+			    const struct vs_plane_info *plane_info)
+{
+	int ret;
+	const struct drm_plane_state *plane_state = &vs_plane_state->base;
+	const struct drm_framebuffer *fb = plane_state->fb;
+
+	if (vs_fb_is_shallow(fb->modifier))
+		return 0;
+
+	if (hw_plane->info->type == DRM_PLANE_TYPE_CURSOR)
+		return 0;
+
+	ret = check_plane_sram_dma_size(info, hw_plane, vs_plane_state, plane_info);
+	if (ret)
+		return ret;
+
+	ret = check_plane_sram_scl_size(info, hw_plane, vs_plane_state, plane_info);
+	if (ret)
+		return ret;
+
+	return 0;
+}
+
+static int check_dma_constraints(struct vs_plane_state *vs_plane_state,
+				 const struct vs_plane_info *plane_info,
+				 const struct drm_framebuffer *fb, struct drm_rect *roi)
+{
+	struct device *dev = vs_plane_state->base.plane->dev->dev;
 	bool is_yuv = fb->format->is_yuv;
 	uint64_t vs_fourcc_mod = vs_fb_parse_fourcc_modifier(fb->modifier);
 	bool is_pvric = fourcc_mod_vs_get_type(vs_fourcc_mod) == DRM_FORMAT_MOD_VS_TYPE_PVRIC;
 
-	/* Represented in fixed point 16.16*/
-	int src_w = drm_rect_width(&plane_state->src) >> 16;
-	int src_h = drm_rect_height(&plane_state->src) >> 16;
-	int src_x = plane_state->src.x1 >> 16;
-	int src_y = plane_state->src.y1 >> 16;
+	int src_w = drm_rect_width(roi);
+	int src_h = drm_rect_height(roi);
+	int src_x = roi->x1;
+	int src_y = roi->y1;
 	unsigned int h_stride = fb->pitches[0];
 	unsigned int fb_lines;
 
@@ -1015,7 +1149,7 @@ static int check_dma_constraints(struct vs_plane_state *vs_plane_state,
 
 	if (src_w < plane_info->min_width || fb->width > plane_info->max_width ||
 	    src_h < plane_info->min_height || fb->height > plane_info->max_height) {
-		dev_dbg(dev,
+		dev_err(dev,
 			"[Reject] fb or crop exceeds limits on plane %d. fb %dx%d crop %dx%d\n",
 			plane_info->id, fb->width, fb->height, src_w, src_h);
 		return -EINVAL;
@@ -1035,7 +1169,7 @@ static int check_dma_constraints(struct vs_plane_state *vs_plane_state,
 			requirement = VS_ALIGN_PVRIC_STRIDE;
 
 		if (!IS_ALIGNED(h_stride, requirement)) {
-			dev_dbg(dev,
+			dev_err(dev,
 				"[Reject] Invalid PVRIC stride alignment on plane: %d. stride: %d. requirement: %d\n",
 				plane_info->id, h_stride, requirement);
 			return -EINVAL;
@@ -1068,7 +1202,7 @@ static int check_dma_constraints(struct vs_plane_state *vs_plane_state,
 		}
 	} else {
 		if (!IS_ALIGNED(h_stride, VS_ALIGN_STRIDE)) {
-			dev_dbg(dev,
+			dev_err(dev,
 				"[Reject] Invalid stride alignment on plane: %d. stride: %d. requirement: %d\n",
 				plane_info->id, h_stride, VS_ALIGN_STRIDE);
 			return -EINVAL;
@@ -1089,14 +1223,14 @@ static int check_dma_constraints(struct vs_plane_state *vs_plane_state,
 		    (fb_lines < ALIGN(fb->height, VS_ALIGN_YUV420)) ||
 		    !IS_ALIGNED(src_w, VS_ALIGN_YUV420) || !IS_ALIGNED(src_h, VS_ALIGN_YUV420) ||
 		    !IS_ALIGNED(src_x, VS_ALIGN_YUV420) || !IS_ALIGNED(src_y, VS_ALIGN_YUV420)) {
-			dev_dbg(dev,
+			dev_err(dev,
 				"[Reject] Invalid alignment for YUV420 on plane: %d. buffer %dx%d crop %dx%d @ %d,%d\n",
 				plane_info->id, h_stride, fb_lines, src_w, src_h, src_x, src_y);
 			return -EINVAL;
 		}
 
 		if (fb->width > plane_info->max_yuv_width) {
-			dev_dbg(dev,
+			dev_err(dev,
 				"[Reject] Exceeding max YUV width on plane: %d. h_stride: %d, crop width %d\n",
 				plane_info->id, h_stride, src_w);
 			return -EINVAL;
@@ -1104,16 +1238,67 @@ static int check_dma_constraints(struct vs_plane_state *vs_plane_state,
 
 		/* Specifically handling PVRIC YUV420 case here*/
 		if (is_pvric && (fb_lines < ALIGN(fb->height, VS_ALIGN_YUV420_PVRIC_FB_HEIGHT))) {
-			dev_dbg(dev,
+			dev_err(dev,
 				"[Reject] Invalid alignment for PVRIC YUV420 on plane: %d. vert stride %d\n",
 				plane_info->id, fb_lines);
 			return -EINVAL;
 		}
 	} else if (is_pvric && (fb_lines < ALIGN(fb->height, VS_ALIGN_ARGB_PVRIC_FB_HEIGHT))) {
-		dev_dbg(dev,
+		dev_err(dev,
 			"[Reject] Invalid fb alignment for PVRIC ARGB on plane: %d. stride %dx%d\n",
 			plane_info->id, h_stride, fb_lines);
 		return -EINVAL;
+	}
+
+	return 0;
+}
+
+static int check_plane_fb(struct drm_plane_state *state, struct vs_plane_state *vs_plane_state,
+			  const struct vs_plane_info *plane_info)
+{
+	int ret;
+	struct device *dev = vs_plane_state->base.plane->dev->dev;
+	struct vs_drm_property_state *dma_cfg_state = NULL;
+	const struct drm_vs_dma *dma_blob;
+	struct drm_rect roi;
+
+	drm_rect_fp_to_int(&roi, &state->src);
+
+	/* Check primary FB DMA constraints */
+	ret = check_dma_constraints(vs_plane_state, plane_info, state->fb, &roi);
+	if (ret) {
+		dev_err(dev, "%s Invalid dma constraints for fb and src\n", __func__);
+		return ret;
+	}
+
+	/* Check VS_DMA_TWO_ROI configuration */
+	if (plane_info->roi) {
+		dma_cfg_state = vs_dc_get_drm_property_state(dev, vs_plane_state->drm_states,
+							     VS_DC_MAX_PROPERTY_NUM, "DMA_CONFIG");
+		dma_blob = (dma_cfg_state && dma_cfg_state->value.blob) ?
+				   dma_cfg_state->value.blob->data :
+				   NULL;
+
+		if (dma_blob && dma_blob->mode == VS_DMA_TWO_ROI) {
+			struct drm_rect roi1;
+
+			/* Check VS_DMA_TWO_ROI ROI-1 DMA constraints */
+			drm_rect_init(&roi1, dma_blob->in_rect.x, dma_blob->in_rect.y,
+				      dma_blob->in_rect.w, dma_blob->in_rect.h);
+			ret = check_dma_constraints(vs_plane_state, plane_info, state->fb, &roi1);
+			if (ret) {
+				dev_err(dev,
+					"%s: Invalid DMA constraints for FB and in_rect "
+					DRM_RECT_FMT "\n", __func__, DRM_RECT_ARG(&roi1));
+				return ret;
+			}
+
+			/**
+			 * Set is_changed to force checking frame buffer size against ROI
+			 * (by dma_config_check()) for the case where only FB is changed.
+			 */
+			dma_cfg_state->is_changed = true;
+		}
 	}
 
 	return 0;
@@ -1223,9 +1408,21 @@ static int check_plane_ext_fb(struct vs_plane_state *plane_state,
 			      const struct vs_plane_info *plane_info)
 {
 	struct device *dev = plane_state->base.plane->dev->dev;
-	const struct drm_framebuffer *fb = NULL, *fb_ext = NULL;
+	const struct drm_framebuffer *fb;
+	const struct drm_framebuffer *fb_ext = plane_state->fb_ext;
+	struct vs_drm_property_state *dma_cfg_state = NULL;
+	const struct drm_vs_dma *dma_blob;
+	struct drm_rect roi1;
+	int ret;
 
-	if (plane_state->fb_ext) {
+	if (plane_info->roi)
+		dma_cfg_state = vs_dc_get_drm_property_state(dev, plane_state->drm_states,
+							     VS_DC_MAX_PROPERTY_NUM, "DMA_CONFIG");
+
+	dma_blob = (dma_cfg_state && dma_cfg_state->value.blob) ? dma_cfg_state->value.blob->data :
+								  NULL;
+
+	if (fb_ext) {
 		if (!plane_info->layer_ext && !plane_info->layer_ext_ex) {
 			dev_err(dev, "%s The plane is not support layer extend DMA mode.\n",
 				__func__);
@@ -1233,12 +1430,46 @@ static int check_plane_ext_fb(struct vs_plane_state *plane_state,
 		}
 
 		fb = plane_state->base.fb;
-		fb_ext = plane_state->fb_ext;
-
 		if (fb->format->format != fb_ext->format->format) {
 			dev_err(dev, "%s Invalid extend layer fb format\n", __func__);
 			return -EINVAL;
 		}
+
+		if (!dma_blob) {
+			dev_err(dev, "%s Invalid DMA_CONFIG blob with fb_ext\n", __func__);
+			return -EINVAL;
+		}
+	}
+
+	if (dma_blob) {
+		/* DMA_MODE should be VS_DMA_EXT_LAYER or VS_DMA_EXT_LAYER_EX with fb_ext */
+		if (dma_blob->mode != VS_DMA_EXT_LAYER && dma_blob->mode != VS_DMA_EXT_LAYER_EX) {
+			if (fb_ext) {
+				dev_err(dev, "%s Invalid DMA_CONFIG mode with fb_ext\n", __func__);
+				return -EINVAL;
+			}
+
+			/* nothing to do if not in ext layer mode */
+			return 0;
+		}
+
+		/* Check VS_DMA_EXT_LAYER or VS_DMA_EXT_LAYER_EX ROI-1 DMA constraints */
+		drm_rect_init(&roi1, dma_blob->in_rect.x, dma_blob->in_rect.y, dma_blob->in_rect.w,
+			      dma_blob->in_rect.h);
+		ret = check_dma_constraints(plane_state, plane_info, fb, &roi1);
+		if (ret) {
+			dev_err(dev,
+				"%s: Invalid DMA constraints for fb_ext and in_rect " DRM_RECT_FMT
+				"\n",
+				__func__, DRM_RECT_ARG(&roi1));
+			return ret;
+		}
+
+		/**
+		 * Set is_changed to force checking frame buffer size against ROI
+		 * (by dma_config_check()) for the case where only fb_ext is changed.
+		 */
+		dma_cfg_state->is_changed = true;
 	}
 
 	return 0;
@@ -1289,7 +1520,6 @@ static int check_plane_scale(struct drm_plane_state *plane_state,
 		 * factors and stretch mode. This can be removed in a later release.
 		 */
 		if (scale.factor_x != old_scale.factor_x || scale.factor_y != old_scale.factor_y ||
-		    scale.stretch_mode != old_scale.stretch_mode ||
 		    scale.src_w != old_scale.src_w || scale.dst_w != old_scale.dst_w ||
 		    scale.src_h != old_scale.src_h || scale.dst_h != old_scale.dst_h)
 			set_bit(VS_PLANE_CHANGED_SCALING, vs_plane_state->changed);
@@ -1452,7 +1682,7 @@ static int vs_dc_check_plane(struct device *dev, struct vs_plane *plane,
 		return -EINVAL;
 	}
 
-	ret = check_dma_constraints(vs_plane_state, plane_info);
+	ret = check_plane_fb(state, vs_plane_state, plane_info);
 	if (ret)
 		return ret;
 
@@ -1467,6 +1697,10 @@ static int vs_dc_check_plane(struct device *dev, struct vs_plane *plane,
 	if (!vs_dc_check_drm_property(dc, plane_info->id, vs_plane_state->drm_states,
 				      plane->properties.num, vs_plane_state))
 		return -EINVAL;
+
+	ret = check_plane_sram(dc->hw.info, hw_plane, vs_plane_state, plane_info);
+	if (ret)
+		return ret;
 
 	/* Configure the related display connection planes side by side split info in plane check insted of in update plane,
 	 * because the writeback configure needs to use the dirty state.

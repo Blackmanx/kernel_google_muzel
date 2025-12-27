@@ -21,17 +21,26 @@
 #include <drm/drm_plane_helper.h>
 #include <drm/drm_drv.h>
 #include <drm/drm_fourcc.h>
+#include <drm/g2d_drm_fourcc.h>
 
 #include "g2d_drv.h"
 #include "g2d_fb.h"
-#include "g2d_plane.h"
 #include "g2d_gem.h"
+#include "g2d_hw_constraints.h"
+#include "g2d_plane.h"
 #include "g2d_sc.h"
 
 // Todo(b/390272052) Consider creating a sc9000_info.h header for hw capabilities like this.
 static const u32 g2d_plane_formats[] = {
 	DRM_FORMAT_ARGB8888, DRM_FORMAT_ABGR8888, DRM_FORMAT_YVU420,
 	DRM_FORMAT_YUV420,   DRM_FORMAT_NV12,	  DRM_FORMAT_NV21,
+};
+
+static const u64 g2d_plane_format_modifiers[] = {
+	DRM_FORMAT_MOD_LINEAR,
+	DRM_FORMAT_MOD_PVR_FBCDC_8x8_V14,
+	DRM_FORMAT_MOD_PVR_FBCDC_16x4_V14,
+	DRM_FORMAT_MOD_INVALID,
 };
 
 static unsigned char g2d_get_plane_number(struct drm_framebuffer *fb)
@@ -88,7 +97,7 @@ static void g2d_plane_helper_atomic_update(struct drm_plane *plane, struct drm_a
 {
 	struct drm_device *drm = plane->dev;
 	struct g2d_plane *g2d_plane = to_g2d_plane(plane);
-	struct g2d_device *g2d_device = container_of(drm, struct g2d_device, drm);
+	struct g2d_device *g2d_device = to_g2d_device(drm);
 
 	/* TODO(b/279522245) The built in assumption here is that the address of plane 0 is
 	 * the beginning of the allocated buffer, this may not hold true for all data formats.
@@ -147,6 +156,32 @@ static void g2d_atomic_helper_plane_reset(struct drm_plane *plane)
 	/* Store custom plane properties here */
 }
 
+static int create_hw_capability_blob(struct drm_device *drm_dev, struct g2d_plane *plane)
+{
+	struct drm_g2d_plane_hw_caps *hw_caps;
+	struct drm_property_blob *blob;
+	const struct g2d_layer_constraints *constraints = get_layer_dma_constraints();
+
+	plane->hw_caps_prop = drm_property_create(
+		drm_dev, DRM_MODE_PROP_IMMUTABLE | DRM_MODE_PROP_BLOB, "HW_CAPS", 0);
+	if (!plane->hw_caps_prop)
+		return -EINVAL;
+
+	blob = drm_property_create_blob(drm_dev, sizeof(struct drm_g2d_plane_hw_caps), 0);
+	if (!blob)
+		return -EINVAL;
+
+	hw_caps = blob->data;
+	hw_caps->min_width = constraints->min_width;
+	hw_caps->min_height = constraints->min_height;
+	hw_caps->min_scale = constraints->min_scale;
+	hw_caps->max_scale = constraints->max_scale;
+
+	drm_object_attach_property(&plane->base.base, plane->hw_caps_prop, blob->base.id);
+
+	return 0;
+}
+
 static const struct drm_plane_funcs g2d_drm_plane_funcs = {
 	.update_plane = drm_atomic_helper_update_plane,
 	.disable_plane = drm_atomic_helper_disable_plane,
@@ -161,16 +196,17 @@ static const struct drm_plane_helper_funcs g2d_plane_helper_funcs = {
 	.atomic_disable = g2d_plane_helper_atomic_disable,
 };
 
-struct g2d_plane *g2d_plane_init(struct g2d_device *gdevice, unsigned int possible_crtcs)
+struct g2d_plane *g2d_plane_init(struct g2d_device *g2d_device, unsigned int possible_crtcs)
 {
-	struct drm_device *drm = &(gdevice->drm);
+	struct drm_device *drm = &g2d_device->drm;
 	struct g2d_plane *g2d_plane;
 	int ret;
 
 	g2d_plane = drmm_universal_plane_alloc(drm, struct g2d_plane, base, possible_crtcs,
 					       &g2d_drm_plane_funcs, g2d_plane_formats,
-					       ARRAY_SIZE(g2d_plane_formats), NULL,
-					       DRM_PLANE_TYPE_PRIMARY, NULL);
+					       ARRAY_SIZE(g2d_plane_formats),
+					       g2d_plane_format_modifiers, DRM_PLANE_TYPE_PRIMARY,
+					       NULL);
 
 	if (IS_ERR(g2d_plane))
 		goto end;
@@ -183,6 +219,13 @@ struct g2d_plane *g2d_plane_init(struct g2d_device *gdevice, unsigned int possib
 						 DRM_MODE_ROTATE_MASK | DRM_MODE_REFLECT_MASK);
 	if (ret)
 		goto error_cleanup;
+
+	/* Private Properties */
+	ret = create_hw_capability_blob(drm, g2d_plane);
+	if (ret) {
+		dev_err(drm->dev, "Failed to create HW capability blob for plane");
+		goto end;
+	}
 
 	sc_plane_init(g2d_plane);
 

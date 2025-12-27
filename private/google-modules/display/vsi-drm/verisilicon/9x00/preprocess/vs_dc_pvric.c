@@ -24,7 +24,7 @@ static void dc_hw_set_plane_fbc_enable(struct dc_hw *hw, u8 id, bool enable)
 	trace_config_hw_layer_feature_en("PVRIC", hw_id, enable);
 
 	config = dc_read(hw, VS_SET_FE_FIELD(DCREG_SH_LAYER, hw_id, COMPRESS_Address));
-	config = VS_SET_FIELD(config, DCREG_SH_LAYER0_COMPRESS, VALUE, !!enable);
+	config = VS_SET_FIELD(config, DCREG_SH_LAYER0_COMPRESS, VALUE, enable);
 
 	dc_write(hw, VS_SET_FE_FIELD(DCREG_SH_LAYER, hw_id, COMPRESS_Address), config);
 
@@ -59,7 +59,7 @@ static void dc_hw_set_plane_fbc_req(struct dc_hw *hw, u8 id, u8 num, u8 format, 
 					     i * base_offset);
 
 		config = VS_SET_FIELD(config, DCREG_SH_LAYER0_PVRIC_REQUESTER_CONTROL_REQT0,
-				      ENABLE_LOSSY, !!lossy);
+				      ENABLE_LOSSY, lossy);
 		config = VS_SET_FIELD(config, DCREG_SH_LAYER0_PVRIC_REQUESTER_CONTROL_REQT0, FORMAT,
 				      format);
 		config = VS_SET_FIELD(config, DCREG_SH_LAYER0_PVRIC_REQUESTER_CONTROL_REQT0, TILE,

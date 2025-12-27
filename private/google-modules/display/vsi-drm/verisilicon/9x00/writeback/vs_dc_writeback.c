@@ -120,7 +120,7 @@ static bool wb_scale_config_hw(struct dc_hw *hw, u8 hw_id, bool enable, const vo
 	/* commit enable scale or disable scale*/
 	config = dc_read(hw, VS_SET_WB_FIELD(DCREG_SH_WB, hw_id, CONFIG_Address));
 
-	config = VS_SET_FIELD(config, DCREG_SH_WB0_CONFIG, SCALE, !!scale->enable);
+	config = VS_SET_FIELD(config, DCREG_SH_WB0_CONFIG, SCALE, scale->enable);
 
 	dc_write(hw, VS_SET_WB_FIELD(DCREG_SH_WB, hw_id, CONFIG_Address), config);
 

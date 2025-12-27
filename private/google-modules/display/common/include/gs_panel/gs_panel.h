@@ -108,8 +108,10 @@ struct brightness_capability {
 
 #define GS_PANEL_REFRESH_CTRL_FI_AUTO BIT(31)
 #define GS_PANEL_REFRESH_CTRL_MRR_V1_OVER_V2 BIT(30)
+#define GS_PANEL_REFRESH_CTRL_EARLY_EXIT BIT(29)
 #define GS_PANEL_REFRESH_CTRL_FEATURE_MASK (GS_PANEL_REFRESH_CTRL_FI_AUTO |\
-					    GS_PANEL_REFRESH_CTRL_MRR_V1_OVER_V2)
+					    GS_PANEL_REFRESH_CTRL_MRR_V1_OVER_V2 |\
+					    GS_PANEL_REFRESH_CTRL_EARLY_EXIT)
 
 /**
  * enum gs_panel_feature - features supported by this panel
@@ -455,13 +457,23 @@ struct gs_panel_funcs {
 	/**
 	 * @is_mode_seamless:
 	 *
+	 * DEPRECATED; prefer use of is_mode_seamless_atomic()
+	 *
 	 * This callback is used to check if a switch to a particular mode can be done
 	 * seamlessly without full mode set given the current hardware configuration
-	 *
-	 * TODO(b/279520499): implementation
 	 */
 	bool (*is_mode_seamless)(const struct gs_panel *gs_panel,
-				 const struct gs_panel_mode *pmode);
+				 const struct gs_panel_mode *new_pmode);
+
+	/**
+	 * @is_mode_seamless_atomic:
+	 *
+	 * This callback is used to check if a switch to a particular mode can be done
+	 * seamlessly without full mode set given the current hardware configuration
+	 */
+	bool (*is_mode_seamless_atomic)(const struct gs_panel *gs_panel,
+					const struct gs_panel_mode *old_pmode,
+					const struct gs_panel_mode *new_pmode);
 
 	/**
 	 * @set_self_refresh
@@ -829,6 +841,19 @@ struct gs_panel_mode_array {
 	const struct gs_panel_mode modes[];
 };
 
+/**
+ * GS_PANEL_MODES() - initialize a gs_panel_mode_array object
+ *
+ * This macro is used to initialize a gs_panel_mode_array given a list of
+ * gs_panel_mode's. The number of modes is calculated and will be set.
+ */
+#define GS_PANEL_MODES(...) \
+	{ \
+		.num_modes = sizeof((struct gs_panel_mode[]){__VA_ARGS__}) \
+			   / sizeof(struct gs_panel_mode), \
+		.modes = {__VA_ARGS__} \
+	}
+
 #define BL_STATE_STANDBY BL_CORE_FBBLANK
 #define BL_STATE_LP BIT(30) /* backlight is in LP mode */
 
@@ -960,6 +985,13 @@ struct gs_panel_desc {
 	 * between calls to detect_fault()
 	 */
 	const u32 fault_detect_interval_ms;
+	/**
+	 * @panel_errors_mask: mask of @panel_errors for defining reset requirement
+	 * Perform a bitwise AND operation on @panel_errors and this mask before propagation.
+	 * This field is a u64 const because @panel_errors is set via DRM property, which is limited
+	 * to a uint64_t, even though @panel_errors bitmap is of length GS_PANEL_ERR_MAX.
+	 */
+	const u64 panel_errors_mask;
 };
 
 /* PRIV DATA */
@@ -1326,6 +1358,18 @@ struct gs_panel_background_work_data {
 };
 
 /**
+ * enum gs_content_gray_level - the content gray level of screen UI
+ * @GRAY_LEVEL_NORMAL: content gray level is normal for most Apps
+ * @GRAY_LEVEL_LOW: content gray level is low for specific Apps
+ * @GRAY_LEVEL_COUNT: placeholder, counter for number of levels
+ */
+enum gs_content_gray_level {
+	GRAY_LEVEL_NORMAL = 0,
+	GRAY_LEVEL_LOW,
+	GRAY_LEVEL_COUNT,
+};
+
+/**
  * struct gs_panel - data associated with panel driver operation
  * TODO: better documentation
  */
@@ -1356,6 +1400,11 @@ struct gs_panel {
 	 * @hw_status: current status of panel hardware
 	 */
 	struct gs_panel_status hw_status;
+	/**
+	 * @panel_errors: Errors on the panel read from DDIC
+	 * Specifically, this is a bitmap of enum gs_panel_err
+	 */
+	DECLARE_BITMAP(panel_errors, GS_PANEL_ERR_MAX);
 	/* If true, panel won't be powered off */
 	bool force_power_on;
 	struct gs_panel_idle_data idle_data;
@@ -1490,6 +1539,9 @@ struct gs_panel {
 
 	/** @refresh_ctrl_work_scheduled: whether any refresh_ctrl work has been scheduled */
 	bool refresh_ctrl_work_scheduled;
+
+	/**@content_gray_level: current content gray level of screen UI */
+	enum gs_content_gray_level content_gray_level;
 };
 
 /* FUNCTIONS */
@@ -1993,10 +2045,12 @@ void gs_panel_refresh_ctrl(struct gs_panel *ctx, ktime_t frame_start_ts);
 #define GS_FLAG_AUTO_FI_UPDATE BIT(7)
 #define GS_FLAG_PWM_MODE_UPDATE BIT(8)
 #define GS_FLAG_POWER_STATE_UPDATE BIT(9)
+#define GS_FLAG_EARLY_EXIT_UPDATE BIT(10)
 
 #define GS_FLAG_REFRESH_CTRL_UPDATE (GS_FLAG_MIN_RR_UPDATE | \
 				     GS_FLAG_INSERT_FRAMES | \
-				     GS_FLAG_AUTO_FI_UPDATE)
+				     GS_FLAG_AUTO_FI_UPDATE |\
+				     GS_FLAG_EARLY_EXIT_UPDATE)
 
 /* TODO: b/402868084 - refactor when more states are controlled by HWC */
 /* HBM */

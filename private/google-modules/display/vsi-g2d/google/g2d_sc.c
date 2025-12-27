@@ -17,17 +17,22 @@
 #include <drm/drm_fourcc.h>
 #include <drm/drm_framebuffer.h>
 #include <drm/drm_mode.h>
-#include <drm/vs_drm_fourcc.h>
 #include <drm/g2d_drm.h>
+#include <drm/g2d_drm_fourcc.h>
 
-#include "g2d_sc.h"
-#include "g2d_sc_hw.h"
+#include "g2d_crtc.h"
 #include "g2d_drv.h"
+#include "g2d_gem.h"
+#include "g2d_hw_constraints.h"
 #include "g2d_plane.h"
 #include "g2d_plane_hw.h"
-#include "g2d_crtc.h"
+#include "g2d_pvric.h"
+#include "g2d_pvric_hw.h"
+#include "g2d_sc.h"
+#include "g2d_sc_hw.h"
 #include "g2d_writeback.h"
 #include "g2d_writeback_hw.h"
+#include "g2d_recovery.h"
 
 static inline u8 to_vs_yuv_gamut(u32 color_space)
 {
@@ -89,7 +94,7 @@ static inline u8 to_vs_rotation(u32 rotation)
 	return rot;
 }
 
-static inline void update_format(u32 format, struct sc_hw_fb *fb)
+static inline u8 drm_format_to_hw_layer_format(u32 format)
 {
 	u8 f = FORMAT_A8R8G8B8;
 
@@ -172,10 +177,10 @@ static inline void update_format(u32 format, struct sc_hw_fb *fb)
 		break;
 	}
 
-	fb->format = f;
+	return f;
 }
 
-static inline void update_wb_format(u32 format, struct sc_hw_fb *fb)
+static inline u8 drm_format_to_hw_wb_format(u32 format)
 {
 	u8 f = WB_FORMAT_RGB888;
 
@@ -206,6 +211,8 @@ static inline void update_wb_format(u32 format, struct sc_hw_fb *fb)
 		break;
 	case DRM_FORMAT_NV12:
 	case DRM_FORMAT_NV21:
+	case DRM_FORMAT_YVU420:
+	case DRM_FORMAT_YUV420:
 		f = WB_FORMAT_NV12;
 		break;
 	case DRM_FORMAT_P010:
@@ -215,7 +222,7 @@ static inline void update_wb_format(u32 format, struct sc_hw_fb *fb)
 		break;
 	}
 
-	fb->format = f;
+	return f;
 }
 
 static inline void update_swizzle(u32 format, struct sc_hw_fb *fb)
@@ -268,47 +275,45 @@ static inline void update_swizzle(u32 format, struct sc_hw_fb *fb)
 	}
 }
 
-static inline void update_tile_mode(u64 modifier, struct sc_hw_fb *fb)
+static inline u8 get_tile_mode(u64 modifier, u32 format)
 {
-	u8 norm_mode, tile = TILE_MODE_LINEAR;
+	u8 tile = TILE_MODE_LINEAR;
 
-	norm_mode = modifier & DRM_FORMAT_MOD_VS_NORM_MODE_MASK;
+	if (!is_buffer_pvric(modifier))
+		return tile;
 
-	switch (norm_mode) {
-	case DRM_FORMAT_MOD_VS_TILE_16X4:
+	switch (format) {
+	case DRM_FORMAT_ARGB8888:
+	case DRM_FORMAT_ABGR8888:
+	case DRM_FORMAT_RGBA8888:
+	case DRM_FORMAT_BGRA8888:
+	case DRM_FORMAT_XRGB8888:
+	case DRM_FORMAT_XBGR8888:
+	case DRM_FORMAT_RGBX8888:
+	case DRM_FORMAT_BGRX8888:
+	case DRM_FORMAT_ARGB2101010:
+	case DRM_FORMAT_ABGR2101010:
+	case DRM_FORMAT_RGBA1010102:
+	case DRM_FORMAT_BGRA1010102:
 		tile = TILE_MODE_16X4;
 		break;
-	case DRM_FORMAT_MOD_VS_TILE_16X8:
-		tile = TILE_MODE_16X8;
-		break;
-	case DRM_FORMAT_MOD_VS_TILE_32X2:
+	case DRM_FORMAT_ARGB16161616F:
+	case DRM_FORMAT_ABGR16161616F:
 		tile = TILE_MODE_32X2;
 		break;
-	case DRM_FORMAT_MOD_VS_TILE_32X4:
-		tile = TILE_MODE_32X4;
-		break;
-	case DRM_FORMAT_MOD_VS_TILE_32X8:
+	case DRM_FORMAT_NV12:
+	case DRM_FORMAT_NV21:
 		tile = TILE_MODE_32X8;
 		break;
-	case DRM_FORMAT_MOD_VS_TILE_16X16:
-		tile = TILE_MODE_16X16;
+	case DRM_FORMAT_P010:
+		tile = TILE_MODE_16X8;
 		break;
 	default:
+		WARN(1, "Using TILE_MODE_LINEAR for unsupported compressed format %d", format);
 		break;
 	}
 
-	fb->tile_mode = tile;
-}
-
-static inline void update_wb_tile_mode(u64 modifier, struct sc_hw_fb *fb)
-{
-	u8 norm_mode, tile = WB_TILE_MODE_LINEAR;
-
-	norm_mode = modifier & DRM_FORMAT_MOD_VS_NORM_MODE_MASK;
-	if (norm_mode == DRM_FORMAT_MOD_VS_TILE_16X16)
-		tile = WB_TILE_MODE_16X16;
-
-	fb->tile_mode = tile;
+	return tile;
 }
 
 static void update_plane_fb(struct g2d_sc *sc, struct g2d_plane *plane, u8 display_id,
@@ -329,15 +334,16 @@ static void update_plane_fb(struct g2d_sc *sc, struct g2d_plane *plane, u8 displ
 	fb->rotation = to_vs_rotation(state->rotation);
 	fb->zpos = state->normalized_zpos;
 	fb->enable = state->visible;
-	update_format(drm_fb->format->format, fb);
+	fb->format = drm_format_to_hw_layer_format(drm_fb->format->format);
 	update_swizzle(drm_fb->format->format, fb);
-	update_tile_mode(drm_fb->modifier, fb);
+	fb->tile_mode = get_tile_mode(drm_fb->modifier, drm_fb->format->format);
 
 	sc_hw_update_plane(&sc->hw, plane->id, fb);
 }
 
 static void update_wb_fb(struct g2d_sc *sc, u32 display_id,
-			 struct g2d_writeback_connector *wb_connector, struct drm_framebuffer *fb)
+			 struct g2d_writeback_connector *wb_connector,
+			 struct drm_framebuffer *drm_fb)
 {
 	struct sc_hw_fb wb_fb = { 0 };
 
@@ -348,13 +354,13 @@ static void update_wb_fb(struct g2d_sc *sc, u32 display_id,
 	wb_fb.stride = wb_connector->pitch[0];
 	wb_fb.u_stride = wb_connector->pitch[1];
 	wb_fb.v_stride = wb_connector->pitch[2];
-	wb_fb.width = fb->width;
-	wb_fb.height = fb->height;
+	wb_fb.width = drm_fb->width;
+	wb_fb.height = drm_fb->height;
 	wb_fb.tile_mode = 0;
 	wb_fb.enable = true;
-	update_wb_format(fb->format->format, &wb_fb);
-	update_swizzle(fb->format->format, &wb_fb);
-	update_wb_tile_mode(fb->modifier, &wb_fb);
+	wb_fb.format = drm_format_to_hw_wb_format(drm_fb->format->format);
+	update_swizzle(drm_fb->format->format, &wb_fb);
+	wb_fb.tile_mode = get_tile_mode(drm_fb->modifier, drm_fb->format->format);
 
 	sc_hw_update_wb_fb(&sc->hw, wb_connector->id, &wb_fb);
 }
@@ -410,6 +416,25 @@ static void update_plane_y2r(struct g2d_sc *sc, u8 id, struct drm_plane_state *p
 	sc_hw_update_plane_y2r(&sc->hw, id, &y2r_conf);
 }
 
+static void update_plane_fbc(struct g2d_sc *sc, u8 display_id, struct drm_plane_state *plane_state)
+{
+	struct drm_framebuffer *fb = plane_state->fb;
+	struct pvric_hw_config pvric = { 0 };
+	const struct drm_format_info *info = fb->format;
+
+	pvric_populate_hw_config(info, fb, &pvric);
+	pvric_hw_update_plane(&sc->hw, display_id, &pvric);
+}
+
+static void update_wb_fbc(struct g2d_sc *sc, u32 display_id, struct drm_framebuffer *fb)
+{
+	struct pvric_hw_config pvric = { 0 };
+	const struct drm_format_info *info = fb->format;
+
+	pvric_populate_hw_config(info, fb, &pvric);
+	pvric_hw_update_wb(&sc->hw, display_id, &pvric);
+}
+
 static void populate_layer_scale(const struct drm_plane_state *plane_state,
 				 struct sc_hw_scale *scale)
 {
@@ -423,33 +448,17 @@ static void populate_layer_scale(const struct drm_plane_state *plane_state,
 
 	/*
 	 * Since src_w/h are in 16.16 and crtc_w/h are plain ints, this division will
-	 * result in 16.16 output. Note that subtracting 1 is a HW constraint for no-stretch mode
+	 * result in 16.16 output. Note that subtracting 1 is a HW constraint for non-stretch mode
 	 */
 	scale->factor_x = (scale->src_w - (1 << 16)) / (scale->dst_w - 1);
 	scale->factor_y = (scale->src_h - (1 << 16)) / (scale->dst_h - 1);
 
-	/* Strech mode scale factors do not require -1. See b/294939884 */
-	if (scale->factor_x != scale->factor_y) {
-		scale->stretch_mode = true;
-		scale->factor_x = scale->src_w / scale->dst_w;
-		scale->factor_y = scale->src_h / scale->dst_h;
-	}
-
 	/*
-	 * See b/294939884 for details on offset calculation.
-	 * Note that factors are computed as src/dest, so scale factors < 1 are _upscaling_
+	 * For now G2D only implements non-stretch mode, which always has an offset of 0.
+	 * See b/444582387 for context
 	 */
-	if (scale->stretch_mode) {
-		scale->offset_x = (scale->factor_x < DRM_PLANE_NO_SCALING) ?
-					  (scale->factor_x >> 1) + (8 << 7) :
-					  0x0;
-		scale->offset_y = (scale->factor_y < DRM_PLANE_NO_SCALING) ?
-					  (scale->factor_y >> 1) + (8 << 7) :
-					  0x0;
-	} else {
-		scale->offset_x = (scale->factor_x < DRM_PLANE_NO_SCALING) ? 0x8000 : 0x0;
-		scale->offset_y = (scale->factor_y < DRM_PLANE_NO_SCALING) ? 0x8000 : 0x0;
-	}
+	scale->offset_x = 0x0;
+	scale->offset_y = 0x0;
 
 	scale->enable = (scale->factor_x != DRM_PLANE_NO_SCALING ||
 			 scale->factor_y != DRM_PLANE_NO_SCALING);
@@ -464,28 +473,28 @@ static void update_scale(struct g2d_sc *sc, u8 id, struct drm_plane_state *plane
 	sc_hw_update_plane_scale(&sc->hw, id, &scale);
 }
 
-static void g2d_sc_commit(struct device *dev, struct drm_crtc *crtc)
+static void g2d_sc_crtc_commit(struct device *dev, struct drm_crtc *crtc)
 {
 	struct drm_device *drm = dev_get_drvdata(dev);
-	struct g2d_device *g2d_device = container_of(drm, struct g2d_device, drm);
+	struct g2d_device *g2d_device = to_g2d_device(drm);
 	struct g2d_sc *sc = g2d_device->sc;
-	// TODO(b/355089225): display ID is currently hardcoded to 0.
-	// Update this when we support 2 pipelines.
-	u8 display_id = 0;
-
-	sc_hw_commit(&sc->hw, display_id);
-
 	/*
 	 * TODO(b/355089225): display ID is currently hardcoded to 0.
 	 * Update this when we support 2 pipelines.
 	 */
-	sc_hw_start_trigger(&sc->hw, 0 /*display_id*/);
+	u8 display_id = 0;
+
+	g2d_qos_set_qos_config(g2d_device, crtc);
+
+	/* TODO(b/421978624) Plane HW programming should be moved out of the crtc commit callback */
+	sc_hw_commit(&sc->hw, display_id);
+	sc_hw_start_trigger(&sc->hw, display_id);
 }
 
 static void g2d_sc_crtc_enable(struct device *dev, struct drm_crtc *crtc)
 {
 	struct drm_device *drm = dev_get_drvdata(dev);
-	struct g2d_device *g2d_device = container_of(drm, struct g2d_device, drm);
+	struct g2d_device *g2d_device = to_g2d_device(drm);
 	struct g2d_sc *sc = g2d_device->sc;
 
 	pm_runtime_get_sync(dev);
@@ -497,7 +506,7 @@ static void g2d_sc_crtc_enable(struct device *dev, struct drm_crtc *crtc)
 static void g2d_sc_crtc_disable(struct device *dev, struct drm_crtc *crtc)
 {
 	struct drm_device *drm = dev_get_drvdata(dev);
-	struct g2d_device *g2d_device = container_of(drm, struct g2d_device, drm);
+	struct g2d_device *g2d_device = to_g2d_device(drm);
 	struct g2d_sc *sc = g2d_device->sc;
 
 	dev_dbg(dev, "%s: Disablng interrupts on crtc disable.", __func__);
@@ -505,16 +514,113 @@ static void g2d_sc_crtc_disable(struct device *dev, struct drm_crtc *crtc)
 	sc_hw_disable_interrupts(&sc->hw);
 
 	pm_runtime_put_sync(dev);
+
+	g2d_qos_clear_qos_configs(g2d_device, crtc);
 }
 
-void g2d_wb_hw_configure(struct g2d_writeback_connector *g2d_wb_connector,
-			 struct drm_framebuffer *fb)
+static int check_alignment(struct device *dev, const struct drm_framebuffer *fb,
+			   const struct g2d_alignment_constraints *alignment)
+{
+	unsigned int h_stride = fb->pitches[0];
+	unsigned int fb_lines;
+	u32 drm_format = fb->format->format;
+	u32 stride_alignment;
+	bool is_pvric;
+
+	is_pvric = is_buffer_pvric(fb->modifier);
+
+	if (is_pvric)
+		stride_alignment = alignment->stride_pvric;
+	else
+		stride_alignment = alignment->stride;
+
+	if (!IS_ALIGNED(h_stride, stride_alignment)) {
+		dev_dbg(dev,
+			"[Reject] Invalid stride alignment. stride: %d. requirement: %d, format %d\n",
+			h_stride, stride_alignment, fb->format->format);
+		return -EINVAL;
+	}
+
+	if (is_pvric) {
+		dma_addr_t buffer_base;
+		dma_addr_t tile_base;
+		int i = 0;
+		const struct drm_format_info *format_info;
+		struct g2d_bo *g2d_obj;
+
+		format_info = drm_format_info(drm_format);
+
+		for (i = 0; i < format_info->num_planes; i++) {
+			g2d_obj = to_g2d_buffer_object(fb->obj[i]);
+			buffer_base = g2d_obj->dma_addr;
+			tile_base = buffer_base + fb->offsets[i];
+			if (fb->offsets[i] < alignment->addr_pvric) {
+				dev_err(dev,
+					"[Reject] PVRIC header is smaller than the minimum size %d: header addr: %pad, tile addr %pad for plane %d.",
+					alignment->addr_pvric, &buffer_base, &tile_base, i);
+				return -EINVAL;
+			}
+			if (!IS_ALIGNED(tile_base, alignment->addr_pvric)) {
+				dev_err(dev,
+					"[Reject] PVRIC tile_base: %pad (base_addr: %pad + offset %#x) for plane %d in the layer is not aligned to %d!",
+					&tile_base, &buffer_base, fb->offsets[i], i,
+					alignment->addr_pvric);
+				return -EINVAL;
+			}
+		}
+	}
+
+	/*
+	 * Align buffer width & height
+	 * Note: For vertical stride DMA requirements, we ensure that the buffer is *at least* as
+	 * large as ALIGN(fb->height, <format_alignment_requirement>). We are not concerned with
+	 * the exact fb_lines value, since there may be additional padding present.
+	 */
+	/* Align buffer width & height */
+	fb_lines = (fb->obj[0]->size - fb->offsets[0]) / h_stride;
+	if (fb_lines < ALIGN(fb->height, alignment->height)) {
+		dev_dbg(dev,
+			"[Reject] Invalid framebuffer height alignment. Requirement %d, vert stride %d, format %d\n",
+			alignment->height, fb_lines, drm_format);
+		return -EINVAL;
+	}
+	if (!IS_ALIGNED(h_stride, alignment->width)) {
+		dev_dbg(dev,
+			"[Reject] Invalid width alignment. Requirement %d, horizontal stride %d, format %d\n",
+			alignment->width, h_stride, drm_format);
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+static int check_wb(struct drm_device *drm_dev, const struct drm_framebuffer *fb)
+{
+	const struct g2d_wb_constraints *constraints = get_wb_dma_constraints();
+	u8 hw_format = drm_format_to_hw_wb_format(fb->format->format);
+	const struct g2d_alignment_constraints *alignment = &constraints->alignment[hw_format];
+
+	if (fb->width > alignment->max_width) {
+		dev_dbg(drm_dev->dev, "[Reject] wb fb exceeds limits fb %dx%d ,max %u\n", fb->width,
+			fb->height, alignment->max_width);
+		return -EINVAL;
+	}
+
+	return check_alignment(drm_dev->dev, fb, alignment);
+}
+
+void g2d_wb_hw_commit(struct g2d_writeback_connector *g2d_wb_connector, struct drm_framebuffer *fb)
 {
 	struct drm_writeback_connector *wb_connector;
 	struct drm_connector *connector;
 	struct drm_device *drm;
 	struct g2d_device *g2d_device;
 	struct g2d_sc *sc;
+	/*
+	 * TODO(b/355089225): display ID is currently hardcoded to 0.
+	 * Update this when we support 2 pipelines.
+	 */
+	u32 display_id = 0;
 
 	if (!fb || !g2d_wb_connector) {
 		pr_err("%s: Invalid parameters!", __func__);
@@ -524,11 +630,12 @@ void g2d_wb_hw_configure(struct g2d_writeback_connector *g2d_wb_connector,
 	wb_connector = &g2d_wb_connector->base;
 	connector = &wb_connector->base;
 	drm = connector->dev;
-	g2d_device = container_of(drm, struct g2d_device, drm);
+	g2d_device = to_g2d_device(drm);
 	sc = g2d_device->sc;
 
-	update_wb_fb(sc, 0 /*display_id is hard coded for now*/, g2d_wb_connector, fb);
-	wb_set_fb(&sc->hw, 0, &sc->hw.wb[0].fb); /*hw_id set to 0 for now*/
+	update_wb_fb(sc, display_id, g2d_wb_connector, fb);
+	update_wb_fbc(sc, display_id, fb);
+	sc_hw_wb_commit(&sc->hw, display_id);
 }
 
 static void update_plane(struct g2d_sc *sc, struct g2d_plane *g2d_plane,
@@ -550,13 +657,18 @@ static void update_plane(struct g2d_sc *sc, struct g2d_plane *g2d_plane,
 	update_scale(sc, g2d_plane->id, plane_state);
 
 	update_plane_y2r(sc, g2d_plane->id, plane_state, state);
+
+	update_plane_fbc(sc, g2d_plane->id, plane_state);
 }
 
 static int check_plane_rotation(struct drm_plane_state *plane_state)
 {
 	const struct device *dev = plane_state->plane->dev->dev;
+	u32 src_h = drm_rect_height(&plane_state->src) >> 16;
 	u32 rotate_mask = plane_state->rotation & DRM_MODE_ROTATE_MASK;
 	u32 flip_mask = plane_state->rotation & DRM_MODE_REFLECT_MASK;
+	const struct g2d_layer_constraints *constraints = get_layer_dma_constraints();
+	u32 drm_format = plane_state->fb->format->format;
 
 	/* Return early if neither flip nor rotate are configured */
 	if (plane_state->rotation == DRM_MODE_ROTATE_0)
@@ -588,8 +700,15 @@ static int check_plane_rotation(struct drm_plane_state *plane_state)
 		}
 	}
 
-	/* b/318783657 - Rotation + x or y flip not supported */
 	if (rotate_mask & (DRM_MODE_ROTATE_90 | DRM_MODE_ROTATE_270)) {
+		u8 hw_format = drm_format_to_hw_layer_format(drm_format);
+
+		if (src_h > constraints->alignment[hw_format].max_height_rot) {
+			dev_dbg(dev, "[Reject] crop height %d exceeds rotation limits.\n", src_h);
+			return -EINVAL;
+		}
+
+		/* b/318783657 - Rotation + x or y flip not supported */
 		if (flip_mask != 0) {
 			dev_err(dev, "Flip+Rotate not supported!\n");
 			return -EINVAL;
@@ -602,13 +721,59 @@ static int check_plane_rotation(struct drm_plane_state *plane_state)
 	return 0;
 }
 
+static int check_plane_dma_constraints(struct g2d_plane_state *g2d_plane_state)
+{
+	const struct drm_plane_state *plane_state = &g2d_plane_state->base;
+	struct device *dev = plane_state->plane->dev->dev;
+	struct g2d_plane *g2d_plane = to_g2d_plane(plane_state->plane);
+	const struct drm_framebuffer *fb = plane_state->fb;
+	const struct g2d_layer_constraints *constraints = get_layer_dma_constraints();
+	u32 drm_format = fb->format->format;
+
+	/* Represented in fixed point 16.16*/
+	int src_w = drm_rect_width(&plane_state->src) >> 16;
+	int src_h = drm_rect_height(&plane_state->src) >> 16;
+	int src_x = plane_state->src.x1 >> 16;
+	int src_y = plane_state->src.y1 >> 16;
+	const struct drm_format_info *format_info;
+	u8 hw_format = drm_format_to_hw_layer_format(drm_format);
+	const struct g2d_alignment_constraints *alignment = &constraints->alignment[hw_format];
+
+	/* Check framebuffer dimensions */
+	if (src_w < constraints->min_width || fb->width > alignment->max_width ||
+	    src_h < constraints->min_height) {
+		dev_dbg(dev,
+			"[Reject] fb or crop exceeds limits on layer %d. fb %dx%d crop %dx%d\n",
+			g2d_plane->id, fb->width, fb->height, src_w, src_h);
+		return -EINVAL;
+	}
+
+	format_info = drm_format_info(drm_format);
+	if (!format_info || format_info->num_planes > MAX_NUM_PLANES) {
+		dev_err(dev, "[Reject] Invalid format info attached to framebuffer\n");
+		return -EINVAL;
+	}
+
+	/* Align crop width and height */
+
+	if (!IS_ALIGNED(src_w, alignment->width) || !IS_ALIGNED(src_h, alignment->height) ||
+	    !IS_ALIGNED(src_x, alignment->width) || !IS_ALIGNED(src_y, alignment->height)) {
+		dev_dbg(dev, "[Reject] Invalid alignment on layer: %d. crop %dx%d @ %d,%d\n",
+			g2d_plane->id, src_w, src_h, src_x, src_y);
+		return -EINVAL;
+	}
+
+	return check_alignment(dev, fb, alignment);
+}
+
 static int check_plane_y2r(struct g2d_plane_state *g2d_plane_state)
 {
 	struct drm_plane_state *plane_state = &g2d_plane_state->base;
 	struct device *dev = plane_state->plane->dev->dev;
 	bool is_yuv = plane_state->fb->format->is_yuv;
 
-	/* TODO(b/384820419) Note that these will always pass until custom coefficients are
+	/*
+	 * TODO(b/384820419) Note that these will always pass until custom coefficients are
 	 * supported
 	 */
 	if (g2d_plane_state->y2r_coef && !is_yuv) {
@@ -629,6 +794,7 @@ static int check_plane(struct drm_device *dev, struct g2d_plane *plane,
 	struct drm_crtc *crtc = plane_state->crtc;
 	struct drm_crtc_state *crtc_state;
 	struct g2d_plane_state *g2d_plane_state = to_g2d_plane_state(plane_state);
+	const struct g2d_layer_constraints *constraints;
 	int ret = 0;
 
 	crtc_state = drm_atomic_get_new_crtc_state(plane_state->state, crtc);
@@ -637,8 +803,9 @@ static int check_plane(struct drm_device *dev, struct g2d_plane *plane,
 		return -EINVAL;
 	}
 
-	ret = drm_atomic_helper_check_plane_state(plane_state, crtc_state, G2D_MIN_SCALE,
-						  G2D_MAX_SCALE, true /* can_position */,
+	constraints = get_layer_dma_constraints();
+	ret = drm_atomic_helper_check_plane_state(plane_state, crtc_state, constraints->min_scale,
+						  constraints->max_scale, true /* can_position */,
 						  true /* can_update_disabled */);
 
 	if (ret) {
@@ -651,16 +818,21 @@ static int check_plane(struct drm_device *dev, struct g2d_plane *plane,
 		return ret;
 
 	ret = check_plane_y2r(g2d_plane_state);
+	if (ret)
+		return ret;
+
+	ret = check_plane_dma_constraints(g2d_plane_state);
 
 	return ret;
 }
 
 static const struct g2d_writeback_funcs sc_writeback_funcs = {
-	.config = g2d_wb_hw_configure,
+	.check = check_wb,
+	.commit = g2d_wb_hw_commit,
 };
 
 static const struct g2d_crtc_funcs sc_crtc_funcs = {
-	.commit = g2d_sc_commit,
+	.commit = g2d_sc_crtc_commit,
 	.enable = g2d_sc_crtc_enable,
 	.disable = g2d_sc_crtc_disable,
 };
@@ -716,17 +888,49 @@ static irqreturn_t sc_isr(int irq, void *data)
 
 	sc_hw_get_interrupt(&sc->hw, &status);
 
-	for (i = 0; i < NUM_PIPELINES; i++) {
-		pipe_mask = BIT(i);
-		if (status.pipe_frame_done & pipe_mask)
-			g2d_handle_writeback_frm_done(sc->writeback[i]);
-	}
-
 	dev_dbg(dev,
 		"%s: frm_start=%#x frm_done=%x pvric_decode_err=%x pvric_encode_err=%x apb_hang=%#x axi_rd_bus_hang=%d axi_wr_bus_hang=%d axi_bus_err=%d",
 		__func__, status.pipe_frame_start, status.pipe_frame_done, status.pvric_decode_err,
 		status.pvric_encode_err, status.apb_hang, status.axi_rd_bus_hang,
 		status.axi_wr_bus_hang, status.axi_bus_err);
+
+	if (status.apb_hang != 0) {
+		dev_warn(dev, "apb_hang err: 0x%x", status.apb_hang);
+		sc->requires_reset = true;
+	}
+	if (status.axi_rd_bus_hang != 0) {
+		dev_warn(dev, "axi_rd_bus_hang err: 0x%x", status.axi_rd_bus_hang);
+		sc->requires_reset = true;
+	}
+
+	if (status.axi_wr_bus_hang != 0) {
+		dev_warn(dev, "axi_wr_bus_hang err: 0x%x", status.axi_wr_bus_hang);
+		sc->requires_reset = true;
+	}
+
+	if (status.axi_bus_err != 0) {
+		dev_warn(dev, "axi_bus_err err: 0x%x", status.axi_bus_err);
+		sc->requires_reset = true;
+	}
+
+	if (status.pvric_decode_err != 0) {
+		dev_warn(dev, "PVRIC decode err: 0x%x", status.pvric_decode_err);
+		sc->requires_reset = true;
+	}
+
+	if (status.pvric_encode_err != 0) {
+		dev_warn(dev, "pvric_encode_err err: 0x%x", status.pvric_encode_err);
+		sc->requires_reset = true;
+	}
+
+	for (i = 0; i < NUM_PIPELINES; i++) {
+		pipe_mask = BIT(i);
+		if (!sc->requires_reset && (status.pipe_frame_done & pipe_mask))
+			g2d_handle_writeback_frm_done(sc->writeback[i]);
+	}
+
+	if (sc->requires_reset)
+		g2d_reset_trigger(sc);
 
 	return IRQ_HANDLED;
 }
@@ -741,7 +945,7 @@ int sc_irq_init(struct platform_device *pdev)
 
 	dev = &pdev->dev;
 	drm = dev_get_drvdata(dev);
-	g2d_device = container_of(drm, struct g2d_device, drm);
+	g2d_device = to_g2d_device(drm);
 	sc = g2d_device->sc;
 
 	sc->irq_num = platform_irq_count(pdev);
@@ -765,6 +969,7 @@ int sc_irq_init(struct platform_device *pdev)
 		}
 		sc->irqs[i] = irq;
 	}
+	g2d_reset_register(sc);
 
 	return ret;
 }
@@ -772,7 +977,7 @@ int sc_irq_init(struct platform_device *pdev)
 static void g2d_sc_enable_irqs(struct device *dev)
 {
 	struct drm_device *drm = dev_get_drvdata(dev);
-	struct g2d_device *g2d_device = container_of(drm, struct g2d_device, drm);
+	struct g2d_device *g2d_device = to_g2d_device(drm);
 	struct g2d_sc *sc = g2d_device->sc;
 	int i;
 
@@ -785,7 +990,7 @@ static void g2d_sc_enable_irqs(struct device *dev)
 static void g2d_sc_disable_irqs(struct device *dev)
 {
 	struct drm_device *drm = dev_get_drvdata(dev);
-	struct g2d_device *g2d_device = container_of(drm, struct g2d_device, drm);
+	struct g2d_device *g2d_device = to_g2d_device(drm);
 	struct g2d_sc *sc = g2d_device->sc;
 	int i;
 
@@ -805,7 +1010,7 @@ int g2d_pm_runtime_suspend(struct device *dev)
 int g2d_pm_runtime_resume(struct device *dev)
 {
 	struct drm_device *drm = dev_get_drvdata(dev);
-	struct g2d_device *g2d_device = container_of(drm, struct g2d_device, drm);
+	struct g2d_device *g2d_device = to_g2d_device(drm);
 	struct g2d_sc *sc = g2d_device->sc;
 
 	g2d_sc_enable_irqs(dev);
@@ -817,68 +1022,8 @@ int g2d_pm_runtime_resume(struct device *dev)
 void g2d_sc_print_id_regs(struct device *dev)
 {
 	struct drm_device *drm = dev_get_drvdata(dev);
-	struct g2d_device *g2d_device = container_of(drm, struct g2d_device, drm);
+	struct g2d_device *g2d_device = to_g2d_device(drm);
 	struct g2d_sc *sc = g2d_device->sc;
 
 	sc_hw_print_id_regs(&sc->hw, dev);
 }
-
-#if IS_ENABLED(CONFIG_DEBUG_FS)
-static int reg_dump_show(struct seq_file *s, void *data)
-{
-	struct g2d_sc *sc = s->private;
-	struct sc_hw *hw = &sc->hw;
-	int ret;
-
-	ret = pm_runtime_get_if_in_use(hw->dev);
-	if (ret <= 0) {
-		if (ret < 0)
-			dev_warn(hw->dev, "%s: Skipping dump. PM runtime get err: %d", __func__,
-				 ret);
-		else
-			dev_dbg(hw->dev, "%s: G2D off, skipping dump.", __func__);
-
-		return ret;
-	}
-
-	ret = sc_hw_reg_dump(s, hw);
-	pm_runtime_put_sync(hw->dev);
-
-	return ret;
-}
-
-DEFINE_SHOW_ATTRIBUTE(reg_dump);
-int sc_debugfs_init(struct device *dev)
-{
-	struct drm_device *drm;
-	struct g2d_device *g2d_device;
-	struct g2d_sc *sc;
-
-	drm = dev_get_drvdata(dev);
-	g2d_device = container_of(drm, struct g2d_device, drm);
-	sc = g2d_device->sc;
-
-	sc->debugfs = debugfs_create_dir(dev_name(dev), NULL);
-	if (IS_ERR(sc->debugfs)) {
-		dev_err(dev, "could not create debugfs root folder\n");
-		return PTR_ERR(sc->debugfs);
-	}
-
-	debugfs_create_file("reg_dump", 0444, sc->debugfs, sc, &reg_dump_fops);
-
-	return 0;
-}
-
-void sc_debugfs_deinit(struct device *dev)
-{
-	struct drm_device *drm;
-	struct g2d_device *g2d_device;
-	struct g2d_sc *sc;
-
-	drm = dev_get_drvdata(dev);
-	g2d_device = container_of(drm, struct g2d_device, drm);
-	sc = g2d_device->sc;
-
-	debugfs_remove_recursive(sc->debugfs);
-}
-#endif /* CONFIG_DEBUG_FS */

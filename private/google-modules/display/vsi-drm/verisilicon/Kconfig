@@ -64,4 +64,14 @@ config VERISILICON_DISPLAYPORT
 	  which allows connecting a DisplayPort encoder to the
 	  DPTX driver,
 	  otherwise, say N.
+
+config VERISILICON_RECORD_DRM_STATE
+	bool "Enables recording short-term DRM state history for debugging"
+	depends on DRM_VERISILICON
+	default y
+	help
+	  Enable this option to allow maintaining a record of drm_atomic_states
+	  processed by the VeriSilicon drm device, such that in anomalous
+	  circumstances, the previous committed states can be retrieved for
+	  inspection and debugging.
 endif

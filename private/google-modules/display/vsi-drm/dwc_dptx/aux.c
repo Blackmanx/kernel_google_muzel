@@ -295,8 +295,14 @@ int __dptx_read_bytes_from_dpcd(struct dptx *dptx,
 				u8 *bytes,
 				u32 len)
 {
-	return dptx_aux_rw_bytes(dptx, true, false,
+	int retval;
+
+	retval = dptx_aux_rw_bytes(dptx, true, false,
 				 reg_addr, bytes, len);
+	if (retval < 0)
+		dptx->stats.dpcd_read_failures++;
+
+	return retval;
 }
 
 int __dptx_write_bytes_to_dpcd(struct dptx *dptx,

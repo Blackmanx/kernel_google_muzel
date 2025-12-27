@@ -9,6 +9,7 @@
 
 #include "gs_panel_internal.h"
 
+#include <linux/bitmap.h>
 #include <linux/mutex.h>
 #include <drm/drm_atomic.h>
 #include <drm/drm_connector.h>
@@ -314,9 +315,13 @@ static void gs_panel_connector_print_state(struct drm_printer *p,
 	drm_printf(p, "\toperation_rate: %u\n", state->operation_rate);
 	drm_printf(p, "\tmipi_sync: 0x%lx\n", state->mipi_sync);
 	drm_printf(p, "\trefresh_ctl_min_refresh_rate: %u\n", state->min_refresh_rate);
-	drm_printf(p, "\tinsert_frames: %u\n", state->insert_frames);
+	drm_printf(p, "\trefresh_ctl_auto_frame_enabled: %u\n", state->auto_fi);
+	drm_printf(p, "\trefresh_ctl_early_exit: %u\n", state->early_exit);
+	drm_printf(p, "\trefresh_ctl_insert_frames: %u\n", state->insert_frames);
 	drm_printf(p, "\tframe_interval_us: %u us\n", state->frame_interval_us);
 	drm_printf(p, "\tpending_update_flags: 0x%x\n", state->pending_update_flags);
+	drm_printf(p, "\tdsi_errors: %*pb\n", GS_DSI_ERR_MAX, state->dsi_errors);
+	drm_printf(p, "\tpanel_errors: %*pb\n", GS_PANEL_ERR_MAX, state->panel_errors);
 
 	/*TODO(b/267170999): MODE*/
 	mutex_unlock(&ctx->mode_lock);
@@ -327,6 +332,7 @@ static void gs_panel_update_connector_state(const struct gs_drm_connector *gs_co
 {
 	struct gs_panel *ctx = gs_connector_to_panel(gs_connector);
 
+	mutex_lock(&ctx->mode_lock);
 	state->brightness_level = ctx->bl->props.brightness;
 	state->global_hbm_mode = ctx->hbm_mode;
 	state->local_hbm_on = ctx->lhbm.effective_state;
@@ -335,9 +341,12 @@ static void gs_panel_update_connector_state(const struct gs_drm_connector *gs_co
 	state->min_refresh_rate = GS_PANEL_REFRESH_CTRL_MIN_REFRESH_RATE(ctx->refresh_ctrl);
 	state->insert_frames = GS_PANEL_REFRESH_CTRL_FI_FRAME_COUNT(ctx->refresh_ctrl);
 	state->auto_fi = (ctx->refresh_ctrl & GS_PANEL_REFRESH_CTRL_FI_AUTO);
+	state->early_exit = (ctx->refresh_ctrl & GS_PANEL_REFRESH_CTRL_EARLY_EXIT);
 	state->pwm_mode = ctx->pwm_mode;
 	state->frame_interval_us = ctx->frame_interval_us;
 	state->panel_power_state =  ctx->panel_power_state;
+	bitmap_copy(state->panel_errors, ctx->panel_errors, GS_PANEL_ERR_MAX);
+	mutex_unlock(&ctx->mode_lock);
 }
 
 static int gs_panel_connector_get_property(struct gs_drm_connector *gs_connector,
@@ -355,10 +364,10 @@ static int gs_panel_connector_get_property(struct gs_drm_connector *gs_connector
 		dev_dbg(ctx->dev, "conn_get_prop: global_hbm_mode(%llu)\n", *val);
 	} else if (property == p->local_hbm_on) {
 		*val = gs_state->local_hbm_on;
-		dev_dbg(ctx->dev, "conn_get_prop: local_hbm_on(%s)\n", *val ? "true" : "false");
+		dev_dbg(ctx->dev, "conn_get_prop: local_hbm_on(%llu)\n", *val);
 	} else if (property == p->dimming_on) {
 		*val = gs_state->dimming_on;
-		dev_dbg(ctx->dev, "conn_get_prop: dimming_on(%s)\n", *val ? "true" : "false");
+		dev_dbg(ctx->dev, "conn_get_prop: dimming_on(%llu)\n", *val);
 	} else if (property == p->operation_rate) {
 		*val = gs_state->operation_rate;
 		dev_dbg(ctx->dev, "conn_get_prop: operation_rate(%llu)\n", *val);
@@ -377,7 +386,10 @@ static int gs_panel_connector_get_property(struct gs_drm_connector *gs_connector
 		dev_dbg(ctx->dev, "gs_conn get prop: min_rr(%llu)\n", *val);
 	} else if (property == p->refresh_ctl_auto_frame_enabled) {
 		*val = gs_state->auto_fi;
-		dev_dbg(ctx->dev, "gs_conn get prop: auto_fi(%s)\n", *val ? "true" : "false");
+		dev_dbg(ctx->dev, "gs_conn get prop: auto_fi(%llu)\n", *val);
+	} else if (property == p->refresh_ctl_early_exit_enabled) {
+		*val = gs_state->early_exit;
+		dev_dbg(ctx->dev, "gs_conn get prop: early_exit(%llu)\n", *val);
 	} else if (property == p->refresh_ctl_insert_frames) {
 		*val = 0;
 		dev_dbg(ctx->dev, "gs_conn get prop: insert_frames\n");
@@ -387,6 +399,14 @@ static int gs_panel_connector_get_property(struct gs_drm_connector *gs_connector
 	} else if (property == p->panel_power_state) {
 		*val = gs_state->panel_power_state;
 		dev_dbg(ctx->dev, "gs_conn get prop: panel_power_state(%llu)\n", *val);
+	} else if (property == p->dsi_errors) {
+		bitmap_to_arr64(val, gs_state->dsi_errors, GS_DSI_ERR_MAX);
+		dev_dbg(ctx->dev, "gs_conn get prop: dsi_errors(%*pb)\n", GS_DSI_ERR_MAX,
+			gs_state->dsi_errors);
+	} else if (property == p->panel_errors) {
+		bitmap_to_arr64(val, gs_state->panel_errors, GS_PANEL_ERR_MAX);
+		dev_dbg(ctx->dev, "gs_conn get prop: panel_errors(%*pb)\n", GS_PANEL_ERR_MAX,
+			gs_state->panel_errors);
 	} else {
 		dev_err(ctx->dev, "gs_conn get prop: unrecognized property\n");
 		return -EINVAL;
@@ -442,7 +462,11 @@ static int gs_panel_connector_set_property(struct gs_drm_connector *gs_connector
 	} else if (property == p->refresh_ctl_auto_frame_enabled) {
 		gs_state->auto_fi = val;
 		gs_state->pending_update_flags |= GS_FLAG_AUTO_FI_UPDATE;
-		dev_dbg(ctx->dev, "conn_set_prop: auto_fi(%s)\n", val ? "true" : "false");
+		dev_dbg(ctx->dev, "conn_set_prop: auto_fi(%llu)\n", val);
+	} else if (property == p->refresh_ctl_early_exit_enabled) {
+		gs_state->early_exit = val;
+		gs_state->pending_update_flags |= GS_FLAG_EARLY_EXIT_UPDATE;
+		dev_dbg(ctx->dev, "conn_set_prop: early_exit(%llu)\n", val);
 	} else if (property == p->frame_interval) {
 		if (val != 0)
 			do_div(val, NSEC_PER_USEC);
@@ -458,6 +482,12 @@ static int gs_panel_connector_set_property(struct gs_drm_connector *gs_connector
 		gs_state->panel_power_state = val;
 		gs_state->pending_update_flags |= GS_FLAG_POWER_STATE_UPDATE;
 		dev_dbg(ctx->dev, "conn_set_prop: panel_power_state(%llu)\n", val);
+	} else if (property == p->dsi_errors) {
+		bitmap_from_u64(gs_state->dsi_errors, val);
+		dev_dbg(ctx->dev, "conn_set_prop: dsi_errors(%llu)\n", val);
+	} else if (property == p->panel_errors) {
+		bitmap_from_u64(gs_state->panel_errors, val);
+		dev_dbg(ctx->dev, "conn_set_prop: panel_errors(%llu)\n", val);
 	} else {
 		dev_err(ctx->dev, "property not recognized within %s- \n", __func__);
 		return -EINVAL;
@@ -722,6 +752,16 @@ static int gs_panel_run_detect_fault(struct gs_panel *ctx)
 	/* Read fault registers */
 	ret = ctx->desc->gs_panel_func->detect_fault(ctx);
 
+	if (unlikely(GS_PANEL_ERR_MAX > 64)) {
+		dev_warn(ctx->dev, "panel_errors size (%u) > 64, skip mask\n", GS_PANEL_ERR_MAX);
+	} else {
+		DECLARE_BITMAP(mask, 64);
+
+		bitmap_from_u64(mask, ctx->desc->panel_errors_mask);
+		bitmap_and(ctx->panel_errors, ctx->panel_errors, mask, GS_PANEL_ERR_MAX);
+	}
+	trace_panel_errors(ctx->gs_connector->panel_index, ctx->panel_errors);
+
 	/* Update last fault check timestamp */
 	ctx->timestamps.last_panel_fault_check_ts = now;
 
@@ -849,32 +889,34 @@ static void gs_panel_commit_properties(struct gs_panel *ctx,
 		/*TODO(tknelms) DPU_ATRACE_END("dbv_wait");*/
 	}
 
-	if (gs_panel_has_func(ctx, refresh_ctrl)) {
-		bool update_refresh_ctrl = false;
+	if (gs_panel_has_func(ctx, refresh_ctrl) &&
+	    (conn_state->pending_update_flags & GS_FLAG_REFRESH_CTRL_UPDATE)) {
 		u32 refresh_ctrl;
 
 		mutex_lock(&ctx->mode_lock);
 		refresh_ctrl = ctx->refresh_ctrl;
 		if (conn_state->pending_update_flags & GS_FLAG_MIN_RR_UPDATE) {
-			update_refresh_ctrl = true;
 			GS_PANEL_REFRESH_CTRL_SET_MIN_REFRESH_RATE(refresh_ctrl,
 								   conn_state->min_refresh_rate);
 		}
 		if (conn_state->pending_update_flags & GS_FLAG_INSERT_FRAMES) {
-			update_refresh_ctrl = true;
 			GS_PANEL_REFRESH_CTRL_SET_FI_FRAME_COUNT(refresh_ctrl,
 								 conn_state->insert_frames);
 		}
 		if (conn_state->pending_update_flags & GS_FLAG_AUTO_FI_UPDATE) {
-			update_refresh_ctrl = true;
 			if (conn_state->auto_fi)
 				refresh_ctrl |= GS_PANEL_REFRESH_CTRL_FI_AUTO;
 			else
 				refresh_ctrl &= ~GS_PANEL_REFRESH_CTRL_FI_AUTO;
 		}
+		if (conn_state->pending_update_flags & GS_FLAG_EARLY_EXIT_UPDATE) {
+			if (conn_state->early_exit)
+				refresh_ctrl |= GS_PANEL_REFRESH_CTRL_EARLY_EXIT;
+			else
+				refresh_ctrl &= ~GS_PANEL_REFRESH_CTRL_EARLY_EXIT;
+		}
 
-		if (update_refresh_ctrl)
-			ctx->refresh_ctrl = refresh_ctrl;
+		ctx->refresh_ctrl = refresh_ctrl;
 		mutex_unlock(&ctx->mode_lock);
 	}
 
@@ -894,6 +936,9 @@ static void gs_panel_connector_atomic_pre_commit(struct gs_drm_connector *gs_con
 	mutex_lock(&ctx->mode_lock); /*TODO(b/267170999): MODE*/
 	if (idle_data->panel_update_idle_mode_pending)
 		panel_update_idle_mode_locked(ctx, false);
+	/* If panel errors cleared, propagate to panel */
+	if (!bitmap_equal(gs_new_state->panel_errors, ctx->panel_errors, GS_PANEL_ERR_MAX))
+		bitmap_copy(ctx->panel_errors, gs_new_state->panel_errors, GS_PANEL_ERR_MAX);
 	mutex_unlock(&ctx->mode_lock); /*TODO(b/267170999): MODE*/
 }
 
@@ -964,6 +1009,7 @@ static int gs_panel_connector_attach_properties(struct gs_panel *ctx)
 	struct gs_drm_connector_properties *p = gs_drm_connector_get_properties(ctx->gs_connector);
 	struct drm_mode_object *obj = &ctx->gs_connector->base.base;
 	const struct gs_panel_desc *desc = ctx->desc;
+	bool early_exit = ctx->refresh_ctrl & GS_PANEL_REFRESH_CTRL_EARLY_EXIT;
 	int ret = 0;
 
 	if (!p || !desc)
@@ -991,8 +1037,11 @@ static int gs_panel_connector_attach_properties(struct gs_panel *ctx)
 	drm_object_attach_property(obj, p->refresh_ctl_insert_frames, 0);
 	drm_object_attach_property(obj, p->refresh_ctl_min_refresh_rate, 0);
 	drm_object_attach_property(obj, p->refresh_ctl_auto_frame_enabled, false);
+	drm_object_attach_property(obj, p->refresh_ctl_early_exit_enabled, early_exit);
 	drm_object_attach_property(obj, p->pwm_mode, 0);
 	drm_object_attach_property(obj, p->panel_power_state, 0);
+	drm_object_attach_property(obj, p->dsi_errors, 0);
+	drm_object_attach_property(obj, p->panel_errors, 0);
 	drm_object_attach_property(obj, p->all_modes, 0);
 
 	if (desc->brightness_desc->brt_capability) {

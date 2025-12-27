@@ -11,6 +11,7 @@
 #include "vs_dc_dsc_rc_tables.h"
 #include "vs_dc_hw.h"
 #include "vs_dc_reg_be.h"
+#include "vs_trace_9x00.h"
 
 struct vs_dc_dsc_dataflow_params {
 	int initial_lines;
@@ -574,6 +575,23 @@ static inline void dsc_write(struct dc_hw *hw, u32 panel_id, u32 dword_reg, u32 
 	dc_write(hw, addr, val);
 }
 
+static inline u32 dsc_read(struct dc_hw *hw, u32 panel_id, u32 dword_reg)
+{
+	u32 ret, addr = 0;
+
+	if (panel_id == 0)
+		addr = DCREG_PANEL0_DSC_Address;
+	else if (panel_id == 1)
+		addr = DCREG_PANEL1_DSC_Address;
+	else if (panel_id == 2)
+		addr = DCREG_PANEL2_DSC_Address;
+
+	addr += dword_reg * 4;
+	ret = dc_read(hw, addr);
+
+	return ret;
+}
+
 static int dsc_enc_write_apb_registers(struct dc_hw *hw, u32 panel_id,
 				       const struct drm_dsc_config *dsc_cfg,
 				       const struct dc_hw_dsc_usage *sw_config,
@@ -684,6 +702,9 @@ int dc_hw_config_dsc(struct dc_hw *hw, u8 hw_id, const struct dc_hw_dsc_usage *s
 		return -EINVAL;
 	}
 
+	trace_disp_dsc(hw_id, sw_cfg->enable, sw_cfg->video_mode, sw_cfg->slices_per_line,
+		       sw_cfg->ss_num, dsc_cfg);
+
 	enable_dsc(hw, hw_id, sw_cfg->enable);
 	if (sw_cfg->enable) {
 		dataflow_params.initial_lines = get_initial_lines(dsc_cfg, sw_cfg);
@@ -696,5 +717,24 @@ int dc_hw_config_dsc(struct dc_hw *hw, u8 hw_id, const struct dc_hw_dsc_usage *s
 			dataflow_params.ob_max_addr = get_ob_max_addr_8k(sw_cfg->ss_num);
 		dsc_enc_write_apb_registers(hw, hw_id, dsc_cfg, sw_cfg, &dataflow_params);
 	}
+	return 0;
+}
+
+int dc_hw_read_dsc_status(struct dc_hw *hw, u8 hw_id)
+{
+	const u32 HS0_ADDR = 0x040;
+
+	u32 gen_stat, hslice_stat, out_stat, intr_stat;
+
+	gen_stat = dsc_read(hw, hw_id, HS0_ADDR | HS_GEN_STATUS_ADDR);
+	hslice_stat = dsc_read(hw, hw_id, HS0_ADDR | HS_HSLICE_STATUS_ADDR);
+	out_stat = dsc_read(hw, hw_id, HS0_ADDR | HS_OUT_STATUS_ADDR);
+	intr_stat = dsc_read(hw, hw_id, HS0_ADDR | HS_INT_STAT_ADDR);
+
+	dev_dbg(hw->dev, "gen_stat:%#010x hslice_stat:%#010x out_stat:%#010x intr_stat:%#010x\n",
+		gen_stat, hslice_stat, out_stat, intr_stat);
+
+	trace_disp_dsc_status(gen_stat, hslice_stat, out_stat, intr_stat);
+
 	return 0;
 }

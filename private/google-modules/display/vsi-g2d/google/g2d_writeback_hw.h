@@ -6,8 +6,7 @@
 #ifndef _G2D_WRITEBACK_HW_H_
 #define _G2D_WRITEBACK_HW_H_
 
-#include "g2d_sc.h"
-
-void wb_set_fb(struct sc_hw *hw, u8 hw_id, struct sc_hw_fb *fb);
+struct sc_hw;
+void wb_hw_commit(struct sc_hw *hw, u8 hw_id);
 
 #endif /* _G2D_WRITEBACK_HW_H_ */

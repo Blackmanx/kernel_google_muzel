@@ -8,8 +8,10 @@
 #include <drm/g2d_drm.h>
 #include <drm/drm_print.h>
 
+#include "g2d_pvric_hw.h"
+
 // Todo(b/390265640): Move to dts
-#define NUM_PIPELINES (2)
+#define NUM_PIPELINES (1)
 
 #define __vsFIELDSTART(reg_field) \
 		(0 ? reg_field)
@@ -83,9 +85,11 @@ enum sc_hw_wb_format {
 	WB_FORMAT_XRGB8888,
 	WB_FORMAT_A2RGB101010,
 	WB_FORMAT_X2RGB101010,
+	/* b/332946613 Note that RGB888 is unsupported by HW */
 	WB_FORMAT_RGB888,
 	WB_FORMAT_NV12 = 14,
 	WB_FORMAT_P010 = 16,
+	NUM_WB_FORMATS,
 };
 
 enum sc_hw_pipe_id {
@@ -99,6 +103,7 @@ enum sc_hw_color_format {
 	FORMAT_X8R8G8B8,
 	FORMAT_A2R10G10B10,
 	FORMAT_X2R10G10B10,
+	/* b/332946613 Note that R8G8B8 is unsupported by HW */
 	FORMAT_R8G8B8,
 	FORMAT_R5G6B5,
 	FORMAT_A1R5G5B5,
@@ -106,7 +111,9 @@ enum sc_hw_color_format {
 	FORMAT_A4R4G4B4,
 	FORMAT_X4R4G4B4,
 	FORMAT_A16R16G16B16 = 0x0A,
+	/* b/332946613 Note that YUV422 formats like FORMAT_YUY2 are unsupported by HW */
 	FORMAT_YUY2,
+	/* b/332946613 Note that YUV422 formats like FORMAT_UYVY are unsupported by HW */
 	FORMAT_UYVY,
 	FORMAT_YV12,
 	FORMAT_NV12,
@@ -114,6 +121,7 @@ enum sc_hw_color_format {
 	FORMAT_P010,
 	FORMAT_P210,
 	FORMAT_YUV420_PACKED,
+	NUM_LAYER_FORMATS,
 };
 
 enum sc_hw_tile_mode {
@@ -197,7 +205,6 @@ struct sc_hw_fb {
 	u8 zpos;
 	u8 display_id;
 	bool enable;
-	bool dirty;
 };
 
 struct sc_hw_roi {
@@ -206,7 +213,6 @@ struct sc_hw_roi {
 	enum drm_g2d_dma_mode mode;
 	struct drm_g2d_rect in_rect;
 	bool enable;
-	bool dirty;
 };
 
 struct sc_hw_scale {
@@ -218,7 +224,6 @@ struct sc_hw_scale {
 	u32 factor_y;
 	u32 offset_x;
 	u32 offset_y;
-	bool stretch_mode;
 	bool enable;
 	bool coefficients_dirty;
 };
@@ -235,15 +240,12 @@ struct sc_hw_plane {
 	struct sc_hw_scale scale;
 	struct sc_hw_roi roi;
 	struct sc_hw_y2r y2r;
+	struct pvric_hw_config pvric;
 };
 
 struct sc_hw_wb {
 	struct sc_hw_fb fb;
-};
-
-struct sc_hw;
-struct sc_hw_funcs {
-	void (*plane)(struct sc_hw *hw, u8 display_id);
+	struct pvric_hw_config pvric;
 };
 
 struct sc_hw_interrupt_status {
@@ -265,7 +267,6 @@ struct sc_hw {
 	u32 reg_size;
 	struct sc_hw_plane plane[NUM_PIPELINES];
 	struct sc_hw_wb wb[NUM_PIPELINES];
-	const struct sc_hw_funcs *func;
 	struct sc_hw_sub_funcs *sub_func;
 	/*for multiple interrupt destinations*/
 	u8 intr_dest;
@@ -273,6 +274,7 @@ struct sc_hw {
 };
 
 void sc_hw_commit(struct sc_hw *hw, u8 display_id);
+void sc_hw_wb_commit(struct sc_hw *hw, u8 display_id);
 void sc_hw_enable_shadow_register(struct sc_hw *hw, u8 display_id, bool enable);
 void sc_hw_start_trigger(struct sc_hw *hw, u8 display_id);
 void sc_hw_update_wb_fb(struct sc_hw *hw, u8 id, struct sc_hw_fb *fb);

@@ -305,6 +305,11 @@ static int gs_drm_connector_create_refresh_ctrl_properties(struct gs_drm_connect
 		return -ENOMEM;
 	p->refresh_ctl_auto_frame_enabled = prop;
 
+	prop = drm_property_create_bool(drm_dev, 0, "refresh_ctl_early_exit_enabled");
+	if (!prop)
+		return -ENOMEM;
+	p->refresh_ctl_early_exit_enabled = prop;
+
 	return 0;
 }
 
@@ -322,6 +327,66 @@ static int gs_drm_connector_create_hdr_formats_property(struct gs_drm_connector 
 						     props, ARRAY_SIZE(props),
 						     HDR_DOLBY_VISION | HDR_HDR10 | HDR_HLG);
 	if (!p->hdr_formats)
+		return -ENOMEM;
+
+	return 0;
+}
+
+static int gs_drm_connector_create_dsi_errors_property(struct gs_drm_connector *gs_connector)
+{
+	static const struct drm_prop_enum_list props[] = {
+		{ GS_DSI_ERR_SYS_RSTN, "DSI System Reset Needed" },
+		{ GS_DSI_ERR_PHY_RSTN, "DSI PHY Reset Needed" },
+		{ GS_DSI_ERR_IPI_RSTN, "DSI IPI Reset Needed" },
+		{ GS_DSI_ERR_HARD_RSTN, "DSI Hard Reset Needed" },
+	};
+	struct drm_device *dev = gs_connector->base.dev;
+	struct gs_drm_connector_properties *p = gs_drm_connector_get_properties(gs_connector);
+
+	p->dsi_errors = drm_property_create_bitmask(dev, DRM_MODE_PROP_IMMUTABLE, "dsi_errors",
+						    props, ARRAY_SIZE(props),
+						    (1UL << GS_DSI_ERR_MAX) - 1);
+	if (!p->dsi_errors)
+		return -ENOMEM;
+
+	return 0;
+}
+
+static int gs_drm_connector_create_panel_errors_property(struct gs_drm_connector *gs_connector)
+{
+	static const struct drm_prop_enum_list props[] = {
+		{ GS_PANEL_ERR_DSI_SOT, "DSI SoT" },
+		{ GS_PANEL_ERR_DSI_SOT_SYNC, "DSI SoT Sync" },
+		{ GS_PANEL_ERR_DSI_EOT_SYNC, "DSI EoT Sync" },
+		{ GS_PANEL_ERR_DSI_ESCAPE_MODE_ENTRY, "DSI Escape Mode Entry Command" },
+		{ GS_PANEL_ERR_DSI_LP_XMIT_SYNC, "DSI Low-Power Transmit Sync" },
+		{ GS_PANEL_ERR_DSI_HS_RX_TIMEOUT, "DSI HS RX Timeout" },
+		{ GS_PANEL_ERR_DSI_FALSE_CONTROL, "DSI False Control" },
+		{ GS_PANEL_ERR_DSI_DATA_LANE_CONTENTION, "DSI Data Lane Contention" },
+		{ GS_PANEL_ERR_DSI_ECC_SINGLE, "DSI ECC Single-Bit (corrected)" },
+		{ GS_PANEL_ERR_DSI_ECC_MULTI, "DSI ECC Multi-Bit (corrected)" },
+		{ GS_PANEL_ERR_DSI_CHECKSUM, "DSI Checksum" },
+		{ GS_PANEL_ERR_DSI_DATA_TYPE, "DSI Data Type Not Recognized" },
+		{ GS_PANEL_ERR_DSI_VC_ID_INVALID, "DSI VC ID Invalid" },
+		{ GS_PANEL_ERR_DSI_XMIT_LEN, "DSI Invalid Transmission Len" },
+		{ GS_PANEL_ERR_DSI_RESERVED, "DSI Reserved" },
+		{ GS_PANEL_ERR_DSI_PROTOCOL_VIOLATION, "DSI Protocol Violation" },
+		{ GS_PANEL_ERR_DSI_GENERAL, "DSI General" },
+		{ GS_PANEL_ERR_VLIN1, "VLIN1" },
+		{ GS_PANEL_ERR_TE, "TE" },
+		{ GS_PANEL_ERR_PPS, "PPS Setting" },
+		{ GS_PANEL_ERR_CHECKSUM, "Checksum" },
+		{ GS_PANEL_ERR_ESD, "ESD Detection" },
+		{ GS_PANEL_ERR_DISP_INVALID, "Display Invalid" },
+		{ GS_PANEL_ERR_VGH, "VGH Power" },
+	};
+	struct drm_device *dev = gs_connector->base.dev;
+	struct gs_drm_connector_properties *p = gs_drm_connector_get_properties(gs_connector);
+
+	p->panel_errors = drm_property_create_bitmask(dev, DRM_MODE_PROP_IMMUTABLE, "panel_errors",
+						      props, ARRAY_SIZE(props),
+						      (1UL << GS_PANEL_ERR_MAX) - 1);
+	if (!p->panel_errors)
 		return -ENOMEM;
 
 	return 0;
@@ -454,6 +519,14 @@ int gs_drm_connector_create_properties(struct drm_connector *connector)
 		return ret;
 
 	ret = gs_drm_connector_create_hdr_formats_property(gs_connector);
+	if (ret)
+		return ret;
+
+	ret = gs_drm_connector_create_dsi_errors_property(gs_connector);
+	if (ret)
+		return ret;
+
+	ret = gs_drm_connector_create_panel_errors_property(gs_connector);
 	if (ret)
 		return ret;
 

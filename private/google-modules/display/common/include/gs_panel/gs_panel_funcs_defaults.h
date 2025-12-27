@@ -106,10 +106,30 @@ int gs_panel_read_serial(struct gs_panel *ctx);
 void gs_panel_model_init(struct gs_panel *ctx, const char *project, u8 extra_info);
 
 /**
+ * gs_panel_is_mode_seamless_atomic_helper() - Default implementation for
+ *                                             checking seamless transition.
+ * @ctx: Reference to panel data
+ * @old_pmode: Old (often: current) display mode
+ * @new_pmode: Proposed display mode
+ *
+ * Checks whether the panel can transition between the two modes seamlessly without
+ * having to turn the display off before the mode change.
+ *
+ * This implementation checks if resolution/timings and flags are the same.
+ *
+ * Return: true if seamless transition possible, false otherwise
+ */
+bool gs_panel_is_mode_seamless_atomic_helper(const struct gs_panel *ctx,
+					     const struct gs_panel_mode *old_pmode,
+					     const struct gs_panel_mode *new_pmode);
+
+/**
  * gs_panel_is_mode_seamless_helper() - Default implementation for checking
  *                                      seamless transition.
  * @ctx: Reference to panel data
- * @mode: Proposed display mode
+ * @new_pmode: Proposed display mode
+ *
+ * DEPRECATED; prefer use of is_mode_seamless_atomic()
  *
  * Checks whether the panel can transition to the new mode seamlessly without
  * having to turn the display off before the mode change.
@@ -119,7 +139,7 @@ void gs_panel_model_init(struct gs_panel *ctx, const char *project, u8 extra_inf
  * Return: true if seamless transition possible, false otherwise
  */
 bool gs_panel_is_mode_seamless_helper(const struct gs_panel *ctx,
-				      const struct gs_panel_mode *pmode);
+				      const struct gs_panel_mode *new_pmode);
 
 /**
  * gs_panel_get_te2_edges_helper() - Get rising and falling edges of TE2 signal
@@ -183,5 +203,31 @@ int gs_panel_set_vddd_regulator_helper(struct gs_panel *ctx, bool is_lp);
  * Return: 0 on success, negative value on error
  */
 int gs_panel_set_vddd_optional_gpio_helper(struct gs_panel *ctx, bool is_lp);
+
+/**
+ * gs_panel_refresh_ctrl_full_helper() - update full refresh_ctrl features
+ * @ctx: Reference to panel data
+ * @pmode: current display mode
+ *
+ * This helper will update the panel features based on the refresh_ctrl bits,
+ * assuming a full refresh_ctrl feature set.
+ *
+ * Return: true if changes to the features were detected, false otherwise
+ */
+bool gs_panel_refresh_ctrl_full_helper(struct gs_panel *ctx, const struct gs_panel_mode *pmode);
+
+/**
+ * gs_panel_refresh_ctrl_lite_helper() - update lite refresh_ctrl features
+ * @ctx: Reference to panel data
+ * @pmode: current display mode
+ * @min_rr_supported: minimum refresh rate supported by the panel
+ *
+ * This helper will update the panel features based on the refresh_ctrl bits,
+ * assuming a lite refresh_ctrl feature set.
+ *
+ * Return: true if new changes nees to be applied, false if no changes were detected
+ */
+bool gs_panel_refresh_ctrl_lite_helper(struct gs_panel *ctx, const struct gs_panel_mode *pmode,
+				       u8 min_rr_supported);
 
 #endif // _GS_PANEL_FUNCS_DEFAULTS_H_

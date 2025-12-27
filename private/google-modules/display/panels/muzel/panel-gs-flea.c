@@ -88,87 +88,100 @@ static const u16 VFP = 8, VSA = 2, VBP = 16;
 	.cfg = &pps_config,\
 }
 
-static const struct gs_panel_mode_array flea_modes = {
-	.num_modes = 3,
-	.modes = {
-		/* MRR modes */
-		{
-			.mode = {
-				.name = "1080x2424x60@60",
-				DRM_MODE_TIMING(60, HDISPLAY, HFP, HSA, HBP,
-						VDISPLAY, VFP, VSA, VBP),
-				/* aligned to bootloader setting */
-				.type = DRM_MODE_TYPE_PREFERRED,
-				.width_mm = WIDTH_MM,
-				.height_mm = HEIGHT_MM,
-			},
-			.gs_mode = {
-				.mode_flags = MIPI_DSI_CLOCK_NON_CONTINUOUS,
-				.vblank_usec = 120,
-				.te_usec = 8606,
-				.bpc = 8,
-				.dsc = FLEA_DSC,
-			},
+static const struct gs_panel_mode_array flea_modes = GS_PANEL_MODES(
+	/* MRR modes */
+	{
+		.mode = {
+			.name = "1080x2424x60@60",
+			DRM_MODE_TIMING(60, HDISPLAY, HFP, HSA, HBP,
+					VDISPLAY, VFP, VSA, VBP),
+			/* aligned to bootloader setting */
+			.type = DRM_MODE_TYPE_PREFERRED,
+			.width_mm = WIDTH_MM,
+			.height_mm = HEIGHT_MM,
 		},
-		{
-			.mode = {
-				.name = "1080x2424x120@120",
-				DRM_MODE_TIMING(120, HDISPLAY, HFP, HSA, HBP,
-						VDISPLAY, VFP, VSA, VBP),
-				.width_mm = WIDTH_MM,
-				.height_mm = HEIGHT_MM,
-			},
-			.gs_mode = {
-				.mode_flags = MIPI_DSI_CLOCK_NON_CONTINUOUS,
-				.vblank_usec = 120,
-				.te_usec = 276,
-				.bpc = 8,
-				.dsc = FLEA_DSC,
-			},
+		.gs_mode = {
+			.mode_flags = MIPI_DSI_CLOCK_NON_CONTINUOUS,
+			.vblank_usec = 120,
+			.te_usec = 8606,
+			.bpc = 8,
+			.dsc = FLEA_DSC,
 		},
-		/* VRR modes */
-		{
-			.mode = {
-				.name = "1080x2424x120@120",
-				DRM_VRR_MODE_TIMING(120, 120, HDISPLAY, HFP, HSA, HBP,
-						    VDISPLAY, VFP, VSA, VBP),
-				.type = DRM_MODE_TYPE_PREFERRED,
-				.width_mm = WIDTH_MM,
-				.height_mm = HEIGHT_MM,
-			},
-			.gs_mode = {
-				.mode_flags = MIPI_DSI_CLOCK_NON_CONTINUOUS,
-				.vblank_usec = 120,
-				.te_usec = 276,
-				.bpc = 8,
-				.dsc = FLEA_DSC,
-			},
+	},
+	{
+		.mode = {
+			.name = "1080x2424x120@120",
+			DRM_MODE_TIMING(120, HDISPLAY, HFP, HSA, HBP,
+					VDISPLAY, VFP, VSA, VBP),
+			.width_mm = WIDTH_MM,
+			.height_mm = HEIGHT_MM,
 		},
-	}, /* modes */
-};
+		.gs_mode = {
+			.mode_flags = MIPI_DSI_CLOCK_NON_CONTINUOUS,
+			.vblank_usec = 120,
+			.te_usec = 276,
+			.bpc = 8,
+			.dsc = FLEA_DSC,
+		},
+	},
+	/* VRR modes */
+#ifndef PANEL_FACTORY_BUILD
+	{
+		.mode = {
+			.name = "1080x2424x60@60",
+			DRM_VRR_MODE_TIMING(60, 60, HDISPLAY, HFP, HSA, HBP,
+					    VDISPLAY, VFP, VSA, VBP),
+			/* aligned to bootloader setting */
+			.type = DRM_MODE_TYPE_PREFERRED,
+			.width_mm = WIDTH_MM,
+			.height_mm = HEIGHT_MM,
+		},
+		.gs_mode = {
+			.mode_flags = MIPI_DSI_CLOCK_NON_CONTINUOUS,
+			.vblank_usec = 120,
+			.te_usec = 8606,
+			.bpc = 8,
+			.dsc = FLEA_DSC,
+		},
+	},
+#endif
+	{
+		.mode = {
+			.name = "1080x2424x120@120",
+			DRM_VRR_MODE_TIMING(120, 120, HDISPLAY, HFP, HSA, HBP,
+					    VDISPLAY, VFP, VSA, VBP),
+			.width_mm = WIDTH_MM,
+			.height_mm = HEIGHT_MM,
+		},
+		.gs_mode = {
+			.mode_flags = MIPI_DSI_CLOCK_NON_CONTINUOUS,
+			.vblank_usec = 120,
+			.te_usec = 276,
+			.bpc = 8,
+			.dsc = FLEA_DSC,
+		},
+	},
+);
 
-static const struct gs_panel_mode_array flea_lp_modes = {
-	.num_modes = 1,
-	.modes = {
-		{
-			.mode = {
-				.name = "1080x2424x30@30",
-				DRM_MODE_TIMING(30, HDISPLAY, HFP, HSA, HBP,
-						VDISPLAY, VFP, VSA, VBP),
-				.width_mm = WIDTH_MM,
-				.height_mm = HEIGHT_MM,
-			},
-			.gs_mode = {
-				.mode_flags = MIPI_DSI_CLOCK_NON_CONTINUOUS,
-				.vblank_usec = 120,
-				.te_usec = 1103,
-				.bpc = 8,
-				.dsc = FLEA_DSC,
-				.is_lp_mode = true,
-			},
+static const struct gs_panel_mode_array flea_lp_modes = GS_PANEL_MODES(
+	{
+		.mode = {
+			.name = "1080x2424x30@30",
+			DRM_MODE_TIMING(30, HDISPLAY, HFP, HSA, HBP,
+					VDISPLAY, VFP, VSA, VBP),
+			.width_mm = WIDTH_MM,
+			.height_mm = HEIGHT_MM,
 		},
-	}, /* modes */
-};
+		.gs_mode = {
+			.mode_flags = MIPI_DSI_CLOCK_NON_CONTINUOUS,
+			.vblank_usec = 120,
+			.te_usec = 1103,
+			.bpc = 8,
+			.dsc = FLEA_DSC,
+			.is_lp_mode = true,
+		},
+	},
+);
 
 static const struct gs_brightness_configuration flea_brt_configs[] = {
 	{
@@ -271,6 +284,11 @@ static const u8 panel_update[] = { 0xF7, 0x2F };
 static const u8 pixel_off[] = { 0x22 };
 static const u8 flash_execute[] = { 0xC0, 0x03 };
 
+static const u8 vrr_60_te_settings[] = { 0xB9, 0x00, 0x09, 0x4F, 0x00, 0x00, 0x10,
+					 0x00, 0x09, 0x90, 0x00, 0x09, 0x90 };
+static const u8 vrr_120_te_settings[] = { 0xB9, 0x00, 0x09, 0x4F, 0x00, 0x00, 0x10,
+					  0x00, 0x09, 0x4F, 0x00, 0x00, 0x10 };
+
 static const struct gs_dsi_cmd flea_off_cmds[] = {
 	GS_DSI_CMD(MIPI_DCS_SET_DISPLAY_OFF),
 	GS_DSI_DELAY_CMD(120, MIPI_DCS_ENTER_SLEEP_MODE),
@@ -326,11 +344,11 @@ static const struct gs_dsi_cmd flea_init_cmds[] = {
 	/* PASET: 2424 */
 	GS_DSI_CMD(MIPI_DCS_SET_PAGE_ADDRESS, 0x00, 0x00, 0x09, 0x77),
 
-	/* FFC On (756Mpbs) Setting */
+	/* FFC On (758.4Mpbs) Setting */
 	GS_DSI_CMDLIST(test_key_enable),
 	GS_DSI_CMDLIST(test_key_fc_enable),
 	GS_DSI_CMD(0xB0, 0x00, 0x3E, 0xC5),
-	GS_DSI_CMD(0xC5, 0x56, 0x59),
+	GS_DSI_CMD(0xC5, 0x56, 0x13),
 	GS_DSI_CMD(0xB0, 0x00, 0x36, 0xC5),
 	GS_DSI_CMD(0xC5, 0x11, 0x10, 0x50, 0x05),
 
@@ -358,21 +376,6 @@ static const struct gs_dsi_cmd flea_init_cmds[] = {
 	GS_DSI_CMDLIST(test_key_disable),
 };
 static DEFINE_GS_CMDSET(flea_init);
-
-static const struct gs_dsi_cmd flea_vrr_cmds[] = {
-	GS_DSI_CMDLIST(test_key_enable),
-	/* Fixed TE */
-	GS_DSI_CMD(0xB9, 0x51),
-	/* 120Hz TE Setting */
-	GS_DSI_CMD(0xB0, 0x00, 0x02, 0xB9),
-	GS_DSI_CMD(0xB9, 0x00),
-	/* TE Width Settings */
-	GS_DSI_CMD(0xB0, 0x00, 0x08, 0xB9),
-	GS_DSI_CMD(0xB9, 0x00, 0x09, 0x4F, 0x00, 0x00, 0x10, 0x00, 0x09, 0x4F, 0x00, 0x00, 0x10),
-	GS_DSI_CMDLIST(panel_update),
-	GS_DSI_CMDLIST(test_key_disable),
-};
-static DEFINE_GS_CMDSET(flea_vrr);
 
 /**
  * struct flea_panel - panel specific runtime info
@@ -406,48 +409,39 @@ static void flea_change_frequency(struct gs_panel *ctx, const struct gs_panel_mo
 	GS_DCS_BUF_ADD_CMDLIST(dev, panel_update);
 	GS_DCS_BUF_ADD_CMDLIST_AND_FLUSH(dev, test_key_disable);
 
+	notify_panel_te2_freq_changed(ctx, 0);
+
 	dev_info(dev, "%s: change to %uHz\n", __func__, vrefresh);
+}
+
+static void flea_mode_set(struct gs_panel *ctx, const struct gs_panel_mode *pmode)
+{
+	if (gs_is_vrr_mode(pmode)) {
+		struct device *dev = ctx->dev;
+
+		GS_DCS_BUF_ADD_CMDLIST(dev, test_key_enable);
+		GS_DCS_BUF_ADD_CMD(dev, 0xB0, 0x00, 0x08, 0xB9);
+		if (drm_mode_vrefresh(&pmode->mode) > 60)
+			GS_DCS_BUF_ADD_CMDLIST(dev, vrr_120_te_settings);
+		else
+			GS_DCS_BUF_ADD_CMDLIST(dev, vrr_60_te_settings);
+		GS_DCS_BUF_ADD_CMDLIST_AND_FLUSH(dev, test_key_disable);
+	}
+
+	flea_change_frequency(ctx, pmode);
+
+	dev_dbg(ctx->dev, "%s: change to %dhz\n", __func__, drm_mode_vrefresh(&pmode->mode));
 }
 
 #ifndef PANEL_FACTORY_BUILD
 static void flea_refresh_ctrl(struct gs_panel *ctx)
 {
-	struct device *dev = ctx->dev;
 	const struct gs_panel_mode *pmode = ctx->current_mode;
-	const u32 ctrl = ctx->refresh_ctrl;
-
-	if (!pmode)
-		return;
-
-	dev_dbg(ctx->dev, "refresh_ctrl=%#X\n", ctrl);
-
-	if (!gs_is_vrr_mode(pmode)) {
-		dev_warn(dev, "refresh_ctrl: mode control not supported for %s\n",
-			       pmode->mode.name);
-		return;
-	}
 
 	PANEL_ATRACE_BEGIN(__func__);
 
-	if (ctrl & GS_PANEL_REFRESH_CTRL_FI_FRAME_COUNT_MASK ||
-	    ctrl & GS_PANEL_REFRESH_CTRL_FI_AUTO)
-		dev_warn(dev, "refresh_ctrl: FI functionality not supported\n");
-
-	if (ctrl & GS_PANEL_REFRESH_CTRL_MIN_REFRESH_RATE_MASK) {
-		u32 vrefresh = drm_mode_vrefresh(&pmode->mode);
-		u32 min_vrefresh = GS_PANEL_REFRESH_CTRL_MIN_REFRESH_RATE(ctrl);
-
-		if (min_vrefresh == vrefresh || min_vrefresh == VRR_MIN_IDLE_RR_HZ) {
-			ctx->sw_status.idle_vrefresh = min_vrefresh;
-			PANEL_ATRACE_INT_PID_FMT(ctx->sw_status.idle_vrefresh, ctx->trace_pid,
-						 "idle_vrefresh[%s]", ctx->panel_model);
-			flea_change_frequency(ctx, pmode);
-		} else {
-			dev_warn(ctx->dev,
-				 "refresh_ctrl: %uHz min RR requested, only %u/%u Hz supported\n",
-				 min_vrefresh, VRR_MIN_IDLE_RR_HZ, vrefresh);
-		}
-	}
+	if (gs_panel_refresh_ctrl_lite_helper(ctx, pmode, VRR_MIN_IDLE_RR_HZ))
+		flea_change_frequency(ctx, pmode);
 
 	PANEL_ATRACE_END(__func__);
 }
@@ -534,7 +528,7 @@ static void flea_set_hbm_mode(struct gs_panel *ctx, enum gs_hbm_mode mode)
 			GS_DCS_BUF_ADD_CMD(dev, 0x68, 0xB4, 0x2C, 0x6A,
 						0x80, 0x00, 0x00, 0x26, 0xEB);
 		else
-			GS_DCS_BUF_ADD_CMD(dev, 0x68, 0xB4, 0x2C, 0x6A,
+			GS_DCS_BUF_ADD_CMD(dev, 0x68, 0xB0, 0x2C, 0x6A,
 						0x80, 0x00, 0x00, 0xB2, 0x8E);
 	} else {
 		/* FGZ Mode OFF */
@@ -570,15 +564,15 @@ static void flea_set_dimming(struct gs_panel *ctx, bool dimming_on)
 	flea_update_wrctrld(ctx);
 }
 
-static void flea_mode_set(struct gs_panel *ctx, const struct gs_panel_mode *pmode)
+static bool flea_is_mode_seamless_atomic(const struct gs_panel *ctx,
+					 const struct gs_panel_mode *old_pmode,
+					 const struct gs_panel_mode *new_pmode)
 {
-	flea_change_frequency(ctx, pmode);
-}
-
-static bool flea_is_mode_seamless(const struct gs_panel *ctx, const struct gs_panel_mode *pmode)
-{
-	/* seamless mode switch is possible if only changing refresh rate */
-	return drm_mode_equal_no_clocks(&ctx->current_mode->mode, &pmode->mode);
+	/*
+	 * As this panel supports one resolution with multiple refresh rates,
+	 * to save some CPU cycles, we could always return true.
+	 */
+	return true;
 }
 
 static void flea_debugfs_init(struct drm_panel *panel, struct dentry *root)
@@ -604,17 +598,6 @@ panel_out:
 	dput(panel_root);
 }
 
-static void flea_panel_init(struct gs_panel *ctx)
-{
-	const struct gs_panel_mode *pmode = ctx->current_mode;
-
-	if (gs_is_vrr_mode(pmode)) {
-		ctx->sw_status.idle_vrefresh = VRR_MIN_IDLE_RR_HZ;
-		gs_panel_send_cmdset(ctx, &flea_vrr_cmdset);
-		flea_change_frequency(ctx, pmode);
-	}
-}
-
 static void flea_get_panel_rev(struct gs_panel *ctx, u32 id)
 {
 	/* extract command 0xDB */
@@ -631,12 +614,9 @@ static void flea_set_nolp_mode(struct gs_panel *ctx, const struct gs_panel_mode 
 	if (!gs_is_panel_active(ctx))
 		return;
 
-	if (gs_is_vrr_mode(pmode))
-		gs_panel_send_cmdset(ctx, &flea_vrr_cmdset);
-
 	/* AOD Mode Off Setting */
 	flea_update_wrctrld(ctx);
-	flea_change_frequency(ctx, pmode);
+	flea_mode_set(ctx, pmode);
 
 	dev_info(ctx->dev, "exit LP mode\n");
 }
@@ -661,20 +641,16 @@ static int flea_enable(struct drm_panel *panel)
 		/* initial command */
 		gs_panel_send_cmdset(ctx, &flea_init_cmdset);
 
-		if (gs_is_vrr_mode(pmode))
-			gs_panel_send_cmdset(ctx, &flea_vrr_cmdset);
-
 		ctx->ffc_en = true;
 	}
 
 	/* frequency */
-	flea_change_frequency(ctx, pmode);
+	flea_mode_set(ctx, pmode);
 
-	/* DSC related configuration */
-	GS_DCS_WRITE_CMD(dev, MIPI_DSI_COMPRESSION_MODE, 0x01);
-	gs_dcs_write_dsc_config(dev, &pps_config);
 	/* DSC Enable */
-	GS_DCS_BUF_ADD_CMD(dev, 0x9D, 0x01);
+	mipi_dsi_compression_mode(to_mipi_dsi_device(dev), true);
+	/* DSC related configuration */
+	gs_dcs_write_dsc_config(dev, &pps_config);
 
 	/* dimming and HBM */
 	flea_update_wrctrld(ctx);
@@ -716,8 +692,6 @@ static int flea_panel_probe(struct mipi_dsi_device *dsi)
 
 	ctx = &spanel->base;
 	spanel->is_pixel_off = false;
-	/* FFC is enabled in bootloader */
-	ctx->ffc_en = true;
 
 	return gs_dsi_panel_common_init(dsi, ctx);
 }
@@ -773,10 +747,11 @@ static void flea_update_ffc(struct gs_panel *ctx, unsigned int hs_clk_mbps)
 
 		/* Update FFC */
 		GS_DCS_BUF_ADD_CMD(dev, 0xB0, 0x00, 0x3E, 0xC5);
+		/* Apply the parameters to adapt outputs 758.4 & 740.8 Mbps */
 		if (hs_clk_mbps == MIPI_DSI_FREQ_DEFAULT) {
-			GS_DCS_BUF_ADD_CMD(dev, 0xC5, 0x56, 0x59);
+			GS_DCS_BUF_ADD_CMD(dev, 0xC5, 0x56, 0x13);
 		} else { /* MIPI_DSI_FREQ_ALTERNATIVE */
-			GS_DCS_BUF_ADD_CMD(dev, 0xC5, 0x58, 0x37);
+			GS_DCS_BUF_ADD_CMD(dev, 0xC5, 0x58, 0x1F);
 		}
 
 		GS_DCS_BUF_ADD_CMD(dev, 0xB0, 0x00, 0x36, 0xC5);
@@ -788,6 +763,26 @@ static void flea_update_ffc(struct gs_panel *ctx, unsigned int hs_clk_mbps)
 	}
 
 	PANEL_ATRACE_END(__func__);
+}
+
+static void flea_panel_init(struct gs_panel *ctx)
+{
+	const struct gs_panel_mode *pmode = ctx->current_mode;
+
+	if (gs_is_vrr_mode(pmode)) {
+		ctx->sw_status.idle_vrefresh = VRR_MIN_IDLE_RR_HZ;
+		flea_mode_set(ctx, pmode);
+	}
+
+	/**
+	 * Update FFC parameters
+	 * This is to overwrite the FFC parameters in the bootloader to simplify
+	 * the changes. The FFC parameter difference should only affect the TE
+	 * period during boot (very slight performance impact), and it should not
+	 * cause any artifacts. After boot, we will use the correct FFC parameters
+	 * all the time.
+	 */
+	flea_update_ffc(ctx, MIPI_DSI_FREQ_DEFAULT);
 }
 
 static void flea_prepare_color_data_read(struct device *dev)
@@ -998,6 +993,11 @@ static int flea_detect_fault(struct gs_panel *ctx)
 		dev_err(dev, "DDIC error found, trigger register dump\n");
 		dev_err(dev, "ERR_DSI: %02x %02x\n", buf[0], buf[1]);
 
+		bitmap_zero(ctx->panel_errors, GS_PANEL_ERR_MAX);
+		set_bit(GS_PANEL_ERR_DSI_GENERAL, ctx->panel_errors);
+		bitmap_set_value8(ctx->panel_errors, buf[0], 8);
+		bitmap_set_value8(ctx->panel_errors, buf[1], 0);
+
 		/* Brightness */
 		ret = mipi_dsi_dcs_read(dsi, MIPI_DCS_GET_DISPLAY_BRIGHTNESS, br_buf, BR_LEN);
 		if (ret == BR_LEN)
@@ -1043,7 +1043,7 @@ static const struct gs_panel_funcs flea_gs_funcs = {
 	.set_binned_lp = gs_panel_set_binned_lp_helper,
 	.set_dimming = flea_set_dimming,
 	.set_hbm_mode = flea_set_hbm_mode,
-	.is_mode_seamless = flea_is_mode_seamless,
+	.is_mode_seamless_atomic = flea_is_mode_seamless_atomic,
 	.mode_set = flea_mode_set,
 	.panel_init = flea_panel_init,
 	.panel_config = flea_panel_config,
@@ -1109,6 +1109,8 @@ const struct gs_panel_desc google_flea = {
 	.default_dsi_hs_clk_mbps = MIPI_DSI_FREQ_DEFAULT,
 	.reset_timing_ms = { -1, 1, 10 },
 	.fault_detect_interval_ms = 5000,
+	.panel_errors_mask = ~(BIT(GS_PANEL_ERR_DSI_SOT) | BIT(GS_PANEL_ERR_DSI_SOT_SYNC)),
+
 };
 
 static const struct of_device_id gs_panel_of_match[] = {

@@ -9,4 +9,5 @@
 
 int dc_hw_config_dsc(struct dc_hw *hw, u8 hw_id, const struct dc_hw_dsc_usage *sw_cfg,
 		     const struct drm_dsc_config *dsc_cfg);
+int dc_hw_read_dsc_status(struct dc_hw *hw, u8 hw_id);
 #endif

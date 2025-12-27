@@ -89,7 +89,20 @@ static enum drm_mode_status g2d_wb_connector_mode_valid(struct drm_connector *co
 static int g2d_wb_connector_atomic_check(struct drm_connector *connector,
 					 struct drm_atomic_state *state)
 {
-	return 0;
+	struct drm_connector_state *connector_state;
+	struct drm_writeback_connector *wb_connector;
+	struct g2d_writeback_connector *g2d_wb_connector;
+	struct drm_framebuffer *fb;
+
+	connector_state = drm_atomic_get_new_connector_state(state, connector);
+	wb_connector = drm_connector_to_writeback(connector);
+	g2d_wb_connector = to_g2d_writeback_connector(wb_connector);
+
+	if (!connector_state->writeback_job)
+		return 0;
+
+	fb = connector_state->writeback_job->fb;
+	return g2d_wb_connector->funcs->check(state->dev, fb);
 }
 
 static int g2d_wb_connector_atomic_prepare(struct drm_writeback_connector *connector,
@@ -98,11 +111,6 @@ static int g2d_wb_connector_atomic_prepare(struct drm_writeback_connector *conne
 	struct drm_framebuffer *fb;
 	struct g2d_writeback_connector *g2d_wb_connector = to_g2d_writeback_connector(connector);
 
-	/*
-	 * TODO(rushikesh@) remove pitch alignment.
-	 * we should always use the pitch exactly as provided by userspace
-	 */
-	uint32_t pitch_alignment = 64;
 	u8 num_planes;
 	int i;
 
@@ -117,7 +125,7 @@ static int g2d_wb_connector_atomic_prepare(struct drm_writeback_connector *conne
 
 		g2d_obj = to_g2d_buffer_object(fb->obj[i]);
 		g2d_wb_connector->dma_addr[i] = g2d_obj->dma_addr + fb->offsets[i];
-		g2d_wb_connector->pitch[i] = ALIGN(fb->pitches[i], pitch_alignment);
+		g2d_wb_connector->pitch[i] = fb->pitches[i];
 		g2d_wb_connector->is_yuv = fb->format->is_yuv;
 	}
 
@@ -140,7 +148,7 @@ static void g2d_wb_connector_atomic_commit(struct drm_connector *connector,
 
 	drm_writeback_queue_job(wb_connector, connector_state);
 
-	g2d_wb_connector->funcs->config(g2d_wb_connector, fb);
+	g2d_wb_connector->funcs->commit(g2d_wb_connector, fb);
 	dev_dbg(drm->dev, "%s: hardware config complete", __func__);
 
 	g2d_wb_connector->armed++;
@@ -185,10 +193,10 @@ static const struct drm_encoder_helper_funcs g2d_wb_encoder_helper_funcs = {
 	.atomic_disable = g2d_wb_encoder_atomic_disable,
 };
 
-int g2d_enable_writeback_connector(struct g2d_device *gdevice, uint32_t possible_crtcs)
+int g2d_enable_writeback_connector(struct g2d_device *g2d_device, uint32_t possible_crtcs)
 {
 	int i;
-	struct drm_device *drm = &gdevice->drm;
+	struct drm_device *drm = &g2d_device->drm;
 
 	for (i = 0; i < NUM_PIPELINES; i++) {
 		int ret;
@@ -198,7 +206,7 @@ int g2d_enable_writeback_connector(struct g2d_device *gdevice, uint32_t possible
 		g2d_wb_connector = kzalloc(sizeof(struct g2d_writeback_connector), GFP_KERNEL);
 		if (!g2d_wb_connector)
 			return -ENOMEM;
-		gdevice->sc->writeback[i] = g2d_wb_connector;
+		g2d_device->sc->writeback[i] = g2d_wb_connector;
 		wb_connector = &(g2d_wb_connector->base);
 
 		ret = drm_writeback_connector_init(drm, wb_connector, &g2d_wb_connector_funcs,

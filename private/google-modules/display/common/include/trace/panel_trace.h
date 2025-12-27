@@ -10,7 +10,10 @@
 #if !defined(_PANEL_TRACE_H_) || defined(TRACE_HEADER_MULTI_READ)
 #define _PANEL_TRACE_H_
 
+#include <linux/bitmap.h>
 #include <linux/tracepoint.h>
+
+#include "gs_drm/gs_drm_connector.h"
 
 TRACE_EVENT_CONDITION(dsi_tx,
 	TP_PROTO(u8 type, const u8 *tx_buf, size_t length, bool last, u32 delay_ms),
@@ -64,6 +67,45 @@ TRACE_EVENT(dsi_cmd_fifo_status,
 			__entry->payload  = payload;
 		),
 	TP_printk("header=%d payload=%d", __entry->header, __entry->payload)
+);
+
+#define PANEL_ERROR_FLAGS_NAME(name) \
+	{ (1UL << GS_PANEL_ERR_##name), #name }
+TRACE_EVENT(panel_errors,
+	TP_PROTO(int panel_index, unsigned long *panel_errors),
+	TP_ARGS(panel_index, panel_errors),
+	TP_STRUCT__entry(
+		__field(int, panel_index)
+		__field(u64, panel_errors)
+	),
+	TP_fast_assign(
+		__entry->panel_index = panel_index;
+		bitmap_to_arr64(&__entry->panel_errors, panel_errors, GS_PANEL_ERR_MAX);
+	),
+	TP_printk("idx:%d panel_errors:[%s]", __entry->panel_index,
+		__print_flags(__entry->panel_errors, "|",
+			PANEL_ERROR_FLAGS_NAME(DSI_SOT),
+			PANEL_ERROR_FLAGS_NAME(DSI_SOT_SYNC),
+			PANEL_ERROR_FLAGS_NAME(DSI_EOT_SYNC),
+			PANEL_ERROR_FLAGS_NAME(DSI_ESCAPE_MODE_ENTRY),
+			PANEL_ERROR_FLAGS_NAME(DSI_LP_XMIT_SYNC),
+			PANEL_ERROR_FLAGS_NAME(DSI_HS_RX_TIMEOUT),
+			PANEL_ERROR_FLAGS_NAME(DSI_FALSE_CONTROL),
+			PANEL_ERROR_FLAGS_NAME(DSI_DATA_LANE_CONTENTION),
+			PANEL_ERROR_FLAGS_NAME(DSI_ECC_SINGLE),
+			PANEL_ERROR_FLAGS_NAME(DSI_ECC_MULTI),
+			PANEL_ERROR_FLAGS_NAME(DSI_CHECKSUM),
+			PANEL_ERROR_FLAGS_NAME(DSI_DATA_TYPE),
+			PANEL_ERROR_FLAGS_NAME(DSI_VC_ID_INVALID),
+			PANEL_ERROR_FLAGS_NAME(DSI_XMIT_LEN),
+			PANEL_ERROR_FLAGS_NAME(DSI_GENERAL),
+			PANEL_ERROR_FLAGS_NAME(DSI_PROTOCOL_VIOLATION),
+			PANEL_ERROR_FLAGS_NAME(VLIN1),
+			PANEL_ERROR_FLAGS_NAME(PPS),
+			PANEL_ERROR_FLAGS_NAME(CHECKSUM),
+			PANEL_ERROR_FLAGS_NAME(ESD),
+			PANEL_ERROR_FLAGS_NAME(DISP_INVALID),
+			PANEL_ERROR_FLAGS_NAME(VGH)))
 );
 
 TRACE_EVENT(msleep,

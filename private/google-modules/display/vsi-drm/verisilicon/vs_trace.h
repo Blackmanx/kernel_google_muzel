@@ -43,44 +43,66 @@ DEFINE_EVENT(dc_readwrite, dc_write,
 );
 
 DECLARE_EVENT_CLASS(display,
-	TP_PROTO(int display_id, struct vs_crtc *vs_crtc),
-	TP_ARGS(display_id, vs_crtc),
+	TP_PROTO(int display_id, u32 output_id, struct vs_crtc *vs_crtc),
+	TP_ARGS(display_id, output_id, vs_crtc),
 	TP_STRUCT__entry(
 		__field(int, display_id)
+		__field(u32, output_id)
 		__field(int, frames_pending)
 		__field(int, te_count)
 	),
 	TP_fast_assign(
 		__entry->display_id = display_id;
+		__entry->output_id = output_id;
 		__entry->frames_pending = atomic_read(&vs_crtc->frames_pending);
 		__entry->te_count = atomic_read(&vs_crtc->te_count);
 	),
-	TP_printk("display_id: %d frames_pending: %d te_count: %d",
-		__entry->display_id, __entry->frames_pending, __entry->te_count)
+	TP_printk("display_id: %d output_id: %u frames_pending: %d te_count: %d",
+		__entry->display_id,  __entry->output_id, __entry->frames_pending,
+		__entry->te_count)
 );
-DEFINE_EVENT(display, disp_frame_done_timeout,
-	TP_PROTO(int display_id, struct vs_crtc *vs_crtc),
-	TP_ARGS(display_id, vs_crtc)
-);
+
 DEFINE_EVENT(display, disp_frame_start_timeout,
-	TP_PROTO(int display_id, struct vs_crtc *vs_crtc),
-	TP_ARGS(display_id, vs_crtc)
+	TP_PROTO(int display_id, u32 output_id, struct vs_crtc *vs_crtc),
+	TP_ARGS(display_id, output_id, vs_crtc)
 );
 DEFINE_EVENT(display, disp_frame_start_missing,
-	TP_PROTO(int display_id, struct vs_crtc *vs_crtc),
-	TP_ARGS(display_id, vs_crtc)
+	TP_PROTO(int display_id, u32 output_id, struct vs_crtc *vs_crtc),
+	TP_ARGS(display_id, output_id, vs_crtc)
 );
 DEFINE_EVENT(display, disp_frame_start,
-	TP_PROTO(int display_id, struct vs_crtc *vs_crtc),
-	TP_ARGS(display_id, vs_crtc)
+	TP_PROTO(int display_id, u32 output_id, struct vs_crtc *vs_crtc),
+	TP_ARGS(display_id, output_id, vs_crtc)
 );
 DEFINE_EVENT(display, disp_frame_done,
-	TP_PROTO(int display_id, struct vs_crtc *vs_crtc),
-	TP_ARGS(display_id, vs_crtc)
+	TP_PROTO(int display_id, u32 output_id, struct vs_crtc *vs_crtc),
+	TP_ARGS(display_id, output_id, vs_crtc)
 );
 DEFINE_EVENT(display, disp_commit_done,
-	TP_PROTO(int display_id, struct vs_crtc *vs_crtc),
-	TP_ARGS(display_id, vs_crtc)
+	TP_PROTO(int display_id, u32 output_id, struct vs_crtc *vs_crtc),
+	TP_ARGS(display_id, output_id, vs_crtc)
+);
+
+TRACE_EVENT(disp_frame_done_timeout,
+	TP_PROTO(int display_id, u32 output_id, struct vs_crtc *vs_crtc),
+	TP_ARGS(display_id, output_id, vs_crtc),
+	TP_STRUCT__entry(
+		__field(int, display_id)
+		__field(u32, output_id)
+		__field(int, frames_pending)
+		__field(int, te_count)
+		__field(bool, during_disable)
+	),
+	TP_fast_assign(
+		__entry->display_id = display_id;
+		__entry->output_id = output_id;
+		__entry->frames_pending = atomic_read(&vs_crtc->frames_pending);
+		__entry->te_count = atomic_read(&vs_crtc->te_count);
+		__entry->during_disable = !vs_crtc->base.state->active;
+	),
+	TP_printk("display_id: %d output_id: %d frames_pending: %d te_count: %d%s",
+		__entry->display_id, __entry->output_id, __entry->frames_pending,
+		__entry->te_count, __entry->during_disable ? " during disable" : "")
 );
 
 DECLARE_EVENT_CLASS(disp_be_intr,
@@ -184,7 +206,6 @@ TRACE_EVENT(
 		__field(bool, active_changed)
 		__field(bool, connectors_changed)
 		__field(bool, wb_connectors_updated)
-		__field(bool, skip_update)
 		__field(bool, no_vblank)),
 	TP_fast_assign(
 		__entry->display_id = display_id; __entry->plane_mask = crtc_state->plane_mask;
@@ -195,14 +216,33 @@ TRACE_EVENT(
 		__entry->active_changed = crtc_state->active_changed;
 		__entry->connectors_changed = crtc_state->connectors_changed;
 		__entry->wb_connectors_updated = to_vs_crtc_state(crtc_state)->wb_connectors_updated;
-		__entry->skip_update = to_vs_crtc_state(crtc_state)->skip_update;
 		__entry->no_vblank = crtc_state->no_vblank;),
 	TP_printk(
-		"id:%d skip_update:%d no_vblank:%d plane_mask:%#x [plane_chg:%d plane_upd:%d color_chg:%d mode_chg:%d active_chg:%d conn_chg:%d wb_conn_upd:%d]",
-		__entry->display_id, __entry->skip_update, __entry->no_vblank, __entry->plane_mask,
+		"id:%d no_vblank:%d plane_mask:%#x [plane_chg:%d plane_upd:%d color_chg:%d mode_chg:%d active_chg:%d conn_chg:%d wb_conn_upd:%d]",
+		__entry->display_id, __entry->no_vblank, __entry->plane_mask,
 		__entry->planes_changed, __entry->planes_updated, __entry->color_mgmt_changed,
 		__entry->mode_changed, __entry->active_changed, __entry->connectors_changed,
 		__entry->wb_connectors_updated));
+
+TRACE_EVENT(disp_commit_skip,
+	TP_PROTO(int display_id, const struct drm_crtc_state *crtc_state),
+	TP_ARGS(display_id, crtc_state),
+	TP_STRUCT__entry(
+		__field(int, display_id)
+		__field(u32, plane_mask)
+		__field(bool, active_changed)
+		__field(bool, no_vblank)
+	),
+	TP_fast_assign(
+		__entry->display_id = display_id;
+		__entry->plane_mask = crtc_state->plane_mask;
+		__entry->active_changed = crtc_state->active_changed;
+		__entry->no_vblank = crtc_state->no_vblank;
+	),
+	TP_printk("id:%d no_vblank:%d plane_mask:%#x [active_chg:%d]",
+		  __entry->display_id, __entry->no_vblank,
+		  __entry->plane_mask, __entry->active_changed)
+);
 
 DECLARE_EVENT_CLASS(display_enable_irqs,
 	TP_PROTO(int output_id, int enable),

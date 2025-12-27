@@ -47,6 +47,110 @@ enum gs_mipi_sync_mode {
 	GS_MIPI_CMD_SYNC_PWM_MODE = BIT(6),
 };
 
+/**
+ * enum gs_panel_err - errors read from panel DDIC
+ *
+ * Any error bits read from the panel ddic that might indicate the need for
+ * action on the part of the connector or DPU (such as a reset operation) can be
+ * added here to be represented in a bitmap shared with those components.
+ *
+ * The first 16 bits (through GS_PANEL_ERR_DSI_PROTOCOL_VIOLATION) are set by
+ * the DSI-2 protocol standard, and should remain in their respective bit
+ * positions.
+ *
+ * This enum can support, at maximum, 64 values, such that it fits inside a drm
+ * bitmap property.
+ *
+ * @GS_PANEL_ERR_DSI_SOT: Start of Transmission Error
+ * @GS_PANEL_ERR_DSI_SOT_SYNC: SoT leader sequence corrupted such that proper
+ *			       synchronization cannot be expected
+ * @GS_PANEL_ERR_DSI_EOT_SYNC: Last byte in End of Transmission does not match a
+ *			       byte boundary
+ * @GS_PANEL_ERR_DSI_ESCAPE_MODE_ENTRY: Link began an Escape Mode sequence, but
+ *					the Escape Mode entry command is not
+ *					recognized by the receiving PHY lane
+ * @GS_PANEL_ERR_DSI_LP_XMIT_SYNC: Data not synchronized to byte boundary at end
+ *				   of Low Power Transmission
+ * @GS_PANEL_ERR_DSI_HS_RX_TIMEOUT: Amount of time peripheral stayed in High
+ *				    Speed Transmission mode was longer than
+ *				    maximum expected length
+ * @GS_PANEL_ERR_DSI_FALSE_CONTROL: LP Request or HS Request not followed by
+ *				    expected command sequence
+ * @GS_PANEL_ERR_DSI_DATA_LANE_CONTENTION: Contention detected in DSI link
+ * @GS_PANEL_ERR_DSI_ECC_SINGLE: ECC check on packet header detected and
+ *				 corrected a single-bit error
+ * @GS_PANEL_ERR_DSI_ECC_MULTI: ECC check on packet header detected a
+ *				multi-bit (uncorrectable) error
+ * @GS_PANEL_ERR_DSI_CHECKSUM: Packet payload checksum error (when CRC used)
+ * @GS_PANEL_ERR_DSI_DATA_TYPE: Invalid or unrecognized data type was used
+ * @GS_PANEL_ERR_DSI_VC_ID_INVALID: Packet Header contains an invalid Virtual
+ *				    Channel Identifier
+ * @GS_PANEL_ERR_DSI_XMIT_LEN: Packet Header Word Count does not match the
+ *			       received payload length
+ * @GS_PANEL_ERR_DSI_RESERVED: Reserved error bit, or error in a reserved field
+ * @GS_PANEL_ERR_DSI_PROTOCOL_VIOLATION: A general DSI protocol rule was
+ *					 encountered that was not covered by
+ *					 other DSI error flags.
+ * @GS_PANEL_ERR_DSI_GENERAL: Any DSI errors were encountered
+ * @GS_PANEL_ERR_VLIN1: A panel error was encountered relating to VLIN1
+ * @GS_PANEL_ERR_TE: A panel error was encountered relating to TE
+ * @GS_PANEL_ERR_PPS: The panel's PPS settings did not match expected values
+ * @GS_PANEL_ERR_CHECKSUM: A general checksum error (ex. see: RDDSDR)
+ * @GS_PANEL_ERR_ESD: ESD detected by panel DDIC
+ * @GS_PANEL_ERR_DISP_INVALID: Panel detects invalid display state
+ * @GS_PANEL_ERR_VGH: A panel error was encountered relating to VGH
+ */
+enum gs_panel_err {
+	GS_PANEL_ERR_DSI_SOT = 0,
+	GS_PANEL_ERR_DSI_SOT_SYNC,
+	GS_PANEL_ERR_DSI_EOT_SYNC,
+	GS_PANEL_ERR_DSI_ESCAPE_MODE_ENTRY,
+	GS_PANEL_ERR_DSI_LP_XMIT_SYNC,
+	GS_PANEL_ERR_DSI_HS_RX_TIMEOUT,
+	GS_PANEL_ERR_DSI_FALSE_CONTROL,
+	GS_PANEL_ERR_DSI_DATA_LANE_CONTENTION,
+	GS_PANEL_ERR_DSI_ECC_SINGLE,
+	GS_PANEL_ERR_DSI_ECC_MULTI,
+	GS_PANEL_ERR_DSI_CHECKSUM,
+	GS_PANEL_ERR_DSI_DATA_TYPE,
+	GS_PANEL_ERR_DSI_VC_ID_INVALID,
+	GS_PANEL_ERR_DSI_XMIT_LEN,
+	GS_PANEL_ERR_DSI_RESERVED,
+	GS_PANEL_ERR_DSI_PROTOCOL_VIOLATION,
+	GS_PANEL_ERR_DSI_GENERAL,
+	GS_PANEL_ERR_VLIN1,
+	GS_PANEL_ERR_TE,
+	GS_PANEL_ERR_PPS,
+	GS_PANEL_ERR_CHECKSUM,
+	GS_PANEL_ERR_ESD,
+	GS_PANEL_ERR_DISP_INVALID,
+	GS_PANEL_ERR_VGH,
+	/** @GS_PANEL_ERR_MAX: maximum number of panel err enum values */
+	GS_PANEL_ERR_MAX,
+};
+
+/**
+ * enum gs_dsi_err - Errors read from DSI driver
+ *
+ * In particular, these relate to the recommended driver behavior resulting from
+ * whatever the read error may be.
+ *
+ * These are designed to be stored in a bitmap that fits within a u64,
+ * such that they are compatible with a drm bitmap property.
+ */
+enum gs_dsi_err {
+	/** @GS_DSI_ERR_SYS_RSTN: system reset needed */
+	GS_DSI_ERR_SYS_RSTN = 0,
+	/** @GS_DSI_ERR_PHY_RSTN: PHY reset needed */
+	GS_DSI_ERR_PHY_RSTN,
+	/** @GS_DSI_ERR_IPI_RSTN: IPI reset needed */
+	GS_DSI_ERR_IPI_RSTN,
+	/** @GS_DSI_ERR_HARD_RSTN: Hard reset needed */
+	GS_DSI_ERR_HARD_RSTN,
+	/** @GS_DSI_ERR_MAX: Max value for enum (or bitmap position) */
+	GS_DSI_ERR_MAX,
+};
+
 struct gs_mipi_clks {
 	u32 clks[MAX_ALLOWED_MIPI_CLOCK_NUM];
 };
@@ -105,8 +209,11 @@ struct gs_drm_connector_properties {
 	struct drm_property *refresh_ctl_insert_frames;
 	struct drm_property *refresh_ctl_min_refresh_rate;
 	struct drm_property *refresh_ctl_auto_frame_enabled;
+	struct drm_property *refresh_ctl_early_exit_enabled;
 	struct drm_property *pwm_mode;
 	struct drm_property *panel_power_state;
+	struct drm_property *dsi_errors;
+	struct drm_property *panel_errors;
 };
 
 struct gs_display_partial {
@@ -252,11 +359,20 @@ struct gs_drm_connector_state {
 	/** @auto_fi: Whether panel is doing automatic frame insertion */
 	bool auto_fi;
 
+	/** @early_exit: Whether panel has early exit enabled */
+	bool early_exit;
+
 	/** @pwm_mode: panel PWM mode */
 	enum gs_pwm_mode pwm_mode;
 
 	/** @panel_power_state: panel's current power state */
 	enum gs_panel_power_state panel_power_state;
+
+	/** @dsi_errors: Errors read from DSI driver directly */
+	DECLARE_BITMAP(dsi_errors, GS_DSI_ERR_MAX);
+
+	/** @panel_errors: Errors read from the panel DDIC */
+	DECLARE_BITMAP(panel_errors, GS_PANEL_ERR_MAX);
 
 	/**
 	 * @frame_start_ts: the most recent frame transfer's start time

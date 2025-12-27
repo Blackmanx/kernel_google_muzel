@@ -77,6 +77,8 @@ static void vs_plane_reset(struct drm_plane *plane)
 	/*reset custom properties */
 	bitmap_fill(state->changed, VS_PLANE_CHANGED_MAX);
 	state->blend_id = vs_plane->id;
+	state->dma_sram_size = 0;
+	state->scl_sram_size = 0;
 
 	for (i = 0; i < vs_plane->properties.num; i++) {
 		state->drm_states[i].proto = vs_plane->properties.items[i].proto;
@@ -539,6 +541,8 @@ static void vs_plane_atomic_print_state(struct drm_printer *p,
 		drm_printf(p, "\t%s=%d\n", plane->alpha_property->name, plane_state->alpha);
 
 	drm_printf(p, "\tblend_id = %u\n", vs_plane_state->blend_id);
+	drm_printf(p, "\tdma_sram_size = %u\n", vs_plane_state->dma_sram_size);
+	drm_printf(p, "\tscl_sram_size = %u\n", vs_plane_state->scl_sram_size);
 
 	if (vs_plane->ext_layer_prop)
 		drm_printf(p, "\t%s=%d\n", vs_plane->ext_layer_prop->name,
@@ -682,7 +686,7 @@ static int vs_plane_create_hw_capability_blob(struct drm_device *drm_dev, struct
 		return -EINVAL;
 
 	blob = drm_property_create_blob(drm_dev, sizeof(struct drm_vs_plane_hw_caps), 0);
-	if (!blob)
+	if (IS_ERR(blob))
 		return -EINVAL;
 
 	hw_caps = blob->data;

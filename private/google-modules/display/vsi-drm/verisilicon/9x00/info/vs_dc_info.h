@@ -121,6 +121,25 @@ enum dc_hw_wb_id {
 	HW_WB_NUM,
 };
 
+/**
+ * enum dc_hw_output_id - Hardware output interface IDs
+ * @HW_OUTIF_0: Output interface 0, typically DSI0.
+ * @HW_OUTIF_1: Output interface 1, typically DSI1.
+ * @HW_OUTIF_2: Output interface 2, typically DP0.
+ * @HW_OUTIF_3: Output interface 3, typically DP1.
+ * @HW_OUTIF_4: Output interface for Blender Write-back. This is an artificial
+ *            interface ID used for blender write-back operations.
+ * @HW_OUTIF_NUM: The number of hardware output interfaces.
+ */
+enum dc_hw_output_id {
+	HW_OUTIF_0,
+	HW_OUTIF_1,
+	HW_OUTIF_2,
+	HW_OUTIF_3,
+	HW_OUTIF_4,
+	HW_OUTIF_NUM,
+};
+
 struct vs_dc_urgent_cmd_config {
 	u32 h_margin_pct;
 	u32 v_margin_pct;
@@ -174,6 +193,9 @@ struct vs_plane_info {
 
 	u8 max_uv_phase; /* for uv up-sampling */
 
+	u32 dma_sram_max_size_kb;
+	u32 scl_sram_max_size_kb;
+
 	u8 axi_id;
 	u8 outstanding_number;
 
@@ -197,6 +219,7 @@ struct vs_plane_info {
 	u32 sbs : 1;
 	u32 line_padding : 1;
 	u32 rcd_plane : 1;
+	u32 data_extend : 1;
 };
 
 struct vs_display_info {
@@ -226,7 +249,8 @@ struct vs_display_info {
 	u32 ccm_non_linear : 1;
 	u32 ccm_linear : 1;
 	u32 cgm_lut : 1;
-	u32 lut_roi : 1;
+	u32 lut_roi0 : 1;
+	u32 lut_roi1 : 1;
 	u32 blur : 1;
 	u32 sec_roi : 1;
 	u32 data_mode : 1;
@@ -315,6 +339,7 @@ struct vs_dc_info {
 
 	/* Regdump Skip Registers */
 	const struct regmap_access_table *dump_reg_access_table;
+	const struct regmap_access_table *dump_reg_access_table_secure;
 
 	/* Urgent configuration */
 	const struct vs_dc_urgent_cmd_config *urgent_cmd_config;

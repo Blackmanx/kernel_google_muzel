@@ -406,6 +406,16 @@ enum drm_vs_power_off_mode {
 	VS_POWER_OFF_MODE_COUNT,
 };
 
+/**
+ * enum drm_vs_task_fence_ops - list of task fence operations
+ * VS_TASK_FENCE_CREATE: create a new fence
+ * VS_TASK_FENCE_SIGNAL: signal the fence with an error code
+ */
+enum drm_vs_task_fence_ops {
+	VS_TASK_FENCE_CREATE = 0,
+	VS_TASK_FENCE_SIGNAL = 1,
+};
+
 struct drm_vs_alpha_data_extend {
 	__u32 alpha_extend_value; /* alpha3[31:24], alpha2[23:16], alpha1[15:8], alpha0[7:0] */
 };
@@ -548,6 +558,12 @@ struct drm_vs_color {
 	__u32 r;
 	__u32 g;
 	__u32 b;
+};
+
+struct drm_vs_color_rgb16 {
+	__u16 r;
+	__u16 g;
+	__u16 b;
 };
 
 struct drm_vs_spliter {
@@ -1249,6 +1265,12 @@ struct drm_vs_crtc_hw_caps {
 	__s32 max_scale;
 };
 
+struct drm_vs_task_fence_arg {
+	enum drm_vs_task_fence_ops op;
+	int fd;
+	int err;
+};
+
 #define DRM_VS_GET_FBC_OFFSET 0x00
 #define DRM_VS_SW_RESET 0x01
 #define DRM_VS_GEM_QUERY 0x04
@@ -1256,6 +1278,7 @@ struct drm_vs_crtc_hw_caps {
 #define DRM_VS_GET_HW_CAP 0x07
 #define DRM_VS_GET_LTM_HIST 0x08
 #define DRM_VS_GET_HIST_BINS 0x010
+#define DRM_VS_TASK_FENCE 0x11
 
 #define DRM_IOCTL_VS_GET_FBC_OFFSET \
 	DRM_IOWR(DRM_COMMAND_BASE + DRM_VS_GET_FBC_OFFSET, struct drm_vs_pvric_offset)
@@ -1270,5 +1293,7 @@ struct drm_vs_crtc_hw_caps {
 	DRM_IOWR(DRM_COMMAND_BASE + DRM_VS_GET_HIST_BINS, struct drm_vs_hist_bins_query)
 #define DRM_IOCTL_VS_GET_LTM_HIST \
 	DRM_IOWR(DRM_COMMAND_BASE + DRM_VS_GET_LTM_HIST, struct drm_vs_ltm_histogram_data)
+#define DRM_IOCTL_VS_TASK_FENCE \
+	DRM_IOWR(DRM_COMMAND_BASE + DRM_VS_TASK_FENCE, struct drm_vs_task_fence_arg)
 
 #endif /* __VS_DRM_H__ */

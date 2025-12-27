@@ -42,6 +42,25 @@ struct regmap_field {
 	unsigned int id_offset;
 };
 
+#define regmap_range_sized(addr, size) regmap_reg_range((addr), (addr) + (size) - 1)
+static const struct regmap_range cdphy_dump_reg_allowed[] = {
+	regmap_range_sized(0x3000, 0x6820), /*cdphy_mem_map: PPI_STARTUP_RW_COMMON_DPHY_0*/
+	regmap_range_sized(0xC000, 0x2470), /*cdphy_mem_map: CORE_DIG_DLANE_0_RW_CFG_0*/
+	regmap_range_sized(0x10000, 0x1020), /*cdphy_mem_map: PPI_RW_CPHY_TRIO0_LBERT_0*/
+	regmap_range_sized(0x14000, 0x1470), /*cdphy_mem_map: CORE_DIG_CLANE_0_RW_CFG_0*/
+};
+static const struct regmap_access_table cdphy_dump_reg_access_table = {
+	.yes_ranges = cdphy_dump_reg_allowed,
+	.n_yes_ranges = ARRAY_SIZE(cdphy_dump_reg_allowed),
+};
+static const struct regmap_range apb_dump_reg_allowed[] = {
+	regmap_range_sized(0x0, 0x50), /*apb_regbank: PLL_CFG0*/
+};
+static const struct regmap_access_table apb_dump_reg_access_table = {
+	.yes_ranges = apb_dump_reg_allowed,
+	.n_yes_ranges = ARRAY_SIZE(apb_dump_reg_allowed),
+};
+
 #define REGISTER(a) \
 	{ .name = #a, .reg = cdphy_g301->field_##a }
 static inline __maybe_unused void dw_cdphy_write_base(u32 val, void __iomem *mem, u32 reg)
@@ -58,7 +77,7 @@ static inline __maybe_unused void dw_cdphy_write_u0_apb_regbank(u32 val, void __
 
 static inline u32 dw_cdphy_read_reg(struct regmap *regm, u32 reg)
 {
-	u32 val;
+	u32 val = 0;
 
 	regmap_read(regm, reg, &val);
 	//pr_info("$> %s: reg=0x%x, val=%u\n", __func__, reg, val);
@@ -80,7 +99,7 @@ static inline void dw_cdphy_write_field(struct regmap_field *reg_field, u32 val)
 
 static int dw_mipi_debugfs_u32_get(void *data, u64 *val)
 {
-	u32 tmp;
+	u32 tmp = 0;
 	struct regmap_field *reg_field = (struct regmap_field *)data;
 	struct device *dev;
 
@@ -159,8 +178,10 @@ static void dw_mipi_debugfs_create_x32(const struct debugfs_entries entries[],
 #define INIT_FIELD_CFG(f, conf, regs) ({					\
 		cdphy_g301->f = devm_regmap_field_alloc(dev, cdphy_g301->regs,\
 							variant->conf);	\
-		if (IS_ERR(cdphy_g301->f))					\
-			dev_warn(dev, "Ignoring regmap field"#f "\n"); })
+		if (IS_ERR(cdphy_g301->f)) {					\
+			dev_err(dev, "Failed alloc regmap field"#f "\n");\
+			return PTR_ERR(cdphy_g301->f);				\
+		}})
 
 static const struct regmap_config dw_mipi_cdphy_base_regmap_cfg = {
 	.name = "dw_mipi_cdphy_base",
@@ -1028,7 +1049,8 @@ static int dw_cdphy_regmap_fields_init(struct dw_mipi_cdphy_g301 *cdphy_g301)
 	do {                                                                                  \
 		if (dw_cdphy_preset_add_item(&cdphy_g301->preset_list, dev, #item,            \
 					     cdphy_g301->field_##item, apply_timing)) {       \
-			dev_warn(dev, "%s: failed to add preset item %s\n", __func__, #item); \
+			dev_err(dev, "%s: failed to add preset item %s\n", __func__, #item);  \
+			return -ENOMEM;                                                       \
 		}                                                                             \
 	} while (0)
 
@@ -1064,7 +1086,7 @@ static int dw_cdphy_preset_config_init(struct dw_mipi_cdphy_g301 *cdphy_g301)
 	dev = &cdphy_g301->cdphy->pdev->dev;
 
 	preset_dir = debugfs_create_dir("preset", cdphy_g301->cdphy->debugfs);
-	if (!preset_dir) {
+	if (IS_ERR_OR_NULL(preset_dir)) {
 		pr_err("%s failed to create preset folder\n", __func__);
 		return -EIO;
 	}
@@ -1222,11 +1244,10 @@ static void dw_cdphy_common_config(struct dw_mipi_cdphy_g301 *cdphy_g301)
 
 static void dw_cdphy_specific_dphy_cfg(struct dw_mipi_cdphy_g301 *cdphy_g301)
 {
-	u32 val;
+	u32 val = 6; /* Default value for LP_0_TTAGO_REG */
 	struct dphy_hs_regs *hs_regs = &cdphy_g301->hs_config.dphy_regs;
 
 	/* CORE_DIG_DLANE_?_RW_LP_0 -> LP_0_TTAGO_REG */
-	val = 6;
 	dw_cdphy_write_field(cdphy_g301->field_core_dig_dlane_0_rw_lp_0_lp_0_ttago_reg, val);
 	dw_cdphy_write_field(cdphy_g301->field_core_dig_dlane_1_rw_lp_0_lp_0_ttago_reg, val);
 	dw_cdphy_write_field(cdphy_g301->field_core_dig_dlane_2_rw_lp_0_lp_0_ttago_reg, val);
@@ -1420,11 +1441,10 @@ static void dw_cdphy_specific_dphy_cfg(struct dw_mipi_cdphy_g301 *cdphy_g301)
 
 static void dw_cdphy_specific_cphy_cfg(struct dw_mipi_cdphy_g301 *cdphy_g301)
 {
-	u32 val;
+	u32 val = 6; /* Default value for LP_0_TTAGO_REG */
 	struct cphy_hs_regs *hs_regs = &cdphy_g301->hs_config.cphy_regs;
 
 	/* CORE_DIG_CLANE_?_RW_LP_0 -> LP_0_TTAGO_REG */
-	val = 6;
 	dw_cdphy_write_field(cdphy_g301->field_core_dig_clane_0_rw_lp_0_lp_0_ttago_reg, val);
 	dw_cdphy_write_field(cdphy_g301->field_core_dig_clane_1_rw_lp_0_lp_0_ttago_reg, val);
 	dw_cdphy_write_field(cdphy_g301->field_core_dig_clane_2_rw_lp_0_lp_0_ttago_reg, val);
@@ -1599,7 +1619,7 @@ static void dw_cdphy_specific_cphy_cfg(struct dw_mipi_cdphy_g301 *cdphy_g301)
 
 static void dw_cdphy_extra_config(struct dw_mipi_cdphy_g301 *cdphy_g301)
 {
-	u32 val;
+	u32 val = 1; /* Default value for LP_0_ITMINRX_REG */
 
 	/* CORE_DIG_IOCTRL_RW_AFE_LANE2_CTRL_2_7 -> OA_LANE2_LPRX_LP_PON_OVR_EN */
 	dw_cdphy_write_field(cdphy_g301->field_core_dig_ioctrl_rw_afe_lane2_ctrl_2_7_oa_lane2_lprx_lp_pon_ovr_en,
@@ -1658,7 +1678,6 @@ static void dw_cdphy_extra_config(struct dw_mipi_cdphy_g301 *cdphy_g301)
 			     0);
 
 	/* CORE_DIG_DLANE_?_RW_LP_0 -> LP_0_ITMINRX_REG */
-	val = 1;
 	dw_cdphy_write_field(cdphy_g301->field_core_dig_dlane_0_rw_lp_0_lp_0_itminrx_reg, val);
 	dw_cdphy_write_field(cdphy_g301->field_core_dig_dlane_1_rw_lp_0_lp_0_itminrx_reg, val);
 	dw_cdphy_write_field(cdphy_g301->field_core_dig_dlane_2_rw_lp_0_lp_0_itminrx_reg, val);
@@ -1666,7 +1685,6 @@ static void dw_cdphy_extra_config(struct dw_mipi_cdphy_g301 *cdphy_g301)
 	dw_cdphy_write_field(cdphy_g301->field_core_dig_dlane_clk_rw_lp_0_lp_0_itminrx_reg, val);
 
 	/* CORE_DIG_CLANE_?_RW_LP_0 -> LP_0_ITMINRX_REG */
-	val = 1;
 	dw_cdphy_write_field(cdphy_g301->field_core_dig_clane_0_rw_lp_0_lp_0_itminrx_reg, val);
 	dw_cdphy_write_field(cdphy_g301->field_core_dig_clane_1_rw_lp_0_lp_0_itminrx_reg, val);
 	dw_cdphy_write_field(cdphy_g301->field_core_dig_clane_2_rw_lp_0_lp_0_itminrx_reg, val);
@@ -1685,7 +1703,7 @@ static void dw_cdphy_extra_config(struct dw_mipi_cdphy_g301 *cdphy_g301)
 
 static void dw_cdphy_pll_config(struct dw_mipi_cdphy_g301 *cdphy_g301)
 {
-	u32 val;
+	u32 val = 0;
 	struct pll_config *pll_config = &cdphy_g301->hs_config.pll_config;
 
 	/* TC_DIG_TC_REGISTERS_RW_PLL_ANA_CTRL_0  -> ATB_SENSE_SEL_R */
@@ -1887,7 +1905,7 @@ static int dw_cdphy_set_pll(struct phy *phy, int enable)
 		//dw_cdphy_write_field(cdphy_g301->field_phy_startup_cfg3_reg, 0x0);
 
 		ret = readl_poll_timeout(cdphy_g301->u0_apb_regbank + PHY_STS, val, val & PLL_LOCK,
-					 1000, PHY_STATUS_TIMEOUT_US);
+					 50, PHY_STATUS_TIMEOUT_US);
 		if (ret) {
 			/* TODO: dump corresponding CSR */
 			dev_err(&cdphy->phy->dev, "%s: Failed to wait PHY Lock\n", __func__);
@@ -2054,7 +2072,7 @@ static int dw_dphy_configure_g301(struct phy *phy, union phy_configure_opts *opt
 
 	/* Step 10 */
 	ret = readl_poll_timeout(cdphy_g301->u0_apb_regbank + PHY_STS, val,
-				 val & PHY_READY, 1000, PHY_STATUS_TIMEOUT_US);
+				 val & PHY_READY, 50, PHY_STATUS_TIMEOUT_US);
 	if (ret) {
 		dev_err(&cdphy->phy->dev, "Failed to wait PHY Lock, step 10.b\n");
 		return ret;
@@ -2086,7 +2104,7 @@ static int dw_dphy_init_g301(struct phy *phy)
 {
 	struct dw_mipi_cdphy *cdphy = phy_get_drvdata(phy);
 	struct dw_mipi_cdphy_g301 *cdphy_g301 = cdphy->cdphy_priv_data;
-	u32 val;
+	u32 val = 0;
 
 	dev_info(&cdphy->phy->dev, "Init CD-PHY G301\n");
 
@@ -2526,11 +2544,13 @@ static int reg_dump_show(struct seq_file *s, void *data)
 		return ret;
 	}
 
-	ret_dump = gs_reg_dump("CDPHY-TX", cdphy_g301->base, 0, cdphy_g301->tx_reg_size, &p);
+	ret_dump = gs_reg_dump_with_skips("CDPHY-TX", cdphy_g301->base, 0, cdphy_g301->tx_reg_size,
+					  &p, &cdphy_dump_reg_access_table);
 	if (ret_dump)
 		goto out;
-	ret_dump = gs_reg_dump("U0-APB", cdphy_g301->u0_apb_regbank, 0, cdphy_g301->u0_apb_reg_size,
-			       &p);
+	ret_dump = gs_reg_dump_with_skips("U0-APB", cdphy_g301->u0_apb_regbank, 0,
+					  cdphy_g301->u0_apb_reg_size, &p,
+					  &apb_dump_reg_access_table);
 
 out:
 	ret = pm_runtime_put_sync(dev);

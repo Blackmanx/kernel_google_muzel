@@ -88,6 +88,8 @@ struct vs_plane_state {
 
 	struct vs_drm_property_state drm_states[VS_DC_MAX_PROPERTY_NUM];
 	u32 blend_id;
+	u32 dma_sram_size;
+	u32 scl_sram_size;
 };
 
 struct vs_plane {

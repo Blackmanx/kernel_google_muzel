@@ -64,6 +64,58 @@ VS_DC_ARRAY_PROPERTY_PROTO(prior_3d_lut_proto, "PRIOR_3DLUT", struct drm_vs_colo
 			   VS_MAX_PRIOR_3DLUT_SIZE, false, prior_3d_lut_check, NULL,
 			   prior_3d_lut_config_hw);
 
+static bool _3d_lut_check_rgb16(const struct dc_hw *hw, const struct drm_vs_color_rgb16 *lut,
+				u32 size, u32 lut_bit)
+{
+	u32 i;
+
+	for (i = 0; i < size; i++) {
+		if ((lut[i].r >> lut_bit) || (lut[i].g >> lut_bit) || (lut[i].b >> lut_bit)) {
+			dev_err(hw->dev,
+				"%s: The entry of 3D LUT %u(%u, %u, %u) over valid bit(%u).\n",
+				__func__, i, lut[i].r, lut[i].g, lut[i].g, lut_bit);
+			return false;
+		}
+	}
+	return true;
+}
+
+static bool prior_3d_lut_check_rgb16(const struct dc_hw *hw, u8 hw_id, const void *data, u32 size,
+			       const void *obj_state)
+{
+	const struct vs_dc_info *info = hw->info;
+
+	return _3d_lut_check_rgb16(hw, data, VS_MAX_PRIOR_3DLUT_SIZE, info->cgm_lut_bits);
+}
+
+static bool prior_3d_lut_config_hw_rgb16(struct dc_hw *hw, u8 hw_id, bool enable, const void *data)
+{
+	const u32 reg_index = VS_SET_PANEL01_FIELD(DCREG_PANEL, hw_id, LUT3D_INDEX_Address);
+	const u32 reg_red = VS_SET_PANEL01_FIELD(DCREG_SH_PANEL, hw_id, LUT3D_RED_DATA_Address);
+	const u32 reg_green = VS_SET_PANEL01_FIELD(DCREG_SH_PANEL, hw_id, LUT3D_GREEN_DATA_Address);
+	const u32 reg_blue = VS_SET_PANEL01_FIELD(DCREG_SH_PANEL, hw_id, LUT3D_BLUE_DATA_Address);
+	const struct drm_vs_color_rgb16 *lut = data;
+	u32 i;
+
+	UPDATE_PANEL_CONFIG(hw, hw_id, LUT3D, enable);
+	if (enable) {
+		/* set the index start from 0 */
+		dc_write(hw, reg_index, 0);
+
+		/* coef data of RED/GREEN/BLUE channel*/
+		for (i = 0; i < VS_MAX_PRIOR_3DLUT_SIZE; i++) {
+			dc_write_relaxed(hw, reg_red, lut[i].r);
+			dc_write_relaxed(hw, reg_green, lut[i].g);
+			dc_write_relaxed(hw, reg_blue, lut[i].b);
+		}
+	}
+	return true;
+}
+
+VS_DC_ARRAY_PROPERTY_PROTO(prior_3d_lut_proto_rgb16, "PRIOR_3DLUT_RGB16", struct drm_vs_color_rgb16,
+			   VS_MAX_PRIOR_3DLUT_SIZE, false, prior_3d_lut_check_rgb16, NULL,
+			   prior_3d_lut_config_hw_rgb16);
+
 static bool roi_3d_lut_check(const struct dc_hw *hw, u8 hw_id, const void *data, u32 size,
 			     const void *obj_state)
 {
@@ -126,9 +178,13 @@ VS_DC_BLOB_PROPERTY_PROTO(roi0_3d_lut_proto, "ROI0_3DLUT", struct drm_vs_roi_lut
 bool vs_dc_register_display_3d_lut_states(struct vs_dc_property_state_group *states,
 					  const struct vs_display_info *info)
 {
+	/* TODO: b/441508921 remove the 32bit rgba 3d lut after user space has switched rgb16 */
 	if (info->cgm_lut)
 		__ERR_CHECK(vs_dc_property_register_state(states, &prior_3d_lut_proto), on_error);
-	if (info->lut_roi)
+	if (info->cgm_lut)
+		__ERR_CHECK(vs_dc_property_register_state(states, &prior_3d_lut_proto_rgb16),
+			    on_error);
+	if (info->lut_roi0)
 		__ERR_CHECK(vs_dc_property_register_state(states, &roi0_3d_lut_proto), on_error);
 
 	return true;

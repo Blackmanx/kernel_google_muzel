@@ -3,6 +3,7 @@
  * Copyright (C) 2025 Google, LLC.
  */
 
+#include <linux/io.h>
 #include <linux/types.h>
 
 #include <gs_drm/gs_reg_dump.h>
@@ -29,13 +30,14 @@ inline void sc_write(struct sc_hw *hw, u32 reg, u32 value)
 	writel(value, hw->reg_base + reg - G2D_IP_OFFSET);
 }
 
-static const struct sc_hw_funcs hw_func = {
-	.plane = plane_commit,
-};
-
 void sc_hw_commit(struct sc_hw *hw, u8 display_id)
 {
-	hw->func->plane(hw, display_id);
+	plane_commit(hw, display_id);
+}
+
+void sc_hw_wb_commit(struct sc_hw *hw, u8 display_id)
+{
+	wb_hw_commit(hw, display_id);
 }
 
 void sc_hw_start_trigger(struct sc_hw *hw, u8 display_id)
@@ -69,8 +71,7 @@ void sc_hw_update_wb_fb(struct sc_hw *hw, u8 id, struct sc_hw_fb *fb)
 		if (fb->enable == false)
 			wb->fb.enable = false;
 		else
-			memcpy(&wb->fb, fb, sizeof(*fb) - sizeof(fb->dirty));
-		wb->fb.dirty = true;
+			memcpy(&wb->fb, fb, sizeof(*fb));
 
 		dev_dbg(hw->dev, "%s: plane fb enable: %d, writeback fb enable: %d, id %d",
 			__func__, fb->enable, wb->fb.enable, id);
@@ -85,8 +86,7 @@ void sc_hw_update_plane(struct sc_hw *hw, u8 id, struct sc_hw_fb *fb)
 		if (fb->enable == false)
 			plane->fb.enable = false;
 		else
-			memcpy(&plane->fb, fb, sizeof(*fb) - sizeof(fb->dirty));
-		plane->fb.dirty = true;
+			memcpy(&plane->fb, fb, sizeof(*fb));
 	}
 }
 
@@ -95,8 +95,7 @@ void sc_hw_update_plane_roi(struct sc_hw *hw, u8 id, struct sc_hw_roi *roi)
 	struct sc_hw_plane *plane = &hw->plane[id];
 
 	if (plane && roi) {
-		memcpy(&plane->roi, roi, sizeof(struct sc_hw_roi) - sizeof(roi->dirty));
-		plane->roi.dirty = true;
+		memcpy(&plane->roi, roi, sizeof(struct sc_hw_roi));
 		plane->roi.enable = true;
 	}
 }
@@ -127,7 +126,6 @@ void sc_hw_restore_state(struct sc_hw *hw)
 
 void sc_hw_init(struct sc_hw *hw, struct device *dev)
 {
-	hw->func = &hw_func;
 	hw->dev = dev;
 
 	sc_hw_restore_state(hw);

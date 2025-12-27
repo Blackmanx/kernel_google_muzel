@@ -12,6 +12,8 @@
 #include "regmaps/ctrl_fields.h"
 #include "teeif.h"
 
+#define MAX_LINK_FAILURE_RETRY_CNT (5)
+
 /* TODO(jisshin): implement Widevine(DRM) & NS(Secure Layer) side trigger to
  *                reduce max_ver for dynamic trigger impl.
  */
@@ -113,8 +115,6 @@ static const struct attribute_group hdcp_group = {
 
 static void hdcp_worker(struct work_struct *work)
 {
-	int err;
-	uint32_t requested_lvl;
 	int ret = EIO;
 	ktime_t delta;
 	bool hdcp2_capable = false;
@@ -130,12 +130,6 @@ static void hdcp_worker(struct work_struct *work)
 	if (state != HDCP_AUTH_RESET && state != HDCP_AUTH_IDLE) {
 		dptx_info(dptx, "HDCP auth is skipped during %s state\n",
 			get_auth_state_str(state));
-		return;
-	}
-
-	err = hdcp_tee_get_cp_level(dptx, &requested_lvl);
-	if (!err && !requested_lvl && max_ver <= 2) {
-		dptx_info(dptx, "CP not requested\n");
 		return;
 	}
 
@@ -198,7 +192,12 @@ int handle_cp_irq_set(struct dptx *dptx)
 		if (bstatus & (DP_BSTATUS_LINK_FAILURE | DP_BSTATUS_REAUTH_REQ)) {
 			dptx_err(dptx, "Re-auth due to BSTAT(%d)\n", bstatus);
 			hdcp_set_auth_state(dptx, HDCP_AUTH_IDLE);
-			schedule_delayed_work(&dptx->hdcp_dev.hdcp_work, 0);
+			if (dptx->hdcp_dev.link_failure_cnt < MAX_LINK_FAILURE_RETRY_CNT) {
+				dptx->hdcp_dev.link_failure_cnt++;
+				schedule_delayed_work(&dptx->hdcp_dev.hdcp_work, 0);
+			} else {
+				dptx_err(dptx, "Give up on HDCP during this session\n");
+			}
 		}
 		break;
 	default:
@@ -227,6 +226,11 @@ void dptx_hdcp_disconnect(struct dptx *dptx)
 	cancel_delayed_work_sync(&dptx->hdcp_dev.hdcp_work);
 	dptx->hdcp_dev.connect_time = 0;
 	dptx->hdcp_dev.is_dpcd12_plus = 0;
+}
+
+void dptx_hdcp_physical_disconnect(struct dptx *dptx)
+{
+	dptx->hdcp_dev.link_failure_cnt = 0;
 }
 
 int dptx_hdcp_probe(struct dptx *dptx)

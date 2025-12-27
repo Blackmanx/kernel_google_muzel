@@ -21,9 +21,11 @@
 #include "vs_gem.h"
 #include "vs_crtc.h"
 #include "vs_dc_info.h"
+#include "vs_dc.h"
 #include "vs_writeback.h"
 #include "vs_dc_drm_property.h"
 #include "vs_trace.h"
+#include "trace/dpu_trace.h"
 
 static int wb_connector_get_modes(struct drm_connector *connector)
 {
@@ -103,6 +105,14 @@ static int wb_connector_prepare_writeback_job(struct drm_writeback_connector *co
 	return 0;
 }
 
+static void wb_connector_cleanup_writeback_job(struct drm_writeback_connector *connector,
+					       struct drm_writeback_job *job)
+{
+	struct vs_writeback_connector *vs_wb_connector = to_vs_writeback_connector(connector);
+
+	vs_wb_connector->funcs->cleanup(vs_wb_connector);
+}
+
 static void wb_connector_atomic_commit(struct drm_connector *connector,
 				       struct drm_atomic_state *atomic_state)
 {
@@ -130,6 +140,7 @@ static const struct drm_connector_helper_funcs wb_connector_helper_funcs = {
 	.get_modes = wb_connector_get_modes,
 	.mode_valid = wb_connector_mode_valid,
 	.prepare_writeback_job = wb_connector_prepare_writeback_job,
+	.cleanup_writeback_job = wb_connector_cleanup_writeback_job,
 	.atomic_commit = wb_connector_atomic_commit,
 };
 
@@ -332,8 +343,6 @@ static void wb_encoder_atomic_disable(struct drm_encoder *encoder, struct drm_at
 	struct drm_writeback_connector *wb_connector =
 		container_of(encoder, struct drm_writeback_connector, encoder);
 	struct vs_writeback_connector *vs_wb_connector = to_vs_writeback_connector(wb_connector);
-	struct drm_writeback_job *job;
-	int ret;
 
 	if (!vs_wb_connector->armed && !vs_wb_connector->frame_pending) {
 		DRM_DEV_DEBUG(vs_wb_connector->dev, "%s: [wb-%d] wb not armed, skip disable\n",
@@ -341,28 +350,20 @@ static void wb_encoder_atomic_disable(struct drm_encoder *encoder, struct drm_at
 		return;
 	}
 
-	ret = wait_event_timeout(vs_wb_connector->framedone_waitq, !vs_wb_connector->frame_pending,
-				 msecs_to_jiffies(1000));
-
-	if (!ret)
-		DRM_DEV_ERROR(vs_wb_connector->dev, "%s: [wb-%d] wait for frame done timed out",
-			      __func__, vs_wb_connector->id);
-
-	job = list_first_entry_or_null(&vs_wb_connector->base.job_queue, struct drm_writeback_job,
-				       list_entry);
-	if (job) {
-		DRM_DEV_ERROR(vs_wb_connector->dev, "%s: [wb-%d] job pending during disable\n",
-			      __func__, vs_wb_connector->id);
-		drm_writeback_signal_completion(wb_connector, -EIO);
-	}
+	DPU_ATRACE_BEGIN("%s [wb-%d] armed %u frame_pending %u", __func__, vs_wb_connector->id,
+			 vs_wb_connector->armed, vs_wb_connector->frame_pending);
 
 	DRM_DEV_DEBUG(vs_wb_connector->dev, "%s: [wb-%d] wb job completed, disable hardware\n",
 		      __func__, vs_wb_connector->id);
 
+	/* wb module has shadow register, can disable during active state */
 	vs_wb_connector->funcs->disable(vs_wb_connector);
 	vs_wb_connector->armed = 0;
 	vs_wb_connector->frame_pending = 0;
 	vs_wb_connector->crtc = NULL;
+
+	DPU_ATRACE_END("%s [wb-%d] armed %u frame_pending %u", __func__, vs_wb_connector->id,
+		       vs_wb_connector->armed, vs_wb_connector->frame_pending);
 }
 
 static const struct drm_encoder_helper_funcs wb_encoder_helper_funcs = {
@@ -377,13 +378,18 @@ void vs_writeback_handle_vblank(struct vs_writeback_connector *vs_wb_connector)
 	if (!vs_wb_connector)
 		return;
 
+	DPU_ATRACE_BEGIN("%s [wb-%d] armed %u frame_pending %u", __func__, vs_wb_connector->id,
+			 vs_wb_connector->armed, vs_wb_connector->frame_pending);
+
 	DRM_DEV_DEBUG(vs_wb_connector->dev, "%s: [wb-%d] armed=%d frame_pending=%d\n", __func__,
 		      vs_wb_connector->id, vs_wb_connector->armed, vs_wb_connector->frame_pending);
 	job = list_first_entry_or_null(&vs_wb_connector->base.job_queue, struct drm_writeback_job,
 				       list_entry);
-	if (job)
+	if (job) {
+		DPU_ATRACE_BEGIN("signal wb completion");
 		drm_writeback_signal_completion(&vs_wb_connector->base, 0);
-
+		DPU_ATRACE_END("signal wb completion");
+	}
 	/* Disable WB after each single commit */
 	if (vs_wb_connector->armed && !vs_wb_connector->frame_pending) {
 		DRM_DEV_DEBUG(vs_wb_connector->dev,
@@ -392,6 +398,8 @@ void vs_writeback_handle_vblank(struct vs_writeback_connector *vs_wb_connector)
 		vs_wb_connector->funcs->disable(vs_wb_connector);
 		vs_wb_connector->armed = 0;
 	}
+	DPU_ATRACE_END("%s [wb-%d] armed %u frame_pending %u", __func__, vs_wb_connector->id,
+		       vs_wb_connector->armed, vs_wb_connector->frame_pending);
 }
 
 static const struct drm_prop_enum_list vs_wb_point_enum_list[] = {
@@ -409,7 +417,7 @@ struct vs_writeback_connector *vs_writeback_create(const struct dc_hw_wb *hw_wb,
 	int ret;
 
 	if (!info)
-		return NULL;
+		return ERR_PTR(-EINVAL);
 
 	vs_writeback = kzalloc(sizeof(struct vs_writeback_connector), GFP_KERNEL);
 	if (!vs_writeback)

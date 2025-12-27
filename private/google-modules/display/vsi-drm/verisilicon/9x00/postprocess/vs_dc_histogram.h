@@ -17,9 +17,11 @@ bool vs_dc_hist_chans_check(const struct dc_hw *hw, u8 display_id,
 /* called on DRM update */
 bool vs_dc_hist_chans_update(struct dc_hw *hw, u8 display_id,
 			     const struct vs_crtc_state *crtc_state);
+bool vs_dc_hist_rgb_update(struct dc_hw *hw, u8 display_id, const struct vs_crtc_state *crtc_state);
 
 /* called on commit */
 bool vs_dc_hist_chans_commit(struct dc_hw *hw, u8 display_id);
+bool vs_dc_hist_rgb_commit(struct dc_hw *hw, u8 display_id);
 
 /* called on frame done (handles channels + rgb) */
 bool vs_dc_hist_frame_done(struct dc_hw *hw, u8 display_id,
@@ -27,8 +29,4 @@ bool vs_dc_hist_frame_done(struct dc_hw *hw, u8 display_id,
 
 /* called on flip done (handles channels + rgb) */
 bool vs_dc_hist_flip_done(struct dc_hw *hw, u8 display_id);
-
-/* register histogram rgb property via vs_dc_property framework */
-bool vs_dc_register_hist_rgb_states(struct vs_dc_property_state_group *states,
-				    const struct vs_display_info *display_info);
 #endif

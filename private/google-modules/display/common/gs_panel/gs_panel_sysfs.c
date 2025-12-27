@@ -97,9 +97,6 @@ int gs_panel_get_te2_freq(struct gs_panel *ctx)
 {
 	int freq;
 
-	if (!gs_panel_has_func(ctx, get_te2_freq))
-		return -EOPNOTSUPP;
-
 	/**
 	 * Still allow the read if the panel is inactive at this moment since we may change
 	 * the rate during the transition to active.
@@ -108,7 +105,22 @@ int gs_panel_get_te2_freq(struct gs_panel *ctx)
 		dev_warn(ctx->dev, "%s: panel is not enabled, may show previous freq\n", __func__);
 
 	mutex_lock(&ctx->mode_lock);
-	freq = ctx->desc->gs_panel_func->get_te2_freq(ctx);
+	if (gs_panel_has_func(ctx, get_te2_freq)) {
+		freq = ctx->desc->gs_panel_func->get_te2_freq(ctx);
+	} else {
+		/**
+		 * For the device which doesn't specify the function of getting TE2 frequency,
+		 * changeable TE2 is used by default, so either idle_vrefresh (VRR) or vrefresh
+		 * indicates the current TE2 frequency (refresh rate).
+		 */
+		const struct gs_panel_mode *pmode = ctx->current_mode;
+
+		if (!pmode)
+			return -EINVAL;
+
+		freq = gs_is_vrr_mode(pmode) ? ctx->sw_status.idle_vrefresh :
+					       drm_mode_vrefresh(&pmode->mode);
+	}
 	mutex_unlock(&ctx->mode_lock);
 
 	return freq;
@@ -1154,6 +1166,44 @@ static ssize_t skin_temperature_show(struct device *dev, struct device_attribute
 	return ret;
 }
 
+static ssize_t content_gray_level_store(struct device *dev, struct device_attribute *attr,
+					const char *buf, size_t count)
+{
+	const struct mipi_dsi_device *dsi = to_mipi_dsi_device(dev);
+	struct gs_panel *ctx = mipi_dsi_get_drvdata(dsi);
+	enum gs_content_gray_level level;
+	int ret;
+
+	ret = kstrtouint(buf, 0, &level);
+	if (ret) {
+		dev_err(dev, "invalid content_gray_level value\n");
+		return ret;
+	}
+
+	if (level >= GRAY_LEVEL_COUNT) {
+		dev_err(dev, "undefined content_gray_level value (%d)\n", level);
+		return -EINVAL;
+	}
+
+	if (level != ctx->content_gray_level) {
+		dev_info(dev, "content_gray_level change: %d -> %d\n",
+			 ctx->content_gray_level, level);
+		ctx->content_gray_level = level;
+		sysfs_notify(&ctx->dev->kobj, NULL, "content_gray_level");
+	}
+
+	return count;
+}
+
+static ssize_t content_gray_level_show(struct device *dev, struct device_attribute *attr,
+				       char *buf)
+{
+	const struct mipi_dsi_device *dsi = to_mipi_dsi_device(dev);
+	struct gs_panel *ctx = mipi_dsi_get_drvdata(dsi);
+
+	return sysfs_emit(buf, "%d\n", ctx->content_gray_level);
+}
+
 static DEVICE_ATTR_RO(serial_number);
 static DEVICE_ATTR_RO(panel_extinfo);
 static DEVICE_ATTR_RO(panel_name);
@@ -1186,6 +1236,7 @@ static DEVICE_ATTR_RW(pwm_mode);
 static DEVICE_ATTR_RO(te_freq_hz);
 static DEVICE_ATTR_RW(te2_freq_hz);
 static DEVICE_ATTR_RW(skin_temperature);
+static DEVICE_ATTR_RW(content_gray_level);
 /* TODO(tknelms): re-implement below */
 #if 0
 static DEVICE_ATTR_WO(gamma);
@@ -1222,6 +1273,7 @@ static const struct attribute *panel_attrs[] = { &dev_attr_serial_number.attr,
 						 &dev_attr_te_freq_hz.attr,
 						 &dev_attr_te2_freq_hz.attr,
 						 &dev_attr_skin_temperature.attr,
+						 &dev_attr_content_gray_level.attr,
 /* TODO(tknelms): re-implement below */
 #if 0
 						 &dev_attr_gamma.attr,

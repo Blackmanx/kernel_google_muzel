@@ -8,6 +8,7 @@
 
 #include "g2d_sc_hw.h"
 #include "g2d_writeback.h"
+#include "g2d_recovery.h"
 
 struct g2d_sc {
 	struct g2d_crtc *crtc[NUM_PIPELINES];
@@ -16,14 +17,15 @@ struct g2d_sc {
 
 	unsigned int irq_num;
 	int *irqs;
+	bool requires_reset;
+	struct g2d_recovery g2d_recovery;
 
 	struct dentry *debugfs;
 };
 
 struct platform_device;
 struct g2d_plane;
-void g2d_wb_hw_configure(struct g2d_writeback_connector *g2d_wb_connector,
-			 struct drm_framebuffer *fb);
+void g2d_wb_hw_commit(struct g2d_writeback_connector *g2d_wb_connector, struct drm_framebuffer *fb);
 void g2d_plane_hw_commit(struct sc_hw *hw, u8 display_id);
 void sc_crtc_init(struct g2d_crtc *g2d_crtc);
 void sc_plane_init(struct g2d_plane *g2d_plane);
@@ -34,12 +36,5 @@ int sc_irq_init(struct platform_device *pdev);
 int g2d_pm_runtime_suspend(struct device *dev);
 int g2d_pm_runtime_resume(struct device *dev);
 void g2d_sc_print_id_regs(struct device *dev);
-#if IS_ENABLED(CONFIG_DEBUG_FS)
-int sc_debugfs_init(struct device *dev);
-void sc_debugfs_deinit(struct device *dev);
-#else /* CONFIG_DEBUG_FS */
-static inline int sc_debugfs_init(struct device *dev) { return 0; }
-static inline void sc_debugfs_deinit(struct device *dev) {}
-#endif /* CONFIG_DEBUG_FS */
 
 #endif //G2D_SC_H_

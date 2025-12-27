@@ -30,6 +30,7 @@
 #include "vs_dc.h"
 #include "vs_dc_post.h"
 #include "vs_dc_hw.h"
+#include "vs_dc_sram.h"
 #include "vs_drv.h"
 #include "vs_writeback.h"
 #include "vs_dc_info.h"
@@ -43,6 +44,7 @@
 
 #define MAX_DC_WAIT_EARLIEST_PROCESS_TIME_USEC 100000
 #define MAX_FRAMES_PENDING_COUNT 2
+#define FRAME_DONE_TIMEOUT_MS 100
 
 static inline void update_wb_format(u32 format, struct dc_hw_fb *fb)
 {
@@ -753,6 +755,11 @@ static void dc_fabrt_boost_kwork(struct kthread_work *work)
 {
 	struct vs_crtc *vs_crtc = container_of(work, struct vs_crtc, fboost_work);
 	int ret;
+	struct device *dev = vs_crtc->dev;
+	struct vs_dc *dc = dev_get_drvdata(dev);
+
+	if (!dc->fabrt_devfreq)
+		return;
 
 	DPU_ATRACE_BEGIN("DPU Boost_FABRT");
 	vs_qos_set_fabrt_boost(&vs_crtc->base);
@@ -857,7 +864,8 @@ static bool vs_dc_display_is_idle(struct device *dev, struct drm_crtc *crtc)
 	return !position || vpos == vres;
 }
 
-static void vs_dc_disable(struct device *dev, struct drm_crtc *crtc)
+static void vs_dc_disable(struct device *dev, struct drm_crtc *crtc,
+			  struct drm_crtc_state *old_state)
 {
 	/* TBD !
 	 * developer should update the function implementation
@@ -865,11 +873,12 @@ static void vs_dc_disable(struct device *dev, struct drm_crtc *crtc)
 	 */
 	struct vs_dc *dc = dev_get_drvdata(dev);
 	struct vs_crtc *vs_crtc = to_vs_crtc(crtc);
+	struct vs_crtc_state *vs_crtc_state = to_vs_crtc_state(crtc->state);
 	struct dc_hw_display_mode display;
 	struct dc_hw_display *hw_disp = &dc->hw.display[vs_crtc->id];
-	u8 display_id = to_vs_display_id(dc, crtc);
 	bool is_vid_mode = (hw_disp->mode.output_mode & VS_OUTPUT_MODE_CMD) == 0;
 	int ret;
+	int old_te_count;
 
 	dc_hw_disable_trigger(&dc->hw, vs_crtc->id);
 
@@ -884,21 +893,17 @@ static void vs_dc_disable(struct device *dev, struct drm_crtc *crtc)
 	}
 	DPU_ATRACE_INT_PID_FMT(atomic_read(&vs_crtc->frames_pending), vs_crtc->trace_pid,
 			       "frames_pending[%u]", crtc->index);
-	if (is_vid_mode) {
-		ret = wait_event_timeout(vs_crtc->framedone_waitq,
-					 atomic_read(&vs_crtc->frames_pending) <= 0 &&
-						 !vs_crtc->frame_transfer_pending,
-					 msecs_to_jiffies(100));
-	} else {
-		ret = wait_event_timeout(vs_crtc->framedone_waitq,
-					 atomic_read(&vs_crtc->frames_pending) <= 0,
-					 msecs_to_jiffies(100));
-	}
+
+	old_te_count = atomic_read(&vs_crtc->te_count);
+	ret = wait_event_timeout(vs_crtc->framedone_waitq,
+				 atomic_read(&vs_crtc->frames_pending) <= 0 &&
+					 !vs_crtc->frame_transfer_pending,
+				 msecs_to_jiffies(FRAME_DONE_TIMEOUT_MS));
+
 	if (!ret) {
-		trace_disp_frame_done_timeout(display_id, vs_crtc);
-		dev_err(dev, "%s: wait for frame done timed out, frames pending:%d, te count:%d",
-			crtc->name, atomic_read(&vs_crtc->frames_pending),
-			atomic_read(&vs_crtc->te_count));
+		vs_crtc_record_frame_timeout(vs_crtc, old_te_count, old_state,
+					     msecs_to_jiffies(FRAME_DONE_TIMEOUT_MS), true);
+
 		atomic_set(&vs_crtc->frames_pending, 0);
 		DPU_ATRACE_INT_PID_FMT(atomic_read(&vs_crtc->frames_pending), vs_crtc->trace_pid,
 				       "frames_pending[%u]", crtc->index);
@@ -916,6 +921,9 @@ static void vs_dc_disable(struct device *dev, struct drm_crtc *crtc)
 
 	dc_hw_config_display_status(&dc->hw, vs_crtc->id, true);
 	dc_hw_disable_plane_features(&dc->hw, vs_crtc->id);
+
+	if (vs_crtc_state->needs_hard_reset)
+		dc_hw_hard_reset_output_regs(&dc->hw, vs_crtc->id);
 }
 
 static void update_display_bld_size(struct vs_dc *dc, u8 id, struct vs_crtc_state *crtc_state,
@@ -1035,6 +1043,13 @@ static void update_display_hist_chans(struct vs_dc *dc, u8 id, struct vs_crtc_st
 	vs_dc_hist_chans_update(hw, id, crtc_state);
 }
 
+static void update_display_hist_rgb(struct vs_dc *dc, u8 id, struct vs_crtc_state *crtc_state)
+{
+	struct dc_hw *hw = &dc->hw;
+
+	vs_dc_hist_rgb_update(hw, id, crtc_state);
+}
+
 static void vs_dc_conf_display(struct device *dev, struct drm_crtc *crtc)
 {
 	struct vs_dc *dc = dev_get_drvdata(dev);
@@ -1061,6 +1076,8 @@ static void vs_dc_conf_display(struct device *dev, struct drm_crtc *crtc)
 	update_display_brightness_mask(dc, vs_crtc->id, crtc_state);
 
 	update_display_hist_chans(dc, vs_crtc->id, crtc_state);
+
+	update_display_hist_rgb(dc, vs_crtc->id, crtc_state);
 
 	/* dc property */
 	for (i = 0; i < vs_crtc->properties.num; i++) {
@@ -1198,14 +1215,14 @@ static int check_display_gamma(struct vs_dc *dc, struct vs_crtc_state *crtc_stat
 			lut = crtc_state->prior_gamma.blob->data;
 		} else if ((i == 1) && crtc_state->roi0_gamma.blob &&
 			   crtc_state->roi0_gamma.changed) {
-			if (!display_info->gamma || !display_info->lut_roi) {
+			if (!display_info->gamma || !display_info->lut_roi0) {
 				dev_err(dev, "%s: This CRTC not support roi0 gamma.\n", __func__);
 				return -EINVAL;
 			}
 			lut = crtc_state->roi0_gamma.blob->data;
 		} else if ((i == 2) && crtc_state->roi1_gamma.blob &&
 			   crtc_state->roi1_gamma.changed) {
-			if (!display_info->gamma || !display_info->lut_roi) {
+			if (!display_info->gamma || !display_info->lut_roi1) {
 				dev_err(dev, "%s: This CRTC not support roi1 gamma.\n", __func__);
 				return -EINVAL;
 			}
@@ -1339,6 +1356,134 @@ end:
 	return 0;
 }
 
+static int check_sram_pool_dma_size(const struct vs_dc *dc, struct drm_crtc *crtc,
+				    struct drm_crtc_state *crtc_state)
+{
+	struct device *dev = dc->hw.dev;
+	struct drm_plane *plane;
+	const struct drm_plane_state *plane_state;
+	struct vs_plane_state *vs_plane_state;
+	struct vs_plane *vs_plane;
+	struct vs_plane_info *vs_plane_info;
+	const struct vs_dc_info *dc_info = dc->hw.info;
+	u32 fe0_dma_sram_used = 0;
+	u32 fe1_dma_sram_used = 0;
+	u32 fe0_dma_sram_size = dc_info->fe0_dma_sram_size << 10;
+	u32 fe1_dma_sram_size = dc_info->fe1_dma_sram_size << 10;
+
+	/* accumulate dma sram pool usage */
+	drm_atomic_crtc_state_for_each_plane_state(plane, plane_state, crtc_state) {
+		vs_plane_state = to_vs_plane_state(plane_state);
+		vs_plane = to_vs_plane(plane);
+		vs_plane_info = get_plane_info(vs_plane->id, dc->hw.info);
+
+		if (!vs_plane_info->dma_sram_max_size_kb)
+			continue;
+
+		if (vs_plane_info->fe_id == VS_FE_NONE)
+			continue;
+
+		if (vs_plane_info->fe_id == VS_FE_0)
+			fe0_dma_sram_used += vs_plane_state->dma_sram_size;
+		else if (vs_plane_info->fe_id == VS_FE_1)
+			fe1_dma_sram_used += vs_plane_state->dma_sram_size;
+
+		dev_dbg(dev, "%s: plane id %d fe id %d dma_sram_size %u\n", __func__,
+			vs_plane_info->id, vs_plane_info->fe_id, vs_plane_state->dma_sram_size);
+	}
+
+	/* check against FE0 maximum supported */
+	if (fe0_dma_sram_used > fe0_dma_sram_size) {
+		dev_err(dev, "%s: SRAM DMA FE[0] exceeded allocation (%u > %u)\n", __func__,
+			fe0_dma_sram_used, fe0_dma_sram_size);
+		return -ENOMEM;
+	}
+
+	/* check against FE1 maximum supported */
+	if (fe1_dma_sram_used > fe1_dma_sram_size) {
+		dev_err(dev, "%s: SRAM DMA FE[1] exceeded allocation (%u > %u)\n", __func__,
+			fe1_dma_sram_used, fe1_dma_sram_size);
+		return -ENOMEM;
+	}
+
+	dev_dbg(dev, "%s: SRAM DMA used FE[0] %u FE[1] %u)", __func__, fe0_dma_sram_used,
+		fe1_dma_sram_used);
+
+	return 0;
+}
+
+static int check_sram_pool_scl_size(const struct vs_dc *dc, struct drm_crtc *crtc,
+				    struct drm_crtc_state *crtc_state)
+{
+	struct device *dev = dc->hw.dev;
+	struct drm_plane *plane;
+	const struct drm_plane_state *plane_state;
+	struct vs_plane_state *vs_plane_state;
+	struct vs_plane *vs_plane;
+	struct vs_plane_info *vs_plane_info;
+	const struct vs_dc_info *dc_info = dc->hw.info;
+	u32 fe0_scl_sram_used = 0;
+	u32 fe1_scl_sram_used = 0;
+	u32 fe0_scl_sram_size = dc_info->fe0_scl_sram_size << 10;
+	u32 fe1_scl_sram_size = dc_info->fe1_scl_sram_size << 10;
+
+	/* accumulate scl sram pool usage */
+	drm_atomic_crtc_state_for_each_plane_state(plane, plane_state, crtc_state) {
+		vs_plane_state = to_vs_plane_state(plane_state);
+		vs_plane = to_vs_plane(plane);
+		vs_plane_info = get_plane_info(vs_plane->id, dc->hw.info);
+
+		if (!vs_plane_info->scl_sram_max_size_kb)
+			continue;
+
+		if (vs_plane_info->fe_id == VS_FE_NONE)
+			continue;
+
+		if (vs_plane_info->fe_id == VS_FE_0)
+			fe0_scl_sram_used += vs_plane_state->scl_sram_size;
+		else if (vs_plane_info->fe_id == VS_FE_1)
+			fe1_scl_sram_used += vs_plane_state->scl_sram_size;
+
+		dev_dbg(dev, "%s: plane id %d fe id %d scl_sram_size %u\n", __func__,
+			vs_plane_info->id, vs_plane_info->fe_id, vs_plane_state->scl_sram_size);
+	}
+
+	/* check against FE0 maximum supported */
+	if (fe0_scl_sram_used > fe0_scl_sram_size) {
+		dev_err(dev, "%s: SRAM SCL FE[0] exceeded allocation (%u > %u)\n", __func__,
+			fe0_scl_sram_used, fe0_scl_sram_size);
+		return -ENOMEM;
+	}
+
+	/* check against FE1 maximum supported */
+	if (fe1_scl_sram_used > fe1_scl_sram_size) {
+		dev_err(dev, "%s: SRAM SCL FE[1] exceeded allocation (%u > %u)\n", __func__,
+			fe1_scl_sram_used, fe1_scl_sram_size);
+		return -ENOMEM;
+	}
+
+	dev_dbg(dev, "%s: SRAM SCL used FE[0] %u, FE[1] %u)", __func__, fe0_scl_sram_used,
+		fe1_scl_sram_used);
+
+	return 0;
+}
+
+static int check_sram_pool(const struct vs_dc *dc, struct drm_crtc *crtc,
+			   struct drm_crtc_state *crtc_state)
+{
+	int ret;
+
+	ret = check_sram_pool_dma_size(dc, crtc, crtc_state);
+	if (ret)
+		return ret;
+
+	ret = check_sram_pool_scl_size(dc, crtc, crtc_state);
+	if (ret)
+		return ret;
+
+	return 0;
+}
+
 /*
  * @brief Validate histogram channel configuration
  */
@@ -1415,6 +1560,26 @@ static int vs_dc_check_wb_r2y(struct device *dev, struct vs_crtc *vs_crtc,
 	return 0;
 }
 
+static int vs_dc_check_wb_secure(struct device *dev, struct vs_crtc *vs_crtc,
+				 struct vs_writeback_connector_state *vs_wb_state,
+				 struct drm_framebuffer *fb)
+{
+	struct vs_dc *dc = dev_get_drvdata(dev);
+	struct dc_hw *hw = &dc->hw;
+
+	/*
+	 * Checking the hardware mask is superior to checking for secure planes, since secure
+	 * enable/disable is done asynchronously to commits and there may be overlaps.
+	 */
+	if (!bitmap_empty(hw->secured_layers_mask, HW_PLANE_NUM)) {
+		dev_err(dev, "Rejecting writeback because secure is still enabled. mask: 0x%*pbl\n",
+			HW_PLANE_NUM, hw->secured_layers_mask);
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
 static int vs_dc_check_display(struct device *dev, struct drm_crtc *crtc,
 			       struct drm_crtc_state *crtc_state)
 {
@@ -1453,6 +1618,10 @@ static int vs_dc_check_display(struct device *dev, struct drm_crtc *crtc,
 		return ret;
 
 	ret = check_display_hist_chans(dc, vs_crtc, vs_crtc_state);
+	if (ret)
+		return ret;
+
+	ret = check_sram_pool(dc, crtc, crtc_state);
 	if (ret)
 		return ret;
 
@@ -1617,7 +1786,7 @@ static void vs_dc_commit(struct device *dev, struct drm_crtc *crtc, struct drm_a
 			       "frames_pending[%u]", crtc->index);
 	dc_hw_start_trigger(&dc->hw, display_id, crtc);
 	spin_unlock_irqrestore(&dc->int_lock, flags);
-	trace_disp_commit_done(display_id, vs_crtc);
+	trace_disp_commit_done(display_id, vs_crtc_state->output_id, vs_crtc);
 }
 
 static void update_wb_fb(struct vs_dc *dc, u32 display_id,
@@ -1769,6 +1938,7 @@ static void vs_dc_disable_writeback(struct vs_writeback_connector *wb_connector)
 	wb.enable = false;
 	wb.wb_id = wb_connector->id;
 
+	DPU_ATRACE_BEGIN("%s crtc_attached: %u", __func__, !!wb_connector->crtc);
 	if (wb_connector->crtc)
 		dc_hw_update_display_wb(&dc->hw, wb_connector->crtc->id, &wb);
 
@@ -1777,6 +1947,7 @@ static void vs_dc_disable_writeback(struct vs_writeback_connector *wb_connector)
 
 	dc_hw_setup_wb(&dc->hw, wb_connector->id);
 	dc_hw_config_wb_status(&dc->hw, wb_connector->id, true);
+	DPU_ATRACE_END("%s crtc_attached: %u", __func__, !!wb_connector->crtc);
 }
 
 static int vs_dc_check_wb_point(struct vs_dc *dc, int wb_id,
@@ -1885,6 +2056,10 @@ static int vs_dc_check_writeback(struct vs_writeback_connector *wb_connector,
 	if (ret)
 		return ret;
 
+	ret = vs_dc_check_wb_secure(dev, vs_crtc, vs_wb_state, fb);
+	if (ret)
+		return ret;
+
 	if (!vs_dc_check_drm_property(dc, wb_info->id, vs_wb_state->drm_states,
 				      wb_connector->properties.num, vs_wb_state))
 		return -EINVAL;
@@ -1905,10 +2080,33 @@ static int vs_dc_check_writeback(struct vs_writeback_connector *wb_connector,
 	return 0;
 }
 
+static void vs_dc_disable_writeback_irq(struct vs_writeback_connector *wb_connector)
+{
+	struct device *dev = wb_connector->dev;
+	struct vs_dc *dc = dev_get_drvdata(dev);
+	struct dc_hw *hw = &dc->hw;
+	u32 conn_id = wb_connector->id;
+	u32 wb_hw_id = hw->info->write_back[conn_id].id;
+
+	if (pm_runtime_get_if_in_use(hw->dev) > 0) {
+		dc_hw_enable_wb_irqs(hw, wb_hw_id, false);
+		pm_runtime_put(hw->dev);
+	} else { /* just decrease refcnt when HW is already powered off */
+		unsigned long flags;
+
+		spin_lock_irqsave(&hw->be_irq_slock, flags);
+		if (wb_hw_id < HW_WB_NUM)
+			hw->wb_irq_refcnt[wb_hw_id] -= 1;
+
+		spin_unlock_irqrestore(&hw->be_irq_slock, flags);
+	}
+}
+
 const struct vs_writeback_funcs dc_writeback_funcs = {
 	.config = vs_dc_conf_writeback,
 	.disable = vs_dc_disable_writeback,
 	.check = vs_dc_check_writeback,
+	.cleanup = vs_dc_disable_writeback_irq,
 };
 
 const struct vs_crtc_funcs dc_crtc_funcs = {
@@ -2216,7 +2414,7 @@ static int wb_bind(struct device *dev, struct device *master, void *data)
 
 		writeback = vs_writeback_create(hw_wb, drm_dev, wb_info, valid_crtcs);
 
-		if (!writeback) {
+		if (IS_ERR_OR_NULL(writeback)) {
 			dev_err(dev, "Failed to create writeback connector.\n");
 			ret = -ENOMEM;
 			goto err_cleanup_planes;

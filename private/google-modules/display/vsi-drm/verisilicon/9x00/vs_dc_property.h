@@ -10,7 +10,8 @@
 #include <drm/drm_property.h>
 
 #define VS_DC_MAX_PROPERTY_NUM 128
-#define VS_DC_MAX_PROPERTY_STATE_MEM_MAX_SIZE (128 * 1024)
+// TODO:b/441508921 change back to 128 after remove u32 3d lut
+#define VS_DC_MAX_PROPERTY_STATE_MEM_MAX_SIZE (136 * 1024)
 
 #define VS_DC_BLOB_PROPERTY_PROTO(protoname, strname, state_type, check_func, update_func,      \
 				  config_func)                                                  \

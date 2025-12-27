@@ -13,6 +13,8 @@
 
 #include "vs_plane.h"
 
+struct drm_state_history_record;
+
 /*
  * @dma_dev: device for DMA API.
  *  - use the first attached device if support iommu
@@ -30,6 +32,12 @@ struct vs_drm_private {
 
 	unsigned int pitch_alignment;
 	unsigned int addr_alignment;
+
+	/**
+	 * @sh_record: structure storing a history of the most
+	 * recently-committed drm_atomic_states
+	 */
+	struct drm_state_history_record *sh_record;
 };
 
 int vs_drm_iommu_attach_device(struct drm_device *drm_dev, struct device *dev);

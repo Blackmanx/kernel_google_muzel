@@ -20,8 +20,8 @@
 static const struct regmap_range dump_reg_allowed[] = {
 	regmap_range_sized(0x0, 0x1e0), /*DpuFe0HostInterface*/
 	regmap_range_sized(0x8000, 0x40), /*DpuFe0Secure0*/
-	regmap_range_sized(0x18000, 0x820), /*DpuFe0Layer0*/
-	regmap_range_sized(0x1c000, 0x820), /*DpuFe0Layer1*/
+	regmap_range_sized(0x18000, 0xa70), /*DpuFe0Layer0*/
+	regmap_range_sized(0x1c000, 0xa70), /*DpuFe0Layer1*/
 	regmap_range_sized(0x20000, 0xa70), /*DpuFe0Layer2*/
 	regmap_range_sized(0x24000, 0xa70), /*DpuFe0Layer3*/
 	regmap_range_sized(0x28000, 0xa70), /*DpuFe0Layer4*/
@@ -29,10 +29,8 @@ static const struct regmap_range dump_reg_allowed[] = {
 	regmap_range_sized(0x38000, 0x180), /*DpuFe0Crc4K*/
 	regmap_range_sized(0x39000, 0x140), /*DpuFe0TestPattern4K*/
 	regmap_range_sized(0x40000, 0x140), /*DpuFe1HostInterface*/
-	/* b/419018524 - skip DpuFE1Secure0 range */
-	// regmap_range_sized(0x48000, 0x40),  /*DpuFe1Secure0*/
-	regmap_range_sized(0x58000, 0x820), /*DpuFe1Layer8*/
-	regmap_range_sized(0x5C000, 0x820), /*DpuFe1Layer9*/
+	regmap_range_sized(0x58000, 0xa70), /*DpuFe1Layer8*/
+	regmap_range_sized(0x5C000, 0xa70), /*DpuFe1Layer9*/
 	regmap_range_sized(0x60000, 0xa70), /*DpuFe1Layer10*/
 	regmap_range_sized(0x64000, 0xa70), /*DpuFe1Layer11*/
 	regmap_range_sized(0x68000, 0xa70), /*DpuFe1Layer12*/
@@ -42,8 +40,10 @@ static const struct regmap_range dump_reg_allowed[] = {
 	regmap_range_sized(0x80000, 0x260), /*DpuBeHostInterface*/
 	regmap_range_sized(0x84000, 0x1c0), /*DpuBeSecure0*/
 	regmap_range_sized(0x88000, 0x8e0), /*DpuBeBlender*/
-	regmap_range_sized(0x8c000, 0x820), /*DpuBePostProcessorPanel0*/
-	regmap_range_sized(0x9c000, 0x820), /*DpuBePostProcessorPanel1*/
+	regmap_range_sized(0x8c000, 0x1fc0), /*DpuBePostProcessorPanel0*/
+	regmap_range_sized(0x8f254, 0x18a0), /*DpuBePostProcessorPanel0_1*/
+	regmap_range_sized(0x9c000, 0x1240), /*DpuBePostProcessorPanel1*/
+	regmap_range_sized(0x9f264, 0x1850), /*DpuBePostProcessorPanel1_1*/
 	regmap_range_sized(0xac000, 0x5f0), /*DpuBePostProcessorPanel2*/
 	regmap_range_sized(0xb0000, 0x5f0), /*DpuBePostProcessorPanel3*/
 	regmap_range_sized(0xb4000, 0xb0), /*DpuBeBldWb*/
@@ -55,10 +55,10 @@ static const struct regmap_range dump_reg_allowed[] = {
 	regmap_range_sized(0xba000, 0xa0), /*DpuBePanel3Crc4K*/
 	regmap_range_sized(0xbb000, 0x80), /*DpuBeWbWDMACrc4K*/
 	regmap_range_sized(0xbc000, 0x2b0), /*DpuBeTestPattern4K*/
-	regmap_range_sized(0xbd000, 0x800), /*DpuBePanel0Hist8K*/
+	regmap_range_sized(0xbd000, 0x10d0), /*DpuBePanel0Hist8K*/
 	regmap_range_sized(0xbf000, 0x10), /*DpuBePanel0LTMHist4K*/
-	regmap_range_sized(0xc7000, 0x800), /*DpuBePanel0RGBHist4K*/
-	regmap_range_sized(0xc8000, 0x800), /*DpuBePanel1Hist8K*/
+	regmap_range_sized(0xc7000, 0xc10), /*DpuBePanel0RGBHist4K*/
+	regmap_range_sized(0xc8000, 0x10d0), /*DpuBePanel1Hist8K*/
 	regmap_range_sized(0xd2000, 0x200), /*DpuBePanel0Scaler4K*/
 	regmap_range_sized(0xd4000, 0x10), /*DpuBeMux*/
 	regmap_range_sized(0xd7000, 0x10), /*DpuBeBlenderLayer0OutputPath*/
@@ -90,32 +90,47 @@ static const struct regmap_range dump_reg_allowed[] = {
 	regmap_range_sized(0xff000, 0x220), /*DpuPanel2Dsc*/
 };
 
+#define dump_reg_disallowed_normal_contents \
+	regmap_range_single(DCREG_BE_INTR_TEST_Address),\
+	regmap_range_single(DCREG_BE_INTR_TEST1_Address),\
+	regmap_range_single(DCREG_BE_INTR_TEST2_Address),\
+	regmap_range_single(DCREG_BE_INTR_TEST3_Address),\
+	regmap_range_single(DCREG_BE_TZ_INTR_TEST_Address),\
+	regmap_range_single(DCREG_BE_TZ_INTR_TEST1_Address),\
+	regmap_range_single(DCREG_BE_GSA_INTR_TEST_Address),\
+	regmap_range_single(DCREG_BE_GSA_INTR_TEST1_Address),\
+	regmap_range_single(DCREG_BE_AOC_INTR_TEST_Address),\
+	regmap_range_single(DCREG_BE_AOC_INTR_TEST1_Address),\
+	regmap_range_single(DCREG_OUTIF_INTR_TEST_Address),\
+	regmap_range_single(DCREG_OUTIF_INTR_TEST1_Address),\
+	regmap_range_single(DCREG_OUTIF_INTR_TEST2_Address),\
+	regmap_range_single(DCREG_OUTIF_INTR_TEST3_Address),\
+	regmap_range_single(DCREG_PDMA_INTR_TEST_Address),\
+	regmap_range_single(DCREG_PDMA_INTR_TEST1_Address),\
+	regmap_range_single(DCREG_PDMA_INTR_TEST2_Address),\
+	regmap_range_single(DCREG_PDMA_INTR_TEST3_Address),\
+	regmap_range_single(DCREG_PDMA_INTR_TEST4_Address),\
+	regmap_range_single(DCREG_FE0_INTR_TEST_Address),\
+	regmap_range_single(DCREG_FE0_TZ_INTR_TEST_Address),\
+	regmap_range_single(DCREG_FE0_GSA_INTR_TEST_Address),\
+	regmap_range_single(DCREG_FE1_INTR_TEST_Address),\
+	regmap_range_single(DCREG_FE1_TZ_INTR_TEST_Address),\
+	regmap_range_single(DCREG_FE1_GSA_INTR_TEST_Address)
+
+#define dump_reg_disallowed_secure_contents \
+	regmap_range_sized(0x8000, 0x40), /*DpuFe0Secure0*/\
+	regmap_range_sized(0x84000, 0x1000), /*DpuBeSecure0*/\
+	regmap_range_sized(0xb4000, 0x2000), /*DpuBeBldWb-DpuBePostProWb*/\
+	regmap_range_sized(0xb7000, 0x9000), /*DpuBePanel0Crc4K-DpuBePanel0LTMHist4K*/\
+	regmap_range_sized(0xc7000, 0x3000) /*DpuBePanel0RGBHist4K-DpuBePanel1Hist8K*/
+
 static const struct regmap_range dump_reg_disallowed[] = {
-	regmap_range_single(DCREG_BE_INTR_TEST_Address),
-	regmap_range_single(DCREG_BE_INTR_TEST1_Address),
-	regmap_range_single(DCREG_BE_INTR_TEST2_Address),
-	regmap_range_single(DCREG_BE_INTR_TEST3_Address),
-	regmap_range_single(DCREG_BE_TZ_INTR_TEST_Address),
-	regmap_range_single(DCREG_BE_TZ_INTR_TEST1_Address),
-	regmap_range_single(DCREG_BE_GSA_INTR_TEST_Address),
-	regmap_range_single(DCREG_BE_GSA_INTR_TEST1_Address),
-	regmap_range_single(DCREG_BE_AOC_INTR_TEST_Address),
-	regmap_range_single(DCREG_BE_AOC_INTR_TEST1_Address),
-	regmap_range_single(DCREG_OUTIF_INTR_TEST_Address),
-	regmap_range_single(DCREG_OUTIF_INTR_TEST1_Address),
-	regmap_range_single(DCREG_OUTIF_INTR_TEST2_Address),
-	regmap_range_single(DCREG_OUTIF_INTR_TEST3_Address),
-	regmap_range_single(DCREG_PDMA_INTR_TEST_Address),
-	regmap_range_single(DCREG_PDMA_INTR_TEST1_Address),
-	regmap_range_single(DCREG_PDMA_INTR_TEST2_Address),
-	regmap_range_single(DCREG_PDMA_INTR_TEST3_Address),
-	regmap_range_single(DCREG_PDMA_INTR_TEST4_Address),
-	regmap_range_single(DCREG_FE0_INTR_TEST_Address),
-	regmap_range_single(DCREG_FE0_TZ_INTR_TEST_Address),
-	regmap_range_single(DCREG_FE0_GSA_INTR_TEST_Address),
-	regmap_range_single(DCREG_FE1_INTR_TEST_Address),
-	regmap_range_single(DCREG_FE1_TZ_INTR_TEST_Address),
-	regmap_range_single(DCREG_FE1_GSA_INTR_TEST_Address),
+	dump_reg_disallowed_normal_contents,
+};
+
+static const struct regmap_range dump_reg_disallowed_secure[] = {
+	dump_reg_disallowed_normal_contents,
+	dump_reg_disallowed_secure_contents,
 };
 
 static const struct regmap_access_table dump_reg_access_table = {
@@ -123,6 +138,13 @@ static const struct regmap_access_table dump_reg_access_table = {
 	.n_yes_ranges = ARRAY_SIZE(dump_reg_allowed),
 	.no_ranges = dump_reg_disallowed,
 	.n_no_ranges = ARRAY_SIZE(dump_reg_disallowed),
+};
+
+static const struct regmap_access_table dump_reg_access_table_secure = {
+	.yes_ranges = dump_reg_allowed,
+	.n_yes_ranges = ARRAY_SIZE(dump_reg_allowed),
+	.no_ranges = dump_reg_disallowed_secure,
+	.n_no_ranges = ARRAY_SIZE(dump_reg_disallowed_secure),
 };
 
 /*
@@ -229,6 +251,9 @@ static const struct vs_dc_urgent_vid_config urgent_vid_config = {
 	.enable = true,
 };
 
+#define DMA_SRAM_MAX_SIZE_KB (256)
+#define SCL_SRAM_MAX_SIZE_KB (144)
+
 static const struct vs_plane_info plane_fe0_info[] = {
 	/* DC_REV_0 */
 	{
@@ -274,6 +299,9 @@ static const struct vs_plane_info plane_fe0_info[] = {
 		.crc = 1,
 		.test_pattern = 1,
 		.compressed = 1,
+		.data_extend = 1,
+		.dma_sram_max_size_kb = DMA_SRAM_MAX_SIZE_KB,
+		.scl_sram_max_size_kb = SCL_SRAM_MAX_SIZE_KB,
 	},
 	{
 		.name = "Layer1",
@@ -318,6 +346,9 @@ static const struct vs_plane_info plane_fe0_info[] = {
 		.crc = 1,
 		.test_pattern = 1,
 		.compressed = 1,
+		.data_extend = 1,
+		.dma_sram_max_size_kb = DMA_SRAM_MAX_SIZE_KB,
+		.scl_sram_max_size_kb = SCL_SRAM_MAX_SIZE_KB,
 	},
 	{
 		.name = "Layer2",
@@ -356,6 +387,8 @@ static const struct vs_plane_info plane_fe0_info[] = {
 		.crc = 1,
 		.test_pattern = 1,
 		.compressed = 1,
+		.data_extend = 1,
+		.dma_sram_max_size_kb = DMA_SRAM_MAX_SIZE_KB,
 	},
 	{
 		.name = "Layer3",
@@ -395,6 +428,8 @@ static const struct vs_plane_info plane_fe0_info[] = {
 		.crc = 1,
 		.test_pattern = 1,
 		.compressed = 1,
+		.data_extend = 1,
+		.dma_sram_max_size_kb = DMA_SRAM_MAX_SIZE_KB,
 	},
 	{
 		.name = "Layer4",
@@ -434,6 +469,8 @@ static const struct vs_plane_info plane_fe0_info[] = {
 		.crc = 1,
 		.test_pattern = 1,
 		.compressed = 1,
+		.data_extend = 1,
+		.dma_sram_max_size_kb = DMA_SRAM_MAX_SIZE_KB,
 	},
 	{
 		.name = "Layer5",
@@ -473,6 +510,8 @@ static const struct vs_plane_info plane_fe0_info[] = {
 		.crc = 1,
 		.test_pattern = 1,
 		.compressed = 1,
+		.data_extend = 1,
+		.dma_sram_max_size_kb = DMA_SRAM_MAX_SIZE_KB,
 	},
 };
 
@@ -520,6 +559,9 @@ static const struct vs_plane_info plane_fe1_info[] = {
 		.crc = 1,
 		.test_pattern = 1,
 		.compressed = 1,
+		.data_extend = 1,
+		.dma_sram_max_size_kb = DMA_SRAM_MAX_SIZE_KB,
+		.scl_sram_max_size_kb = SCL_SRAM_MAX_SIZE_KB,
 	},
 	{
 		.name = "Layer9",
@@ -564,6 +606,9 @@ static const struct vs_plane_info plane_fe1_info[] = {
 		.crc = 1,
 		.test_pattern = 1,
 		.compressed = 1,
+		.data_extend = 1,
+		.dma_sram_max_size_kb = DMA_SRAM_MAX_SIZE_KB,
+		.scl_sram_max_size_kb = SCL_SRAM_MAX_SIZE_KB,
 	},
 	{
 		.name = "Layer10",
@@ -602,6 +647,8 @@ static const struct vs_plane_info plane_fe1_info[] = {
 		.crc = 1,
 		.test_pattern = 1,
 		.compressed = 1,
+		.data_extend = 1,
+		.dma_sram_max_size_kb = DMA_SRAM_MAX_SIZE_KB,
 	},
 	{
 		.name = "Layer11",
@@ -641,6 +688,8 @@ static const struct vs_plane_info plane_fe1_info[] = {
 		.crc = 1,
 		.test_pattern = 1,
 		.compressed = 1,
+		.data_extend = 1,
+		.dma_sram_max_size_kb = DMA_SRAM_MAX_SIZE_KB,
 	},
 	{
 		.name = "Layer12",
@@ -680,6 +729,8 @@ static const struct vs_plane_info plane_fe1_info[] = {
 		.crc = 1,
 		.test_pattern = 1,
 		.compressed = 1,
+		.data_extend = 1,
+		.dma_sram_max_size_kb = DMA_SRAM_MAX_SIZE_KB,
 	},
 	{
 		.name = "Layer13",
@@ -718,6 +769,8 @@ static const struct vs_plane_info plane_fe1_info[] = {
 		.crc = 1,
 		.test_pattern = 1,
 		.compressed = 1,
+		.data_extend = 1,
+		.dma_sram_max_size_kb = DMA_SRAM_MAX_SIZE_KB,
 	},
 #if IS_ENABLED(CONFIG_VERISILICON_PLANE_RCD)
 	{
@@ -793,7 +846,8 @@ static const struct vs_display_info crtc_be_info[] = {
 		.ccm_non_linear = 1,
 		.ccm_linear = 1,
 		.cgm_lut = 1,
-		.lut_roi = 1,
+		.lut_roi0 = 1,
+		.lut_roi1 = 0,
 		.blur = 1,
 		.sec_roi = 1,
 		.data_mode = 1,
@@ -832,7 +886,8 @@ static const struct vs_display_info crtc_be_info[] = {
 		.ccm_non_linear = 1,
 		.ccm_linear = 1,
 		.cgm_lut = 1,
-		.lut_roi = 0,
+		.lut_roi0 = 0,
+		.lut_roi1 = 0,
 		.blur = 0,
 		.sec_roi = 1,
 		.data_mode = 1,
@@ -1004,6 +1059,7 @@ const struct vs_dc_info dc_info_9400_32a = {
 	.max_ext_layer = 14,
 	.max_seg_num = 10,
 	.dump_reg_access_table = &dump_reg_access_table,
+	.dump_reg_access_table_secure = &dump_reg_access_table_secure,
 	.urgent_cmd_config = &urgent_cmd_config,
 	.urgent_vid_config = &urgent_vid_config,
 	.max_eotf_size = 129,

@@ -272,6 +272,8 @@ static int vs_gem_prime_vmap(struct drm_gem_object *obj, struct iosys_map *map)
 	if (vs_obj->pages) {
 		npages = vs_obj->size >> PAGE_SHIFT;
 		vaddr = vmap(vs_obj->pages, npages, VM_MAP, pgprot_writecombine(PAGE_KERNEL));
+		if (!vaddr)
+			return -ENOMEM;
 		iosys_map_set_vaddr(map, vaddr);
 	}
 	return 0;

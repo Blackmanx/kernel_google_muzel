@@ -6,6 +6,7 @@
 #include <linux/component.h>
 #include <linux/iommu.h>
 #include <linux/of_graph.h>
+#include <linux/vmalloc.h>
 
 #include <drm/drm_atomic.h>
 #include <drm/drm_crtc.h>
@@ -29,6 +30,7 @@
 #include "vs_dc_pre.h"
 #include "vs_dc_post.h"
 #include "vs_drm_atomic.h"
+#include "vs_drm_state_record.h"
 #include "vs_drv.h"
 #include "vs_gem.h"
 #include "vs_simple_enc.h"
@@ -61,6 +63,7 @@ static const struct drm_ioctl_desc vs_ioctls[] = {
 	DRM_IOCTL_DEF_DRV(VS_GET_HW_CAP, vs_get_hw_cap_ioctl, DRM_MASTER),
 	DRM_IOCTL_DEF_DRV(VS_GET_HIST_BINS, vs_get_hist_bins_query_ioctl, DRM_MASTER),
 	DRM_IOCTL_DEF_DRV(VS_GET_LTM_HIST, vs_get_ltm_hist_ioctl, DRM_MASTER),
+	DRM_IOCTL_DEF_DRV(VS_TASK_FENCE, vs_task_fence_ioctl, DRM_MASTER),
 };
 
 static void vs_drm_lastclose(struct drm_device *dev)
@@ -160,6 +163,117 @@ static void vs_mode_config_init(struct drm_device *dev)
 	dev->mode_config.normalize_zpos = true;
 }
 
+static void vs_drm_setup_clones(struct drm_device *drm_dev)
+{
+	struct drm_encoder *encoder;
+	struct drm_encoder *wb_enc;
+	u32 wb_mask = 0;
+	u32 disp_mask = 0;
+
+	drm_for_each_encoder(encoder, drm_dev) {
+		encoder->possible_clones = drm_encoder_mask(encoder);
+		if (encoder->encoder_type == DRM_MODE_ENCODER_VIRTUAL)
+			wb_mask |= drm_encoder_mask(encoder);
+		else
+			disp_mask |= drm_encoder_mask(encoder);
+	}
+
+	drm_for_each_encoder_mask(wb_enc, drm_dev, wb_mask) {
+		/* Map WBs to encoders */
+		drm_for_each_encoder_mask(encoder, drm_dev, disp_mask) {
+			if (wb_enc->possible_crtcs & encoder->possible_crtcs) {
+				encoder->possible_clones |= drm_encoder_mask(wb_enc);
+				wb_enc->possible_clones |= drm_encoder_mask(encoder);
+			}
+		}
+	}
+}
+
+#if IS_ENABLED(CONFIG_DEBUG_FS)
+#if IS_ENABLED(CONFIG_VERISILICON_RECORD_DRM_STATE)
+
+static int drm_state_history_show(struct seq_file *s, void *data)
+{
+	const struct drm_state_history_data *sh_data = s->private;
+	int i, ret;
+
+	for (i = 0; i < sh_data->num_logged_states; ++i) {
+		seq_printf(s, "State # -%02d\n", i);
+		ret = seq_write(s, sh_data->buffers[i], sh_data->buffer_sizes[i]);
+		if (ret)
+			break;
+	}
+
+	return ret;
+}
+
+static int drm_state_history_open(struct inode *inode, struct file *file)
+{
+	struct drm_device *drm_dev = inode->i_private;
+	size_t total_dump_size = 0;
+	int num_logged_states;
+	char state_header[] = "State # -XX\n";
+	struct drm_state_history_data *sh_data = vzalloc(sizeof(struct drm_state_history_data));
+	int i;
+
+	if (!drm_dev)
+		return -EINVAL;
+	if (!sh_data)
+		return -ENOMEM;
+	file->private_data = sh_data;
+
+	/* Alloc and fill drm state logs */
+	num_logged_states = vs_drm_recorded_states_prepare(sh_data, drm_dev);
+	if (num_logged_states <= 0)
+		return 0;
+
+	for (i = 0; i < num_logged_states; ++i) {
+		total_dump_size += sh_data->buffer_sizes[i];
+		total_dump_size += sizeof(state_header);
+	}
+
+	return single_open_size(file, drm_state_history_show, sh_data, total_dump_size);
+}
+
+static int drm_state_history_release(struct inode *inode, struct file *file)
+{
+	struct drm_state_history_data *sh_data = file->private_data;
+
+	if (!sh_data)
+		return 0;
+
+	vs_drm_recorded_states_destroy(sh_data);
+
+	vfree(sh_data);
+	return single_release(inode, file);
+}
+
+static const struct file_operations drm_state_history_fops = {
+	.owner = THIS_MODULE,
+	.open = drm_state_history_open,
+	.read = seq_read,
+	.llseek = seq_lseek,
+	.release = drm_state_history_release,
+};
+#endif /* CONFIG_VERISILICON_RECORD_DRM_STATE */
+
+static int drm_debugfs_add_custom_entries(struct drm_device *drm_dev)
+{
+#if IS_ENABLED(CONFIG_VERISILICON_RECORD_DRM_STATE)
+	struct dentry *debugfs_root = drm_dev->primary->debugfs_root;
+
+	/*
+	 * Ideally, we would not directly access the debugfs root like this,
+	 * but it is necessary to add custom fops to the file
+	 */
+	debugfs_create_file("state_history", 0444, debugfs_root, drm_dev, &drm_state_history_fops);
+#endif /* CONFIG_VERISILICON_RECORD_DRM_STATE */
+
+	return 0;
+}
+
+#endif /* CONFIG_DEBUG_FS */
+
 /* platfrom driver */
 static int vs_drm_bind(struct device *dev)
 {
@@ -194,6 +308,8 @@ static int vs_drm_bind(struct device *dev)
 
 	vs_mode_config_init(drm_dev);
 
+	vs_drm_setup_clones(drm_dev);
+
 	ret = drm_vblank_init(drm_dev, drm_dev->mode_config.num_crtc);
 	if (ret)
 		goto err_bind;
@@ -202,14 +318,23 @@ static int vs_drm_bind(struct device *dev)
 
 	drm_kms_helper_poll_init(drm_dev);
 
-	ret = drm_dev_register(drm_dev, 0);
+	ret = vs_drm_prepare_state_history_record(drm_dev);
 	if (ret)
 		goto err_helper;
+
+	ret = drm_dev_register(drm_dev, 0);
+	if (ret)
+		goto err_state_history;
+#if IS_ENABLED(CONFIG_DEBUG_FS)
+	drm_debugfs_add_custom_entries(drm_dev);
+#endif
 
 	drm_fbdev_generic_setup(drm_dev, 32);
 
 	return 0;
 
+err_state_history:
+	vs_drm_destroy_state_history_record(drm_dev);
 err_helper:
 	drm_kms_helper_poll_fini(drm_dev);
 err_bind:
@@ -228,6 +353,8 @@ static void vs_drm_unbind(struct device *dev)
 	struct drm_device *drm_dev = dev_get_drvdata(dev);
 
 	drm_dev_unregister(drm_dev);
+
+	vs_drm_destroy_state_history_record(drm_dev);
 
 	drm_kms_helper_poll_fini(drm_dev);
 

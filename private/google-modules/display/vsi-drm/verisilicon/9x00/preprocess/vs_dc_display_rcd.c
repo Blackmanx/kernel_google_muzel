@@ -69,7 +69,7 @@ static void rcd_roi_enable_roi_top(struct dc_hw *hw, u8 display_id,
 					rcd_roi->top_roi.h);
 
 	dc_write(hw, VS_SET_PANEL01_FIELD(DCREG_SH_PANEL, display_id, RCD_ROI0_VALID_Address),
-		 !!rcd_roi->top_enable & DCREG_SH_PANEL0_RCD_ROI0_VALID_WriteMask);
+		 rcd_roi->top_enable & DCREG_SH_PANEL0_RCD_ROI0_VALID_WriteMask);
 
 	/* commit RCD ROI x/y/w/h */
 	roi_values = VS_SET_FIELD(0, DCREG_SH_PANEL0_RCD_ROI0, ORIGIN_X, rcd_roi->top_roi.x);
@@ -111,7 +111,7 @@ static void rcd_roi_enable_roi_btm(struct dc_hw *hw, u8 display_id,
 					rcd_roi->btm_roi.h);
 
 	dc_write(hw, VS_SET_PANEL01_FIELD(DCREG_SH_PANEL, display_id, RCD_ROI1_VALID_Address),
-		 VS_SET_FIELD(0x0, DCREG_SH_PANEL0_RCD_ROI1_VALID, VALID, !!rcd_roi->btm_enable) &
+		 VS_SET_FIELD(0x0, DCREG_SH_PANEL0_RCD_ROI1_VALID, VALID, rcd_roi->btm_enable) &
 			 DCREG_SH_PANEL0_RCD_ROI1_VALID_WriteMask);
 
 	/* commit RCD ROI x/y/w/h */

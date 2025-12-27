@@ -81,6 +81,20 @@ struct gs_panel_mode_export_header {
 	__u16 num_modes;
 };
 
+/**
+ * struct gs_scaler_config - Used to override scaler properties.
+ * @factor_x: horizontal scale factor, format 16.16
+ * @factor_y: vertical scale factor, format 16.16
+ * @init_offset_x: initial offset x, format 16.16
+ * @init_offset_y: initial offset y, format 16.16
+ */
+struct gs_scaler_config {
+	__u32 factor_x;
+	__u32 factor_y;
+	__u32 init_offset_x;
+	__u32 init_offset_y;
+};
+
 #define EXPORTED_MODE_OFFSET(header, idx) ((header)->header_size + ((idx) * (header)->mode_size))
 #define EXPORTED_MODE_BLOB_SIZE(num_modes)            \
 	(sizeof(struct gs_panel_mode_export_header) + \

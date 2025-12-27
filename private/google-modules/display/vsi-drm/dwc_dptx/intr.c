@@ -6,6 +6,8 @@
  */
 #define DEBUG
 
+#include <drm/drm_modeset_lock.h>
+
 #include "dptx.h"
 #include "clock_mng.h"
 #include "video_bridge.h"
@@ -1010,6 +1012,64 @@ static int dptx_audio_wait_for_disable_done(struct dptx *dptx)
 	return ret;
 }
 
+/**
+ * hotunplug_get_crtc_active() - Gets crtc_state for dptx during unplug.
+ * Specifically, this function wraps the process of grabbing modeset locks
+ * and checking if the crtc_state is active.
+ *
+ * @dptx: dptx handle
+ *
+ * Return: true if a crtc is connected to dptx and active; false otherwise
+ */
+static bool hotunplug_get_crtc_active(struct dptx *dptx)
+{
+	struct drm_device *drm_dev;
+	struct drm_modeset_acquire_ctx ctx;
+	struct drm_connector_state *conn_state;
+	struct drm_crtc *crtc;
+	int ret;
+	bool crtc_active = false;
+
+	if (!dptx->connector)
+		return false;
+
+	drm_dev = dptx->connector->dev;
+
+	drm_modeset_acquire_init(&ctx, 0);
+modeset_lock_retry:
+	ret = drm_modeset_lock(&drm_dev->mode_config.connection_mutex, &ctx);
+	if (ret)
+		goto modeset_lock_fail;
+
+	conn_state = dptx->connector->state;
+	if (!conn_state->crtc)
+		goto out;
+
+	crtc = conn_state->crtc;
+	ret = drm_modeset_lock(&crtc->mutex, &ctx);
+	if (ret)
+		goto modeset_lock_fail;
+
+	if (!crtc->state)
+		goto out;
+
+	/* all locks acquired here */
+	crtc_active = crtc->state->active;
+
+modeset_lock_fail:
+	if (ret == -EDEADLK) {
+		ret = drm_modeset_backoff(&ctx);
+		if (!ret)
+			goto modeset_lock_retry;
+	}
+out:
+	drm_modeset_drop_locks(&ctx);
+	drm_modeset_acquire_fini(&ctx);
+	dptx_dbg(dptx, "hotunplug crtc_exists:%d crtc_active:%d\n", (crtc != NULL), crtc_active);
+
+	return crtc_active;
+}
+
 int handle_hotunplug_core(struct dptx *dptx)
 {
 	int retval;
@@ -1018,6 +1078,36 @@ int handle_hotunplug_core(struct dptx *dptx)
 
 	if (!dptx->link.trained)
 		return 0;
+
+	if (!dptx->link_test_mode) {
+		bool crtc_active;
+
+		/*
+		 * release dptx mutex, so that dptx_bridge_atomic_disable() can run,
+		 * and so that in-flight dptx_bridge_atomic_enable can complete
+		 */
+		mutex_unlock(&dptx->mutex);
+
+		crtc_active = hotunplug_get_crtc_active(dptx);
+
+		drm_bridge_hpd_notify(&dptx->bridge, connector_status_disconnected);
+
+		if (crtc_active || dptx->video_enabled) {
+			reinit_completion(&dptx->video_disable_done);
+
+			/* wait for dptx_bridge_atomic_disable() to run */
+			if (!wait_for_completion_timeout(&dptx->video_disable_done, 3 * HZ)) {
+				dptx_err(dptx, "dptx_bridge_atomic_disable() was not called\n");
+				dptx_video_disable(dptx);
+			}
+		}
+
+		/* re-acquire dptx mutex */
+		mutex_lock(&dptx->mutex);
+
+		/* wait for audio disable to complete */
+		dptx_audio_wait_for_disable_done(dptx);
+	}
 
 	dptx->dummy_dtds_present = false;
 
@@ -1032,31 +1122,7 @@ int handle_hotunplug_core(struct dptx *dptx)
 	for (int i = 0; i < num_lanes; i++)
 		google_dpphy_pipe_tx_eq_set(dptx->dp_phy, i, 0, 0);
 	google_dpphy_eq_tune_ovrd_enable(dptx->dp_phy, num_lanes, false);
-
 	dptx->link.trained = false;
-
-	if (!dptx->link_test_mode) {
-		drm_bridge_hpd_notify(&dptx->bridge, connector_status_disconnected);
-
-		if (dptx->video_enabled) {
-			reinit_completion(&dptx->video_disable_done);
-
-			/* release dptx mutex, so that dptx_bridge_atomic_disable() can run */
-			mutex_unlock(&dptx->mutex);
-
-			/* wait for dptx_bridge_atomic_disable() to run */
-			if (!wait_for_completion_timeout(&dptx->video_disable_done, 3 * HZ)) {
-				dptx_err(dptx, "dptx_bridge_atomic_disable() was not called\n");
-				dptx_video_disable(dptx);
-			}
-
-			/* re-acquire dptx mutex */
-			mutex_lock(&dptx->mutex);
-		}
-
-		/* wait for audio disable to complete */
-		dptx_audio_wait_for_disable_done(dptx);
-	}
 
 	return 0;
 }
@@ -1224,6 +1290,7 @@ fail:
 	memcpy(dptx->edid, dptx_fake_edid, EDID_LENGTH);
 	dptx->edid_size = EDID_LENGTH;
 	dptx_err(dptx, "--- EDID READ FAILED: use fake EDID ---\n");
+	dptx->stats.edid_read_failures++;
 	print_hex_dump(KERN_INFO, "dwc_dptx: ", DUMP_PREFIX_NONE, 16, 1,
 			&dptx->edid[0], 128, true);
 	return 0;
@@ -2259,6 +2326,7 @@ int handle_hotplug(struct dptx *dptx)
 		/* Check the sink count */
 		if (dptx->sink_count > dptx->dfp_count + 1) {
 			dptx_err(dptx, "DP Branch Device: invalid sink count\n");
+			dptx->stats.sink_count_invalid_failures++;
 			return -EINVAL;
 		}
 	} else {
@@ -2269,6 +2337,7 @@ int handle_hotplug(struct dptx *dptx)
 		/* Check the sink count */
 		if (dptx->sink_count != 1) {
 			dptx_err(dptx, "DP Sink: invalid sink count\n");
+			dptx->stats.sink_count_invalid_failures++;
 			return -EINVAL;
 		}
 	}
@@ -2317,6 +2386,16 @@ static void dptx_check_audio_capability(struct dptx *dptx)
 	kfree(sads);
 }
 
+/* Increment stats counters based off DSC and FEC support */
+static void dptx_stat_fec_dsc(struct dptx *dptx, bool dptx_fec, bool dptx_dsc)
+{
+	if (dptx_fec && dptx_dsc)
+		dptx->stats.fec_dsc_supported++;
+	else
+		dptx->stats.fec_dsc_not_supported++;
+
+}
+
 int handle_hotplug_core(struct dptx *dptx)
 {
 	u8 byte;
@@ -2325,13 +2404,18 @@ int handle_hotplug_core(struct dptx *dptx)
 	struct edp_alpm *alpm;
 	struct ctrl_regfields *ctrl_fields = dptx->ctrl_fields;
 
+	dptx->dptx_max_res_store.hdisplay = 0;
+	dptx->dptx_max_res_store.vdisplay = 0;
+
 	// Read EDID of the sink using I2C over AUX, and parse the EDID data
 	retval = dptx_read_edid(dptx);
 	if (retval)
 		goto done;
 
-	if (!drm_edid_is_valid((struct edid *)dptx->edid))
+	if (!drm_edid_is_valid((struct edid *)dptx->edid)) {
+		dptx->stats.edid_invalid_failures++;
 		dptx_warn(dptx, "EDID data is corrupted\n");
+	}
 
 	dptx_check_detailed_timing_descriptors(dptx);
 	dptx_parse_edid_audio_data_block(dptx);
@@ -2351,6 +2435,10 @@ int handle_hotplug_core(struct dptx *dptx)
 		dptx->dsc_caps = 0;
 	}
 
+	/* Stats check if FEC/DSC is supported */
+	dptx_stat_fec_dsc(dptx, !!(dptx->fec_caps & DP_FEC_CAPABLE), !!(dptx->dsc_caps &
+		DP_DSC_DECOMPRESSION_IS_SUPPORTED));
+
 	// Initialize ALPM variables
 	alpm = &dptx->alpm;
 	alpm_availability = alpm_is_available(dptx);
@@ -2366,7 +2454,7 @@ int handle_hotplug_core(struct dptx *dptx)
 
 	// Initiate link training
 	if (dptx->link.fec) {
-		dptx_write_regfield(dptx, ctrl_fields->field_enhance_framing_en, 0);
+		dptx_write_regfield(dptx, ctrl_fields->field_enhance_framing_en, 1);
 		dptx_write_regfield(dptx, ctrl_fields->field_enhance_framing_with_fec_en, 1);
 
 		// Set FEC_READY on the sink side

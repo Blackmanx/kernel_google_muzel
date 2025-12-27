@@ -22,7 +22,7 @@ static bool data_extend_config_hw(struct dc_hw *hw, u8 hw_id, bool enable, const
 
 	trace_config_hw_layer_feature_en("DATA_EXTEND", hw_id, enable);
 	config = dc_read(hw, VS_SH_LAYER_FIELD(hw_id, CONFIG_Address));
-	config = VS_SET_FIELD(config, DCREG_SH_LAYER0_CONFIG, EXTEND_BITS_ALPHA_MODE, !!enable);
+	config = VS_SET_FIELD(config, DCREG_SH_LAYER0_CONFIG, EXTEND_BITS_ALPHA_MODE, enable);
 
 	if (enable) {
 		trace_config_hw_layer_feature("DATA_EXTEND_DATA", hw_id, "mode:%d value:%d",
@@ -396,7 +396,7 @@ static bool line_padding_config_hw(struct dc_hw *hw, u8 hw_id, bool enable, cons
 
 	config = dc_read(hw, VS_SH_LAYER_FIELD(hw_id, CONFIG_EX_Address));
 	dc_write(hw, VS_SH_LAYER_FIELD(hw_id, CONFIG_EX_Address),
-		 VS_SET_FIELD(config, DCREG_SH_LAYER0_CONFIG_EX, LINE_PADDING, !!enable));
+		 VS_SET_FIELD(config, DCREG_SH_LAYER0_CONFIG_EX, LINE_PADDING, enable));
 
 	if (enable) {
 		trace_config_hw_layer_feature("LINE_PADDING_DATA", hw_id,
@@ -444,7 +444,9 @@ bool vs_dc_register_preprocess_states(struct vs_dc_property_state_group *states,
 		__ERR_CHECK(vs_dc_property_register_state(states, &line_padding_proto), on_error);
 	if (info->sid != HW_PLANE_NOT_SUPPORTED_SID)
 		__ERR_CHECK(vs_dc_property_register_state(states, &secure_buffer_proto), on_error);
-	__ERR_CHECK(vs_dc_property_register_state(states, &data_extend_proto), on_error);
+	if (info->data_extend)
+		__ERR_CHECK(vs_dc_property_register_state(states, &data_extend_proto), on_error);
+
 	return true;
 on_error:
 	return false;

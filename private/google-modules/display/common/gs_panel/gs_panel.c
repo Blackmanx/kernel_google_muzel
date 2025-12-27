@@ -2048,11 +2048,12 @@ static void gs_panel_init_te2(struct gs_panel *ctx)
 	ctx->te2.option = TEX_OPT_CHANGEABLE;
 }
 
-void gs_panel_init_refresh_ctrl_work_data(struct gs_panel *ctx)
+static void gs_panel_init_refresh_ctrl(struct gs_panel *ctx)
 {
 	struct device *dev = ctx->dev;
 	struct gs_panel_background_work_data *work_data = &ctx->refresh_ctrl_work_data;
 
+	ctx->refresh_ctrl |= GS_PANEL_REFRESH_CTRL_EARLY_EXIT;
 	kthread_init_worker(&work_data->worker);
 	work_data->thread =
 		kthread_run(kthread_worker_fn, &work_data->worker, "refresh_ctrl_kthread");
@@ -2221,11 +2222,14 @@ int gs_dsi_panel_common_init(struct mipi_dsi_device *dsi, struct gs_panel *ctx)
 	gs_panel_init_te2(ctx);
 
 	/* LHBM */
-	if (gs_panel_has_func(ctx, set_local_hbm_mode))
-		gs_panel_init_lhbm(ctx);
+	if (gs_panel_has_func(ctx, set_local_hbm_mode)) {
+		ret = gs_panel_init_lhbm(ctx);
+		if (ret)
+			return ret;
+	}
 
 	if (gs_panel_has_func(ctx, refresh_ctrl))
-		gs_panel_init_refresh_ctrl_work_data(ctx);
+		gs_panel_init_refresh_ctrl(ctx);
 
 	/* Vrefresh */
 	if (ctx->desc->modes) {
@@ -2300,6 +2304,7 @@ int gs_dsi_panel_common_init(struct mipi_dsi_device *dsi, struct gs_panel *ctx)
 	ctx->bridge.funcs = get_panel_drm_bridge_funcs();
 	ctx->sw_status.te.option = TEX_OPT_CHANGEABLE;
 	ctx->sw_status.te.freq_hz = 60;
+	set_bit(FEAT_EARLY_EXIT, ctx->sw_status.feat);
 
 	/* panel handoff */
 	gs_panel_handoff(ctx);
@@ -2331,7 +2336,6 @@ int gs_dsi_panel_common_init(struct mipi_dsi_device *dsi, struct gs_panel *ctx)
 
 err_panel:
 	drm_panel_remove(&ctx->base);
-	drm_bridge_remove(&ctx->bridge);
 	dev_err(dev, "failed to probe gs common panel driver (%d)\n", ret);
 
 	return ret;

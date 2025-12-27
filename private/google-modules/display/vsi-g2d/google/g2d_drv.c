@@ -19,12 +19,15 @@
 #include <drm/drm_ioctl.h>
 
 #include "g2d_sc.h"
+#include "g2d_debugfs.h"
 #include "g2d_drv.h"
 #include "g2d_fb.h"
 #include "g2d_gem.h"
+#include "g2d_qos.h"
 #include "g2d_writeback.h"
 #include "g2d_plane.h"
 #include "g2d_crtc.h"
+#include "g2d_drm_atomic.h"
 
 #define DRV_NAME "drm_g2d"
 #define DRV_DESC "G2D DRM driver"
@@ -60,7 +63,7 @@ static struct drm_driver g2d_drm_driver = {
 static const struct drm_mode_config_funcs g2d_mode_config_funcs = {
 	.fb_create = g2d_fb_create,
 	.atomic_check = drm_atomic_helper_check,
-	.atomic_commit = drm_atomic_helper_commit,
+	.atomic_commit = g2d_drm_atomic_commit,
 };
 
 static struct drm_mode_config_helper_funcs g2d_mode_config_helpers = {
@@ -79,10 +82,10 @@ static void g2d_mode_config_init(struct drm_device *dev)
 	dev->mode_config.helper_private = &g2d_mode_config_helpers;
 }
 
-static int g2d_sc_init(struct platform_device *pdev, struct g2d_device *gdevice)
+static int g2d_sc_init(struct platform_device *pdev, struct g2d_device *g2d_device)
 {
 	int ret = 0;
-	struct device *dev = gdevice->drm.dev;
+	struct device *dev = g2d_device->drm.dev;
 	struct g2d_sc *sc;
 
 	sc = devm_kzalloc(dev, sizeof(struct g2d_sc), GFP_KERNEL);
@@ -91,7 +94,7 @@ static int g2d_sc_init(struct platform_device *pdev, struct g2d_device *gdevice)
 		return PTR_ERR(sc);
 	}
 
-	gdevice->sc = sc;
+	g2d_device->sc = sc;
 
 	sc_init(sc, dev);
 
@@ -101,24 +104,24 @@ static int g2d_sc_init(struct platform_device *pdev, struct g2d_device *gdevice)
 	return ret;
 }
 
-static int g2d_kms_init(struct platform_device *pdev, struct g2d_device *gdevice)
+static int g2d_kms_init(struct platform_device *pdev, struct g2d_device *g2d_device)
 {
 	int ret = 0;
 	uint32_t possible_crtcs = 0;
 	/* TODO(b/355089225): create planes according to the # of pipelines. */
 	struct g2d_plane *layer0_plane = NULL;
-	struct device *dev = gdevice->drm.dev;
-	struct g2d_sc *sc = gdevice->sc;
+	struct device *dev = g2d_device->drm.dev;
+	struct g2d_sc *sc = g2d_device->sc;
 
-	g2d_crtc_init(gdevice);
+	g2d_crtc_init(g2d_device);
 
 	for (int i = 0; i < NUM_PIPELINES; i++)
 		possible_crtcs |= drm_crtc_mask(&sc->crtc[i]->base);
 
-	if (!gdevice)
-		dev_err(dev, "%s: gdevice is null!", __func__);
+	if (!g2d_device)
+		dev_err(dev, "%s: g2d_device is null!", __func__);
 
-	layer0_plane = g2d_plane_init(gdevice, possible_crtcs);
+	layer0_plane = g2d_plane_init(g2d_device, possible_crtcs);
 
 	if (IS_ERR_OR_NULL(layer0_plane)) {
 		dev_err(dev, "Plane init failed!");
@@ -130,7 +133,7 @@ static int g2d_kms_init(struct platform_device *pdev, struct g2d_device *gdevice
 	for (int i = 0; i < NUM_PIPELINES; i++)
 		sc->crtc[i]->base.primary = &layer0_plane->base;
 
-	ret = g2d_enable_writeback_connector(gdevice, possible_crtcs);
+	ret = g2d_enable_writeback_connector(g2d_device, possible_crtcs);
 
 	return ret;
 }
@@ -162,6 +165,8 @@ static int g2d_drm_create(struct platform_device *pdev)
 		dev_err(dev, "g2d_sc_init failed!");
 		return ret;
 	}
+
+	g2d_qos_init(&pdev->dev, priv);
 
 	ret = g2d_kms_init(pdev, priv);
 	if (ret) {
@@ -205,9 +210,9 @@ static int g2d_drm_platform_probe(struct platform_device *pdev)
 		return ret;
 	}
 
-	ret = sc_debugfs_init(&pdev->dev);
+	ret = g2d_debugfs_init(&pdev->dev);
 	if (ret < 0) {
-		dev_err(dev, "ERROR: sc_debugfs_init failed!");
+		dev_err(dev, "ERROR: g2d_debugfs_init failed!");
 		return ret;
 	}
 
@@ -237,7 +242,7 @@ static void g2d_drm_platform_remove(struct platform_device *pdev)
 
 	drm = platform_get_drvdata(pdev);
 
-	sc_debugfs_deinit(&pdev->dev);
+	g2d_debugfs_deinit(&pdev->dev);
 
 	pm_runtime_disable(dev);
 

@@ -22,7 +22,7 @@ int vs_gem_pool_init(struct drm_device *drm_dev, struct vs_gem_pool *gem_pool,
 	 * allocate gem object: minimal allocation is PAGE_SIZE
 	 */
 	gem_pool->gem_obj = vs_gem_create_object(drm_dev, node_count * node_size);
-	if (!gem_pool->gem_obj) {
+	if (IS_ERR(gem_pool->gem_obj)) {
 		drm_err(drm_dev, "unable to allocate gem_obj\n");
 		return -ENOMEM;
 	}
@@ -43,8 +43,8 @@ int vs_gem_pool_init(struct drm_device *drm_dev, struct vs_gem_pool *gem_pool,
 	gem_pool->used = 0;
 	gem_pool->nodes = kzalloc(node_size * node_count, GFP_KERNEL);
 	if (!gem_pool->nodes) {
-		vs_gem_free_object(&gem_pool->gem_obj->base);
 		drm_gem_vunmap_unlocked(&gem_pool->gem_obj->base, &gem_pool->vmap);
+		vs_gem_free_object(&gem_pool->gem_obj->base);
 		gem_pool->gem_obj = NULL;
 
 		drm_err(drm_dev, "unable to allocate gem_list nodes\n");

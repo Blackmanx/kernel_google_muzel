@@ -201,6 +201,25 @@ enum dsi2h_ipi_format {
 	F_COMPRESSED = 0xB,
 };
 
+/**
+ * enum dsi2h_rstn - recommended behavior as a result of dsi errors read
+ *
+ * These parallel @enum gs_dsi_err values, but are designed to be OR'd
+ * together directly in relation to individual error bit reads.
+ */
+enum dsi2h_rstn {
+	/** @NO_RSTN: no reset is recommended */
+	NO_RSTN = 0,
+	/** @SYS_RSTN: System reset needed */
+	SYS_RSTN = BIT(GS_DSI_ERR_SYS_RSTN),
+	/** @PHY_RSTN: PHY reset needed */
+	PHY_RSTN = BIT(GS_DSI_ERR_PHY_RSTN),
+	/** @IPI_RSTN: IPI reset needed */
+	IPI_RSTN = BIT(GS_DSI_ERR_IPI_RSTN),
+	/** @HARD_RSTN: Hard reset needed */
+	HARD_RSTN = BIT(GS_DSI_ERR_HARD_RSTN),
+};
+
 struct dsi2h_color_format {
 	enum dsi2h_ipi_format format;
 	enum dsi2h_ipi_depth depth;
@@ -304,6 +323,11 @@ struct dw_mipi_dsi2h {
 	bool enabled;
 	enum dsi2h_host_state state;
 
+	/* should dsi be fully powered off during panel self refresh, otherwise only enter ulps */
+	bool disable_psr_ulps;
+	/* indicates runtime pm was left on while entering psr, need to deal with extra vote */
+	bool psr_rpm_on;
+
 	struct phy *phy;
 	/* this device has driver data vs_mipi_dsi2h */
 	struct device *dev;
@@ -368,7 +392,10 @@ struct dw_mipi_dsi2h {
 
 	pid_t trace_pid;
 
-	#if IS_ENABLED(CONFIG_DEBUG_FS)
+	/** @rstn: Bitmask of reset behavior recommended */
+	u64 rstn;
+
+#if IS_ENABLED(CONFIG_DEBUG_FS)
 	struct dentry *debugfs;
 	struct dw_debugfs_hwv *debugfs_hwv;
 	struct dw_dsi2h_int_cntrs int_cntrs;

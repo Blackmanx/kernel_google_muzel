@@ -18,6 +18,6 @@ int vs_drm_atomic_commit(struct drm_device *dev, struct drm_atomic_state *state,
 void vs_drm_atomic_commit_tail(struct drm_atomic_state *old_state);
 int vs_drm_atomic_check(struct drm_device *dev, struct drm_atomic_state *state);
 int vs_drm_atomic_disable_all(struct drm_device *dev, struct drm_modeset_acquire_ctx *ctx);
-
+void vs_drm_atomic_print_old_state(const struct drm_atomic_state *state, struct drm_printer *p);
 
 #endif /* __VS_DRM_ATOMIC_H__ */

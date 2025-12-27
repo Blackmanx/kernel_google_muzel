@@ -322,3 +322,10 @@ Contact: "Chris Lu" <luchris@google.com>
 Description:
   Userspace client uses this to write and read the skin temperature.
 
+What: /sys/class/drm/card0/device/primary-panel/content_gray_level
+Date: October 2025
+KernelVersion: 6.6
+Contact: "Chris Lu" <luchris@google.com>
+Description:
+  Userspace client uses this to write the content gray level of screen UI. Some display and
+  sensor configurations will be applied to optimize experiences of specific Apps (b/444467427).

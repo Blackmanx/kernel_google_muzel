@@ -185,6 +185,40 @@ enum link_training_status {
 	LINK_TRAINING_FAILURE_SINK,
 };
 
+/* Getting maximum resolution for telemetry */
+struct dptx_max_res {
+	u16 hdisplay;
+	u16 vdisplay;
+};
+
+/* Preset resolutions for telemetry logging */
+enum dptx_preset_res {
+	DPTX_RES_1366_768,
+	DPTX_RES_1440_900,
+	DPTX_RES_1600_900,
+	DPTX_RES_1920_1080,
+	DPTX_RES_2560_1080,
+	DPTX_RES_2560_1440,
+	DPTX_RES_3440_1440,
+	DPTX_RES_3840_2160,
+	DPTX_RES_5120_2880,
+	DPTX_RES_7680_4320,
+	DPTX_RES_OTHER,
+	DPTX_RES_MAX,
+};
+
+struct dp_stats_counters {
+	u32 link_negotiation_failures;
+	u32 edid_read_failures;
+	u32 dpcd_read_failures;
+	u32 edid_invalid_failures;
+	u32 sink_count_invalid_failures;
+	u32 link_unstable_failures;
+	u32 max_res_counts[DPTX_RES_MAX];
+	u32 fec_dsc_supported;
+	u32 fec_dsc_not_supported;
+};
+
 struct dp_hw_config {
 	/* USB Type-C */
 	enum pin_assignment pin_type;
@@ -386,6 +420,13 @@ struct dptx {
 
 	/* Allow YCbCr 4:2:0 modes */
 	bool ycbcr_420_en;
+
+	/* DP stats/error counters */
+	struct dp_stats_counters stats;
+
+	/* DP struct for managing the maximum res */
+	struct dptx_max_res dptx_max_res_store;
+
 };
 
 /*

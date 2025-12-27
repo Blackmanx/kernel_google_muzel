@@ -1,26 +1,6 @@
 # SPDX-License-Identifier: MIT
 
-load("@bazel_skylib//rules:common_settings.bzl", "string_flag")
 load("//build/kernel/kleaf:kernel.bzl", "ddk_module", "kernel_module_group")
-
-config_setting(
-    name = "soc_lga",
-    flag_values = {
-        ":soc": "lga",
-    },
-)
-
-config_setting(
-    name = "soc_gs",
-    flag_values = {
-        ":soc": "gs",
-    },
-)
-
-string_flag(
-    name = "soc",
-    build_setting_default = "undefined",
-)
 
 ddk_module(
     name = "gs-panel",
@@ -65,11 +45,10 @@ ddk_module(
         "//private/google-modules/display/common:ddk_headers",
         "//private/google-modules/display/common/gs_drm:gs-drm-connector",
     ] + select({
-        ":soc_lga": [
+        "//private/devices/google/common:soc_is_laguna_or_later": [
             "//private/google-modules/soc/rdo:rdo_soc_headers",
             "//private/google-modules/soc/rdo:rdo_soc_module",
         ],
-        ":soc_gs": [],
         "//conditions:default": [],
     }),
 )

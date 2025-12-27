@@ -672,7 +672,6 @@ static void gs_panel_bridge_mode_set(struct drm_bridge *bridge, const struct drm
 {
 	struct gs_panel *ctx = bridge_to_gs_panel(bridge);
 	struct device *dev = ctx->dev;
-	struct mipi_dsi_device *dsi = to_mipi_dsi_device(ctx->dev);
 	const struct gs_panel_mode *pmode = gs_panel_get_mode(ctx, mode);
 	const struct gs_panel_funcs *funcs = ctx->desc->gs_panel_func;
 	const struct gs_panel_mode *old_mode;
@@ -738,7 +737,6 @@ static void gs_panel_bridge_mode_set(struct drm_bridge *bridge, const struct drm
 		ctx->mode_in_progress = MODE_RES_AND_RR_IN_PROGRESS;
 	}
 
-	gs_panel_update_dsi_with_mode(dsi, pmode);
 	ctx->timestamps.last_mode_set_ts = ktime_get();
 
 	PANEL_ATRACE_BEGIN("%s: %dx%dx%d@%d", __func__, pmode->mode.hdisplay, pmode->mode.vdisplay,
@@ -871,6 +869,10 @@ static void gs_panel_bridge_pre_enable(struct drm_bridge *bridge,
 				       struct drm_bridge_state *old_bridge_state)
 {
 	struct gs_panel *ctx = bridge_to_gs_panel(bridge);
+	struct mipi_dsi_device *dsi = to_mipi_dsi_device(ctx->dev);
+	struct drm_crtc_state *crtc_state = ctx->gs_connector->base.state->crtc->state;
+	struct drm_display_mode *mode = &crtc_state->mode;
+	const struct gs_panel_mode *pmode = gs_panel_get_mode(ctx, mode);
 
 	PANEL_ATRACE_BEGIN("gs_panel_bridge_pre_enable");
 	if (ctx->panel_state == GPANEL_STATE_BLANK) {
@@ -878,6 +880,10 @@ static void gs_panel_bridge_pre_enable(struct drm_bridge *bridge,
 			ctx->desc->gs_panel_func->panel_reset(ctx);
 	} else if (!gs_is_panel_enabled(ctx))
 		drm_panel_prepare(&ctx->base);
+
+	/* update dsi device with information about upcoming enabled mode */
+	gs_panel_update_dsi_with_mode(dsi, pmode);
+
 	PANEL_ATRACE_END("gs_panel_bridge_pre_enable");
 }
 
@@ -903,7 +909,8 @@ static void gs_panel_set_partial(struct gs_display_partial *partial,
 /**
  * gs_panel_is_mode_seamless() - check if mode transition can be done seamlessly
  * @ctx: Reference to panel data
- * @mode: Proposed display mode
+ * @old_pmode: Current display mode (potentially NULL if panel was off)
+ * @new_pmode: Proposed display mode
  *
  * Checks whether the panel can transition to the new mode seamlessly without
  * having to turn the display off before the mode change.
@@ -913,11 +920,19 @@ static void gs_panel_set_partial(struct gs_display_partial *partial,
  *
  * Return: true if seamless transition possible, false otherwise
  */
-static bool gs_panel_is_mode_seamless(const struct gs_panel *ctx, const struct gs_panel_mode *mode)
+static bool gs_panel_is_mode_seamless(const struct gs_panel *ctx,
+				      const struct gs_panel_mode *old_pmode,
+				      const struct gs_panel_mode *new_pmode)
 {
-	if (!gs_panel_has_func(ctx, is_mode_seamless))
+	if (gs_panel_has_func(ctx, is_mode_seamless_atomic)) {
+		if (!old_pmode)
+			return false;
+		return ctx->desc->gs_panel_func->is_mode_seamless_atomic(ctx, old_pmode, new_pmode);
+	} else if (gs_panel_has_func(ctx, is_mode_seamless)) {
+		return ctx->desc->gs_panel_func->is_mode_seamless(ctx, new_pmode);
+	} else {
 		return false;
-	return ctx->desc->gs_panel_func->is_mode_seamless(ctx, mode);
+	}
 }
 
 static int gs_drm_connector_check_mode(struct gs_panel *ctx,
@@ -925,7 +940,12 @@ static int gs_drm_connector_check_mode(struct gs_panel *ctx,
 				       struct drm_crtc_state *crtc_state)
 {
 	struct gs_drm_connector_state *gs_connector_state = to_gs_connector_state(connector_state);
+	struct drm_atomic_state *state = crtc_state->state;
+	struct drm_crtc_state *old_crtc_state =
+		drm_atomic_get_old_crtc_state(state, crtc_state->crtc);
 	const struct gs_panel_mode *pmode = gs_panel_get_mode(ctx, &crtc_state->mode);
+	const struct gs_panel_mode *old_pmode =
+		old_crtc_state ? gs_panel_get_mode(ctx, &old_crtc_state->mode) : NULL;
 	bool is_video_mode;
 
 	if (!pmode) {
@@ -941,7 +961,8 @@ static int gs_drm_connector_check_mode(struct gs_panel *ctx,
 	if (crtc_state->connectors_changed || !gs_is_panel_active(ctx))
 		gs_connector_state->seamless_possible = false;
 	else
-		gs_connector_state->seamless_possible = gs_panel_is_mode_seamless(ctx, pmode);
+		gs_connector_state->seamless_possible =
+			gs_panel_is_mode_seamless(ctx, old_pmode, pmode);
 
 	gs_connector_state->gs_mode = pmode->gs_mode;
 	if (gs_panel_has_func(ctx, get_te_usec))

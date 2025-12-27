@@ -31,7 +31,7 @@ static bool display_sharpness_inkmode_config_hw(struct dc_hw *hw, u8 hw_id, bool
 
 	enable = enable && sharpness->enable;
 
-	config = VS_SET_FIELD(config, DCREG_SH_PANEL0_CONFIG, SHARPNESS, !!enable);
+	config = VS_SET_FIELD(config, DCREG_SH_PANEL0_CONFIG, SHARPNESS, enable);
 	dc_write(hw, DCREG_SH_PANEL0_CONFIG_Address + offset, config);
 	mode = VS_SET_FIELD(0, DCREG_SH_PANEL0_SHARP_INK_MODE_SELECT, VALUE, sharpness->ink_mode);
 	dc_write(hw, DCREG_SH_PANEL0_SHARP_INK_MODE_SELECT_Address + offset, mode);
@@ -230,7 +230,7 @@ static bool display_sharpness_color_boost_config_hw(struct dc_hw *hw, u8 hw_id, 
 	const struct drm_vs_sharpness_color_boost *cb = data;
 	const u32 offset = vs_dc_get_display_offset(hw_id);
 
-	dc_write(hw, DCREG_SH_PANEL0_SHARP_COLOR_BOOST_ENABLE_Address + offset, !!enable);
+	dc_write(hw, DCREG_SH_PANEL0_SHARP_COLOR_BOOST_ENABLE_Address + offset, enable);
 	if (enable) {
 		dc_write(hw, DCREG_SH_PANEL0_SHARP_COLOR_BOOST_POSITIVE_GAIN_Address + offset,
 			 cb->pos_gain);
@@ -249,7 +249,7 @@ static bool display_sharpness_soft_clip_config_hw(struct dc_hw *hw, u8 hw_id, bo
 	const struct drm_vs_sharpness_soft_clip *sc = data;
 	const u32 offset = vs_dc_get_display_offset(hw_id);
 
-	dc_write(hw, DCREG_SH_PANEL0_SHARP_SOFT_CLIP_ENABLE_Address + offset, !!enable);
+	dc_write(hw, DCREG_SH_PANEL0_SHARP_SOFT_CLIP_ENABLE_Address + offset, enable);
 	if (enable) {
 		dc_write(hw, DCREG_SH_PANEL0_SHARP_SOFT_CLIP_POSITIVE_OFFSET_Address + offset,
 			 sc->pos_offset);
@@ -271,7 +271,7 @@ static bool display_sharpness_dither_config_hw(struct dc_hw *hw, u8 hw_id, bool 
 	const u32 offset = vs_dc_get_display_offset(hw_id);
 	u32 config = 0;
 
-	dc_write(hw, DCREG_SH_PANEL0_SHARP_DITHER_ENABLE_Address + offset, !!enable);
+	dc_write(hw, DCREG_SH_PANEL0_SHARP_DITHER_ENABLE_Address + offset, enable);
 	if (enable) {
 		config = VS_SET_FIELD(0, DCREG_SH_PANEL0_SHARP_DITHER_TABLE, R_VALUE0,
 				      dither->table_low[0]);

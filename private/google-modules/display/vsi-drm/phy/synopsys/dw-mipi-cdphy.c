@@ -88,8 +88,11 @@ static int dw_mipi_cdphy_probe(struct platform_device *pdev)
 	}
 
 	// call CD-PHY init callback
-	// TODO NC - Check return value
-	dw_cdphy->cdphy_init(dw_cdphy);
+	ret = dw_cdphy->cdphy_init(dw_cdphy);
+	if (ret) {
+		dev_err(dev, "Failed to init PHY\n");
+		return ret;
+	}
 
 	/* Create CD-PHY */
 	dw_cdphy->phy = devm_phy_create(dev, NULL, dw_cdphy->cdphy_ops);

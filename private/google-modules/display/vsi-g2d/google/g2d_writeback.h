@@ -30,13 +30,12 @@ struct g2d_writeback_connector {
 };
 
 struct g2d_writeback_funcs {
-	void (*config)(struct g2d_writeback_connector *wb_connector, struct drm_framebuffer *fb);
-	int (*check)(struct g2d_writeback_connector *wb_connector, struct drm_framebuffer *fb,
-		     struct drm_display_mode *mode, struct drm_connector_state *state);
+	void (*commit)(struct g2d_writeback_connector *wb_connector, struct drm_framebuffer *fb);
+	int (*check)(struct drm_device *drm_dev, const struct drm_framebuffer *fb);
 };
 
 struct g2d_device;
-int g2d_enable_writeback_connector(struct g2d_device *gdevice, uint32_t possible_crtcs);
+int g2d_enable_writeback_connector(struct g2d_device *g2d_device, uint32_t possible_crtcs);
 void g2d_handle_writeback_frm_done(struct g2d_writeback_connector *g2d_wb_connector);
 
 #endif // _G2D_WRITEBACK_H_

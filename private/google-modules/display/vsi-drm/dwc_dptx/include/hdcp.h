@@ -47,6 +47,7 @@ struct hdcp_device {
 	enum auth_state hdcp_auth_state;
 	uint32_t drm_cp_status;
 	uint32_t session_id;
+	uint32_t link_failure_cnt;
 
 	struct hdcp_tz_chan_ctx hdcp_ta_ctx;
 
@@ -67,6 +68,7 @@ void dptx_hdcp_auth_state_probe(struct dptx *dptx_dev);
 void dptx_hdcp_remove(struct dptx *dptx_dev);
 void dptx_hdcp_connect(struct dptx *dptx_dev, bool is_dpcd12_plus);
 void dptx_hdcp_disconnect(struct dptx *dptx_dev);
+void dptx_hdcp_physical_disconnect(struct dptx *dptx_dev);
 
 int handle_cp_irq_set(struct dptx *dptx_dev);
 int hdcp_set_auth_state(struct dptx *dptx, enum auth_state state);

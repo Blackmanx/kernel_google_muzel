@@ -8,6 +8,7 @@ ddk_module(
         "gs_drm_connector.c",
         "gs_drm_trace.c",
         "gs_reg_dump.c",
+        "gs_sscd.c",
     ],
     out = "gs-drm-connector.ko",
     copts = [
@@ -25,6 +26,7 @@ ddk_module(
     deps = [
         "//common:all_headers_aarch64",
         "//private/google-modules/display/common:ddk_headers",
+        "//private/google-modules/soc/gs:headers",
     ],
 )
 

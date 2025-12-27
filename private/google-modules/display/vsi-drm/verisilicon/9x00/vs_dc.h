@@ -6,19 +6,26 @@
 #ifndef __VS_DC_H__
 #define __VS_DC_H__
 
+#include <linux/bitmap.h>
 #include <linux/debugfs.h>
 #include <linux/devfreq.h>
+#include <linux/irq.h>
+#include <linux/irqdesc.h>
 #include <linux/mm_types.h>
 #include <linux/platform_device.h>
 #include <linux/pm_qos.h>
 #include <drm/drm_modes.h>
 #include <drm/drm_color_mgmt.h>
 
+#include <gs_drm/gs_sscd.h>
+
 #include "vs_crtc.h"
 #include "vs_dc_hw.h"
 #include "vs_plane.h"
 #include "vs_writeback.h"
 #include "preprocess/vs_dc_pvric.h"
+
+#define VS_DC_MAX_NUM_IRQS 48
 
 static inline u8 to_vs_rotation(u32 rotation)
 {
@@ -93,6 +100,7 @@ struct vs_dc {
 	 */
 	struct vs_crtc *crtc[DC_DISPLAY_NUM];
 	struct dc_hw hw;
+	struct drm_device *drm_dev;
 
 	struct devfreq *core_devfreq;
 	struct devfreq *fabrt_devfreq;
@@ -100,6 +108,9 @@ struct vs_dc {
 	int *irqs;
 	int irq_enable_count;
 	spinlock_t int_lock;
+	u8 *irq_depths;
+	DECLARE_BITMAP(irq_masked_status, VS_DC_MAX_NUM_IRQS);
+	DECLARE_BITMAP(irq_pending_status, VS_DC_MAX_NUM_IRQS);
 	struct mutex dc_lock; /* protect state and data */
 	struct mutex dc_qos_lock;
 
@@ -130,10 +141,15 @@ struct vs_dc {
 	bool disable_crtc_recovery;
 	/** @disable_urgent: whether to disable QoS urgent level feature */
 	bool disable_urgent;
-
 	/** @boost_fabrt_freq: define the value to boost FABRT frequency */
 	u32 boost_fabrt_freq;
+	/** @disp_sscd: handle for display subsystem coredump */
+	struct display_sscd_info *disp_sscd;
+	/** @coredump_en: whether to enable subsystem coredump */
+	bool coredump_en;
 };
+
+void vs_dc_update_irq_statuses(struct vs_dc *dc);
 
 extern struct platform_driver dc_platform_driver;
 
@@ -147,10 +163,12 @@ int vs_get_feature_cap_ioctl(struct drm_device *dev, void *data, struct drm_file
 int vs_get_hw_cap_ioctl(struct drm_device *dev, void *data, struct drm_file *file_priv);
 int vs_get_hist_bins_query_ioctl(struct drm_device *dev, void *data, struct drm_file *file_priv);
 int vs_get_ltm_hist_ioctl(struct drm_device *dev, void *data, struct drm_file *file_priv);
+int vs_task_fence_ioctl(struct drm_device *dev, void *data, struct drm_file *file_priv);
 bool vs_dc_is_yuv_format(u32 format);
 void vs_dc_check_interrupts(struct device *dev);
 int vs_dc_power_get(struct device *dev, bool sync);
 int vs_dc_power_put(struct device *dev, bool sync);
+int vs_dc_coredump(struct vs_dc *dc, const char *reason);
 bool is_display_cmd_sw_trigger(struct dc_hw_display *display);
 
 #if IS_ENABLED(CONFIG_DEBUG_FS)

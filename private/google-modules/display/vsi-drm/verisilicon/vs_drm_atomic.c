@@ -9,10 +9,13 @@
 
 #include "vs_drm_atomic.h"
 #include "vs_crtc.h"
+#include "vs_drm_state_record.h"
 
+#include <linux/bitmap.h>
 #include <linux/dma-fence.h>
 #include <linux/kthread.h>
 #include <linux/sched.h>
+#include <linux/timekeeping.h>
 
 #include <drm/drm_atomic_helper.h>
 #include <drm/drm_blend.h>
@@ -41,6 +44,8 @@
   * - Add support for gs_connector pre/post commit functions.
   * - Uses a 250 ms fence timeout instead of a infinite one.
   * - Split modeset disable sequence to power off ENCODERS before CRTCS
+  * - Added vs_drm_atomic_print_old_state to match drm_atomic_print_new_state,
+  *     along with function dependencies, to print the old components of a state
   */
 
 static void dump_fence_timeout_info(struct drm_printer *p, struct drm_plane *plane,
@@ -119,6 +124,23 @@ static int vs_drm_atomic_helper_wait_for_fences(struct drm_device *dev,
 	return err;
 }
 
+static void vs_drm_atomic_mark_commit_timestamp(struct drm_atomic_state *state, bool is_begin_ts)
+{
+	struct drm_crtc *crtc;
+	struct drm_crtc_state *new_crtc_state;
+	int i;
+	ktime_t ts = ktime_get_real();
+
+	for_each_new_crtc_in_state(state, crtc, new_crtc_state, i) {
+		struct vs_crtc_state *vs_crtc_state = to_vs_crtc_state(new_crtc_state);
+
+		if (is_begin_ts)
+			vs_crtc_state->commit_begin_ts = ts;
+		else
+			vs_crtc_state->commit_done_ts = ts;
+	}
+}
+
 static void vs_drm_commit_tail(struct drm_atomic_state *old_state)
 {
 	struct drm_device *dev = old_state->dev;
@@ -126,6 +148,9 @@ static void vs_drm_commit_tail(struct drm_atomic_state *old_state)
 
 	DPU_ATRACE_BEGIN(__func__);
 	funcs = dev->mode_config.helper_private;
+
+	/* Record the state being committed */
+	vs_drm_record_state(old_state);
 
 	DPU_ATRACE_BEGIN("wait_for_fences");
 	vs_drm_atomic_helper_wait_for_fences(dev, old_state, false);
@@ -143,6 +168,8 @@ static void vs_drm_commit_tail(struct drm_atomic_state *old_state)
 	DPU_ATRACE_BEGIN("cleanup_done");
 	drm_atomic_helper_commit_cleanup_done(old_state);
 	DPU_ATRACE_END("cleanup_done");
+
+	vs_drm_atomic_mark_commit_timestamp(old_state, false);
 
 	drm_atomic_state_put(old_state);
 	DPU_ATRACE_END(__func__);
@@ -191,6 +218,8 @@ static int vs_drm_atomic_commit_internal(struct drm_device *dev, struct drm_atom
 					 bool nonblock)
 {
 	int ret;
+
+	vs_drm_atomic_mark_commit_timestamp(state, true);
 
 	DPU_ATRACE_BEGIN("setup_commit");
 	ret = drm_atomic_helper_setup_commit(state, nonblock);
@@ -545,6 +574,46 @@ static int vs_drm_atomic_check_updated_planes(struct drm_device *dev,
 	return 0;
 }
 
+static void vs_drm_atomic_check_recovery_needed(struct drm_device *dev,
+						struct drm_atomic_state *state)
+{
+	struct drm_connector *connector;
+	struct drm_connector_state *new_conn_state;
+	int i;
+
+	for_each_new_connector_in_state(state, connector, new_conn_state, i) {
+		struct drm_crtc_state *new_crtc_state;
+		struct gs_drm_connector_state *gs_conn_state;
+		struct vs_crtc_state *vs_crtc_state;
+
+		if (!new_conn_state->crtc)
+			continue;
+
+		new_crtc_state = drm_atomic_get_new_crtc_state(state, new_conn_state->crtc);
+		if (!new_crtc_state->active)
+			continue;
+
+		if (connector->connector_type != DRM_MODE_CONNECTOR_DSI)
+			continue;
+
+		if (!is_gs_drm_connector(connector))
+			continue;
+
+		gs_conn_state = to_gs_connector_state(new_conn_state);
+		vs_crtc_state = to_vs_crtc_state(new_crtc_state);
+
+		if (test_bit(GS_DSI_ERR_HARD_RSTN, gs_conn_state->dsi_errors) ||
+		    !bitmap_empty(gs_conn_state->panel_errors, GS_PANEL_ERR_MAX)) {
+			vs_crtc_state->needs_recovery = true;
+			dev_dbg(dev->dev, "marking crtc needs_recovery dsi:%*pb panel:%*pb\n",
+				GS_DSI_ERR_MAX, gs_conn_state->dsi_errors, GS_PANEL_ERR_MAX,
+				gs_conn_state->panel_errors);
+		}
+		clear_bit(GS_DSI_ERR_HARD_RSTN, gs_conn_state->dsi_errors);
+		bitmap_clear(gs_conn_state->panel_errors, 0, GS_PANEL_ERR_MAX);
+	}
+}
+
 int vs_drm_atomic_check(struct drm_device *dev, struct drm_atomic_state *state)
 {
 	int ret;
@@ -586,6 +655,8 @@ int vs_drm_atomic_check(struct drm_device *dev, struct drm_atomic_state *state)
 			goto end;
 		}
 	}
+
+	vs_drm_atomic_check_recovery_needed(dev, state);
 
 	DPU_ATRACE_BEGIN("check_planes");
 	ret = drm_atomic_helper_check_planes(dev, state);
@@ -1120,3 +1191,225 @@ free:
 	return ret ? : crtc_mask;
 }
 
+/* Print Functions */
+/* These are designed to match their counterparts in drm_atomic.c */
+
+static const char *const color_encoding_name[] = {
+	[DRM_COLOR_YCBCR_BT601] = "ITU-R BT.601 YCbCr",
+	[DRM_COLOR_YCBCR_BT709] = "ITU-R BT.709 YCbCr",
+	[DRM_COLOR_YCBCR_BT2020] = "ITU-R BT.2020 YCbCr",
+};
+
+static const char *const color_range_name[] = {
+	[DRM_COLOR_YCBCR_FULL_RANGE] = "YCbCr full range",
+	[DRM_COLOR_YCBCR_LIMITED_RANGE] = "YCbCr limited range",
+};
+
+static const char *drm_get_color_encoding_name(enum drm_color_encoding encoding)
+{
+	if (WARN_ON(encoding >= ARRAY_SIZE(color_encoding_name)))
+		return "unknown";
+
+	return color_encoding_name[encoding];
+}
+
+static const char *drm_get_color_range_name(enum drm_color_range range)
+{
+	if (WARN_ON(range >= ARRAY_SIZE(color_range_name)))
+		return "unknown";
+
+	return color_range_name[range];
+}
+
+static const char *const colorspace_names[] = {
+	/* For Default case, driver will set the colorspace */
+	[DRM_MODE_COLORIMETRY_DEFAULT] = "Default",
+	/* Standard Definition Colorimetry based on CEA 861 */
+	[DRM_MODE_COLORIMETRY_SMPTE_170M_YCC] = "SMPTE_170M_YCC",
+	[DRM_MODE_COLORIMETRY_BT709_YCC] = "BT709_YCC",
+	/* Standard Definition Colorimetry based on IEC 61966-2-4 */
+	[DRM_MODE_COLORIMETRY_XVYCC_601] = "XVYCC_601",
+	/* High Definition Colorimetry based on IEC 61966-2-4 */
+	[DRM_MODE_COLORIMETRY_XVYCC_709] = "XVYCC_709",
+	/* Colorimetry based on IEC 61966-2-1/Amendment 1 */
+	[DRM_MODE_COLORIMETRY_SYCC_601] = "SYCC_601",
+	/* Colorimetry based on IEC 61966-2-5 [33] */
+	[DRM_MODE_COLORIMETRY_OPYCC_601] = "opYCC_601",
+	/* Colorimetry based on IEC 61966-2-5 */
+	[DRM_MODE_COLORIMETRY_OPRGB] = "opRGB",
+	/* Colorimetry based on ITU-R BT.2020 */
+	[DRM_MODE_COLORIMETRY_BT2020_CYCC] = "BT2020_CYCC",
+	/* Colorimetry based on ITU-R BT.2020 */
+	[DRM_MODE_COLORIMETRY_BT2020_RGB] = "BT2020_RGB",
+	/* Colorimetry based on ITU-R BT.2020 */
+	[DRM_MODE_COLORIMETRY_BT2020_YCC] = "BT2020_YCC",
+	/* Added as part of Additional Colorimetry Extension in 861.G */
+	[DRM_MODE_COLORIMETRY_DCI_P3_RGB_D65] = "DCI-P3_RGB_D65",
+	[DRM_MODE_COLORIMETRY_DCI_P3_RGB_THEATER] = "DCI-P3_RGB_Theater",
+	[DRM_MODE_COLORIMETRY_RGB_WIDE_FIXED] = "RGB_WIDE_FIXED",
+	/* Colorimetry based on scRGB (IEC 61966-2-2) */
+	[DRM_MODE_COLORIMETRY_RGB_WIDE_FLOAT] = "RGB_WIDE_FLOAT",
+	[DRM_MODE_COLORIMETRY_BT601_YCC] = "BT601_YCC",
+};
+
+const char *drm_get_colorspace_name(enum drm_colorspace colorspace)
+{
+	if (colorspace < ARRAY_SIZE(colorspace_names) && colorspace_names[colorspace])
+		return colorspace_names[colorspace];
+	else
+		return "(null)";
+}
+
+static void drm_gem_print_info(struct drm_printer *p, unsigned int indent,
+			       const struct drm_gem_object *obj)
+{
+	drm_printf_indent(p, indent, "name=%d\n", obj->name);
+	drm_printf_indent(p, indent, "refcount=%u\n", kref_read(&obj->refcount));
+	drm_printf_indent(p, indent, "start=%08lx\n", drm_vma_node_start(&obj->vma_node));
+	drm_printf_indent(p, indent, "size=%zu\n", obj->size);
+	drm_printf_indent(p, indent, "imported=%s\n", str_yes_no(obj->import_attach));
+
+	if (obj->funcs->print_info)
+		obj->funcs->print_info(p, indent, obj);
+}
+
+static void drm_framebuffer_print_info(struct drm_printer *p, unsigned int indent,
+				       const struct drm_framebuffer *fb)
+{
+	unsigned int i;
+
+	drm_printf_indent(p, indent, "allocated by = %s\n", fb->comm);
+	drm_printf_indent(p, indent, "refcount=%u\n", drm_framebuffer_read_refcount(fb));
+	drm_printf_indent(p, indent, "format=%p4cc\n", &fb->format->format);
+	drm_printf_indent(p, indent, "modifier=0x%llx\n", fb->modifier);
+	drm_printf_indent(p, indent, "size=%ux%u\n", fb->width, fb->height);
+	drm_printf_indent(p, indent, "layers:\n");
+
+	for (i = 0; i < fb->format->num_planes; i++) {
+		drm_printf_indent(p, indent + 1, "size[%u]=%dx%d\n", i,
+				  drm_format_info_plane_width(fb->format, fb->width, i),
+				  drm_format_info_plane_height(fb->format, fb->height, i));
+		drm_printf_indent(p, indent + 1, "pitch[%u]=%u\n", i, fb->pitches[i]);
+		drm_printf_indent(p, indent + 1, "offset[%u]=%u\n", i, fb->offsets[i]);
+		drm_printf_indent(p, indent + 1, "obj[%u]:%s\n", i, fb->obj[i] ? "" : "(null)");
+		if (fb->obj[i])
+			drm_gem_print_info(p, indent + 2, fb->obj[i]);
+	}
+}
+
+static void drm_atomic_plane_print_state(struct drm_printer *p, const struct drm_plane_state *state)
+{
+	struct drm_plane *plane = state->plane;
+	struct drm_rect src = drm_plane_state_src(state);
+	struct drm_rect dest = drm_plane_state_dest(state);
+
+	drm_printf(p, "plane[%u]: %s\n", plane->base.id, plane->name);
+	drm_printf(p, "\tcrtc=%s\n", state->crtc ? state->crtc->name : "(null)");
+	drm_printf(p, "\tfb=%u\n", state->fb ? state->fb->base.id : 0);
+	if (state->fb)
+		drm_framebuffer_print_info(p, 2, state->fb);
+	drm_printf(p, "\tcrtc-pos=" DRM_RECT_FMT "\n", DRM_RECT_ARG(&dest));
+	drm_printf(p, "\tsrc-pos=" DRM_RECT_FP_FMT "\n", DRM_RECT_FP_ARG(&src));
+	drm_printf(p, "\trotation=%x\n", state->rotation);
+	drm_printf(p, "\tnormalized-zpos=%x\n", state->normalized_zpos);
+	drm_printf(p, "\tcolor-encoding=%s\n", drm_get_color_encoding_name(state->color_encoding));
+	drm_printf(p, "\tcolor-range=%s\n", drm_get_color_range_name(state->color_range));
+
+	if (plane->funcs->atomic_print_state)
+		plane->funcs->atomic_print_state(p, state);
+}
+
+static void drm_atomic_crtc_print_state(struct drm_printer *p, const struct drm_crtc_state *state)
+{
+	struct drm_crtc *crtc = state->crtc;
+
+	drm_printf(p, "crtc[%u]: %s\n", crtc->base.id, crtc->name);
+	drm_printf(p, "\tenable=%d\n", state->enable);
+	drm_printf(p, "\tactive=%d\n", state->active);
+	drm_printf(p, "\tself_refresh_active=%d\n", state->self_refresh_active);
+	drm_printf(p, "\tplanes_changed=%d\n", state->planes_changed);
+	drm_printf(p, "\tmode_changed=%d\n", state->mode_changed);
+	drm_printf(p, "\tactive_changed=%d\n", state->active_changed);
+	drm_printf(p, "\tconnectors_changed=%d\n", state->connectors_changed);
+	drm_printf(p, "\tcolor_mgmt_changed=%d\n", state->color_mgmt_changed);
+	drm_printf(p, "\tplane_mask=%x\n", state->plane_mask);
+	drm_printf(p, "\tconnector_mask=%x\n", state->connector_mask);
+	drm_printf(p, "\tencoder_mask=%x\n", state->encoder_mask);
+	drm_printf(p, "\tmode: " DRM_MODE_FMT "\n", DRM_MODE_ARG(&state->mode));
+
+	if (crtc->funcs->atomic_print_state)
+		crtc->funcs->atomic_print_state(p, state);
+}
+
+static void drm_atomic_connector_print_state(struct drm_printer *p,
+					     const struct drm_connector_state *state)
+{
+	struct drm_connector *connector = state->connector;
+
+	drm_printf(p, "connector[%u]: %s\n", connector->base.id, connector->name);
+	drm_printf(p, "\tcrtc=%s\n", state->crtc ? state->crtc->name : "(null)");
+	drm_printf(p, "\tself_refresh_aware=%d\n", state->self_refresh_aware);
+	drm_printf(p, "\tmax_requested_bpc=%d\n", state->max_requested_bpc);
+	drm_printf(p, "\tcolorspace=%s\n", drm_get_colorspace_name(state->colorspace));
+
+	if (connector->connector_type == DRM_MODE_CONNECTOR_WRITEBACK)
+		if (state->writeback_job && state->writeback_job->fb)
+			drm_printf(p, "\tfb=%d\n", state->writeback_job->fb->base.id);
+
+	if (connector->funcs->atomic_print_state)
+		connector->funcs->atomic_print_state(p, state);
+}
+
+static void drm_atomic_private_obj_print_state(struct drm_printer *p,
+					       const struct drm_private_state *state)
+{
+	struct drm_private_obj *obj = state->obj;
+
+	if (obj->funcs->atomic_print_state)
+		obj->funcs->atomic_print_state(p, state);
+}
+
+/**
+ * vs_drm_atomic_print_old_state - prints old drm atomic state
+ * @state: atomic configuration to check
+ * @p: drm printer
+ *
+ * This functions prints the drm atomic state snapshot using the drm printer
+ * which is passed to it. This snapshot can be used for debugging purposes.
+ *
+ * Note that this function looks into the "old" state objects and hence it
+ * can not only be used after the call to drm_atomic_helper_commit_hw_done(),
+ * but it may be used after calls to drm_atomic_helper_swap_state() to
+ * effectively print the previously-new state of the associated atomic commit.
+ *
+ * It mirrors drm_atomic_print_new_state() directly.
+ */
+void vs_drm_atomic_print_old_state(const struct drm_atomic_state *state, struct drm_printer *p)
+{
+	struct drm_plane *plane;
+	struct drm_plane_state *plane_state;
+	struct drm_crtc *crtc;
+	struct drm_crtc_state *crtc_state;
+	struct drm_connector *connector;
+	struct drm_connector_state *connector_state;
+	struct drm_private_obj *obj;
+	struct drm_private_state *obj_state;
+	int i;
+
+	if (!p) {
+		drm_err(state->dev, "invalid drm printer\n");
+		return;
+	}
+
+	for_each_old_plane_in_state(state, plane, plane_state, i)
+		drm_atomic_plane_print_state(p, plane_state);
+
+	for_each_old_crtc_in_state(state, crtc, crtc_state, i)
+		drm_atomic_crtc_print_state(p, crtc_state);
+
+	for_each_old_connector_in_state(state, connector, connector_state, i)
+		drm_atomic_connector_print_state(p, connector_state);
+
+	for_each_old_private_obj_in_state(state, obj, obj_state, i)
+		drm_atomic_private_obj_print_state(p, obj_state);
+}

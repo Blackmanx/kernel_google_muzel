@@ -80,6 +80,32 @@ static int reg_dump_show(struct seq_file *s, void *data)
 	return vs_dc_reg_dump(s, reg_dump_data->hw, reg_dump_data->reg_type);
 }
 
+static int hw_dump_show(struct seq_file *s, void *data)
+{
+	const struct dc_hw *hw = s->private;
+	u8 i;
+
+	for (i = 0; i < DC_DISPLAY_NUM; i++) {
+		const struct dc_hw_display *display = &hw->display[i];
+
+		seq_printf(s, "display-%d\n", i);
+		display->func.print_state(s, display, 1);
+	}
+	for (i = 0; i < DC_PLANE_NUM; i++) {
+		const struct dc_hw_plane *plane = &hw->plane[i];
+
+		seq_printf(s, "plane-%d\n", i);
+		plane->func.print_state(s, plane, 1);
+	}
+	for (i = 0; i < DC_WB_NUM; i++) {
+		const struct dc_hw_wb *wb = &hw->wb[i];
+
+		seq_printf(s, "wb-%d\n", i);
+		wb->func.print_state(s, wb, 1);
+	}
+	return 0;
+}
+
 static int reg_dump_open(struct inode *inode, struct file *file)
 {
 	struct reg_dump_data *data = inode->i_private;
@@ -93,9 +119,63 @@ static int reg_dump_open(struct inode *inode, struct file *file)
 	return single_open_size(file, reg_dump_show, data, data->dump_size);
 }
 
+static int hw_dump_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, hw_dump_show, inode->i_private);
+}
+
 static const struct file_operations reg_dump_fops = {
 	.owner = THIS_MODULE,
 	.open = reg_dump_open,
+	.read = seq_read,
+	.llseek = seq_lseek,
+	.release = single_release,
+};
+
+static const struct file_operations hw_dump_fops = {
+	.owner = THIS_MODULE,
+	.open = hw_dump_open,
+	.read = seq_read,
+	.llseek = seq_lseek,
+	.release = single_release,
+};
+
+static ssize_t dc_coredump_write(struct file *file, const char __user *user_buf, size_t len,
+				 loff_t *ppos)
+{
+	struct seq_file *m = file->private_data;
+	struct dc_hw *hw = m->private;
+	struct vs_dc *dc = to_vs_dc(hw);
+	bool coredump;
+	int ret;
+
+	if (!dc->disp_sscd)
+		return -EPERM;
+
+	ret = kstrtobool_from_user(user_buf, len, &coredump);
+	if (ret)
+		return ret;
+
+	if (coredump)
+		vs_dc_coredump(dc, "Manual core dump");
+
+	return len;
+}
+
+static int dc_coredump_show(struct seq_file *s, void *data)
+{
+	return -EPERM;
+}
+
+static int dc_coredump_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, dc_coredump_show, inode->i_private);
+}
+
+static const struct file_operations dc_coredump_fops = {
+	.owner = THIS_MODULE,
+	.open = dc_coredump_open,
+	.write = dc_coredump_write,
 	.read = seq_read,
 	.llseek = seq_lseek,
 	.release = single_release,
@@ -144,8 +224,14 @@ int dc_init_debugfs(struct vs_dc *dc)
 		debugfs_create_u32("reg_dump_size", 0664, dentry_dpu_dump, &dc->hw.reg_dump_size);
 	}
 
+	if (dc->coredump_en)
+		debugfs_create_file("coredump_trigger", 0444, dc->debugfs, &dc->hw,
+				    &dc_coredump_fops);
+
 	debugfs_create_bool("disable_hw_reset", 0644, dc->debugfs, &dc->disable_hw_reset);
 	debugfs_create_u32("hw_reg_dump_options", 0644, dc->debugfs, &dc->hw_reg_dump_options);
+
+	debugfs_create_file("state", 0444, dc->debugfs, &dc->hw, &hw_dump_fops);
 
 	return 0;
 }

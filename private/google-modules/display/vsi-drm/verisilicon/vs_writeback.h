@@ -20,6 +20,7 @@ struct vs_writeback_funcs {
 	void (*disable)(struct vs_writeback_connector *wb_connector);
 	int (*check)(struct vs_writeback_connector *wb_connector, struct drm_framebuffer *fb,
 		     struct drm_display_mode *mode, struct drm_connector_state *state);
+	void (*cleanup)(struct vs_writeback_connector *wb_connector);
 };
 
 struct vs_writeback_connector_state {

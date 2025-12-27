@@ -7,6 +7,7 @@
 #include <linux/debugfs.h>
 #include <linux/dma-fence.h>
 #include <linux/kernel.h>
+#include <linux/ktime.h>
 #include <linux/media-bus-format.h>
 #include <linux/of.h>
 #include <linux/pm_runtime.h>
@@ -21,6 +22,7 @@
 #include <drm/drm_print.h>
 #include <drm/drm_vblank.h>
 
+#include <gs_drm/gs_drm_connector.h>
 #include <trace/dpu_trace.h>
 
 #include "vs_crtc.h"
@@ -161,6 +163,8 @@ void vs_crtc_destroy(struct drm_crtc *crtc)
 	for (int i = VS_HIST_CHAN_IDX_0; i < VS_HIST_CHAN_IDX_COUNT; i++)
 		vs_gem_pool_deinit(&vs_crtc->hist_chan_gem_pool[i]);
 
+	vs_gem_pool_deinit(&vs_crtc->hist_rgb_gem_pool);
+
 	wakeup_source_unregister(vs_crtc->ws);
 
 	kfree(vs_crtc);
@@ -189,6 +193,7 @@ static void vs_crtc_reset(struct drm_crtc *crtc)
 	state->output_fmt = MEDIA_BUS_FMT_RGB888_1X24;
 	state->encoder_type = DRM_MODE_ENCODER_NONE;
 	state->seamless_mode_change = false;
+	state->needs_recovery = false;
 
 	for (i = 0; i < vs_crtc->properties.num; i++) {
 		state->drm_states[i].proto = vs_crtc->properties.items[i].proto;
@@ -197,12 +202,15 @@ static void vs_crtc_reset(struct drm_crtc *crtc)
 
 	/* reset internal state variables */
 	atomic_set(&vs_crtc->frames_pending, 0);
+	atomic_set(&vs_crtc->frame_done_count, 0);
+	atomic_set(&vs_crtc->te_count, 0);
 	DPU_ATRACE_INT_PID_FMT(atomic_read(&vs_crtc->frames_pending), vs_crtc->trace_pid,
 			       "frames_pending[%u]", crtc->index);
 	vs_crtc->frame_transfer_pending = false;
 	atomic_set(&vs_crtc->hw_reset_count, 0);
 	vs_crtc->trace_pid = 0;
 	vs_crtc->ltm_hist_query_pending = false;
+	vs_crtc->power_off_mode_override = VS_POWER_OFF_MODE_COUNT;
 }
 
 static void _vs_crtc_duplicate_blob_state(struct vs_drm_blob_state *state)
@@ -325,6 +333,11 @@ static struct drm_crtc_state *vs_crtc_atomic_duplicate_state(struct drm_crtc *cr
 
 	state->need_boost_fabrt = false;
 
+	state->needs_recovery = false;
+
+	state->commit_begin_ts = 0;
+	state->commit_done_ts = 0;
+
 	/* dc properties */
 	vs_dc_duplicate_drm_properties(state->drm_states, ori_state->drm_states,
 				       &vs_crtc->properties);
@@ -388,6 +401,8 @@ static int vs_crtc_atomic_set_property(struct drm_crtc *crtc, struct drm_crtc_st
 	} else if (property == vs_crtc->expected_present_time) {
 		vs_crtc_state->expected_present_time = val;
 		vs_crtc_state->skip_update = false;
+	} else if (property == vs_crtc->hist_rgb_prop) {
+		vs_crtc_state->hist_rgb_enable = val;
 	} else {
 		/* histogram property */
 		for (int i = 0; i < VS_HIST_CHAN_IDX_COUNT; i++) {
@@ -461,6 +476,8 @@ static int vs_crtc_atomic_get_property(struct drm_crtc *crtc, const struct drm_c
 							  0;
 	else if (property == vs_crtc->expected_present_time)
 		*val = vs_crtc_state->expected_present_time;
+	else if (property == vs_crtc->hist_rgb_prop)
+		*val = vs_crtc_state->hist_rgb_enable;
 	else {
 		/* histogram channels */
 		for (int i = VS_HIST_CHAN_IDX_0; i < VS_HIST_CHAN_IDX_COUNT; i++) {
@@ -499,7 +516,9 @@ static struct drm_atomic_state *vs_duplicate_active_crtc_state(struct vs_crtc *v
 	struct drm_atomic_state *state;
 	struct drm_crtc_state *crtc_state;
 	struct vs_crtc_state *vs_crtc_state;
-	int err;
+	struct drm_connector *connector;
+	struct drm_connector_state *conn_state;
+	int err, i;
 
 	state = drm_atomic_state_alloc(dev);
 	if (!state)
@@ -533,6 +552,16 @@ static struct drm_atomic_state *vs_duplicate_active_crtc_state(struct vs_crtc *v
 	crtc_state->active = true;
 	crtc_state->self_refresh_active = false;
 	vs_crtc_state->power_off_mode = VS_POWER_OFF_MODE_FULL;
+
+	/* force property updates on resume */
+	for_each_new_connector_in_state(state, connector, conn_state, i) {
+		if (is_gs_drm_connector_state(conn_state)) {
+			struct gs_drm_connector_state *gs_connector_state =
+				to_gs_connector_state(conn_state);
+
+			gs_connector_state->pending_update_flags = (~0x0);
+		}
+	}
 
 	/* clear the acquire context so that it isn't accidentally reused */
 	state->acquire_ctx = NULL;
@@ -585,6 +614,7 @@ retry:
 	crtc_state->active = false;
 	crtc_state->self_refresh_active = false;
 	vs_crtc_state->power_off_mode = VS_POWER_OFF_MODE_FULL;
+	vs_crtc_state->needs_hard_reset = true;
 
 	/* clear new crtc_state's properties and connections */
 	ret = drm_atomic_set_mode_prop_for_crtc(crtc_state, NULL);
@@ -644,11 +674,11 @@ static int vs_crtc_debugfs_show(struct seq_file *s, void *data)
 	seq_printf(s, "\tactive = %d\n", crtc->state->active);
 	seq_printf(s, "\tsize = %dx%d\n", mode->hdisplay, mode->vdisplay);
 	seq_printf(s, "\tbpp = %u\n", vs_crtc_state->bpp);
-	seq_printf(s, "\tunderrun = %d\n", vs_crtc_state->underrun);
 	seq_printf(s, "\tseamless_mode_change = %d\n", vs_crtc_state->seamless_mode_change);
 	seq_printf(s, "\tframe start timeout = %d\n", atomic_read(&vs_crtc->frame_start_timeout));
 	seq_printf(s, "\tframe done timeout = %d\n", atomic_read(&vs_crtc->frame_done_timeout));
 	seq_printf(s, "\tframe start missing = %d\n", atomic_read(&vs_crtc->frame_start_missing));
+	seq_printf(s, "\tunderrun = %d\n", atomic_read(&vs_crtc->underrun_count));
 	seq_printf(s, "\thardware reset = %d\n", atomic_read(&vs_crtc->hw_reset_count));
 
 	if (vs_crtc->funcs->get_crtc_scanout_position &&
@@ -935,13 +965,20 @@ static void vs_crtc_atomic_print_state(struct drm_printer *p,
 {
 	const struct vs_crtc_state *vs_crtc_state = to_vs_crtc_state(crtc_state);
 	struct vs_crtc *vs_crtc = to_vs_crtc(vs_crtc_state->base.crtc);
+	int i;
 
 	drm_printf(p, "\tbpp = %u\n", vs_crtc_state->bpp);
 	drm_printf(p, "\tencoder_type = %d\n", vs_crtc_state->encoder_type);
 	drm_printf(p, "\toutput_id = %u\n", vs_crtc_state->output_id);
 	drm_printf(p, "\toutput_mode = %#x\n", vs_crtc_state->output_mode);
-	drm_printf(p, "\tunderrun = %d\n", vs_crtc_state->underrun);
 	drm_printf(p, "\tseamless_mode_change = %d\n", vs_crtc_state->seamless_mode_change);
+
+	drm_printf(p, "\tcommit_begin_ts = %lld\n", vs_crtc_state->commit_begin_ts);
+	drm_printf(p, "\tcommit_done_ts = %lld\n", vs_crtc_state->commit_done_ts);
+	if (vs_crtc_state->commit_done_ts && vs_crtc_state->commit_begin_ts)
+		drm_printf(p, "\tcommit_duration = %lldus\n",
+			   ktime_us_delta(vs_crtc_state->commit_done_ts,
+					  vs_crtc_state->commit_begin_ts));
 
 	if (test_bit(VS_QOS_OVERRIDE_CORE_CLK, vs_crtc_state->qos_override))
 		drm_printf(p, "\tcore_clk = %u (requested:%u)\n",
@@ -994,10 +1031,14 @@ static void vs_crtc_atomic_print_state(struct drm_printer *p,
 	else
 		drm_printf(p, "\twr_rt_bw_mbps = %u\n", vs_crtc_state->qos_config.wr_rt_bw_mbps);
 
+	drm_printf(p, "\tskip_update = %d\n", vs_crtc_state->skip_update);
 	drm_printf(p, "\tpower_off_mode = %s\n",
 		   vs_power_off_mode_enum_list[vs_crtc_state->power_off_mode].name);
 	drm_printf(p, "\tpower_off_mode_changed = %d\n", vs_crtc_state->power_off_mode_changed);
 	drm_printf(p, "\tpower_state = %s\n", power_state_names[vs_crtc_state->power_state]);
+	drm_printf(p, "\tneeds_recovery = %d\n", vs_crtc_state->needs_recovery);
+	drm_printf(p, "\tneeds_hard_reset = %d\n", vs_crtc_state->needs_hard_reset);
+	drm_printf(p, "\thist_rgb_enable = %d\n", vs_crtc_state->hist_rgb_enable);
 
 	if (vs_crtc->bld_size_prop)
 		drm_printf(p, "\t%s=%d\n", vs_crtc->bld_size_prop->name, vs_crtc_state->bld_size);
@@ -1029,6 +1070,12 @@ static void vs_crtc_atomic_print_state(struct drm_printer *p,
 			   vs_crtc_state->brightness_mask ?
 				   vs_crtc_state->brightness_mask->base.id :
 				   0);
+	for (i = 0; i < VS_HIST_CHAN_IDX_COUNT; i++)
+		if (vs_crtc->hist_chan_prop[i])
+			drm_printf(p, "\t%s=%d\n", vs_crtc->hist_chan_prop[i]->name,
+				   vs_crtc_state->hist_chan[i].blob ?
+					   vs_crtc_state->hist_chan[i].blob->base.id :
+					   0);
 
 	vs_dc_print_drm_properties(vs_crtc_state->drm_states, &vs_crtc->properties, p);
 }
@@ -1107,28 +1154,26 @@ static void vs_crtc_handle_flip_error(struct drm_crtc *crtc, int error)
 	struct vs_crtc *vs_crtc = to_vs_crtc(crtc);
 	struct device *dev = vs_crtc->dev;
 	struct vs_dc *dc = dev_get_drvdata(dev);
-	struct drm_printer p = drm_info_printer(dev);
 	unsigned long flags;
 
+	/* enable HW reset before power off */
 	if (!dc->disable_hw_reset) {
 		vs_crtc->needs_hw_reset = true;
 		atomic_inc(&vs_crtc->hw_reset_count);
 	}
 
-	if (dc->hw_reg_dump_options == DC_HW_REG_DUMP_IN_CONSOLE)
-		dc_hw_reg_dump(&dc->hw, &p, DC_HW_REG_BANK_ACTIVE);
-	else if (dc->hw_reg_dump_options == DC_HW_REG_DUMP_IN_TRACE)
-		dc_hw_reg_dump(&dc->hw, NULL, DC_HW_REG_BANK_ACTIVE);
-
+	/* trigger recovery sequence */
 	if (!dc->disable_crtc_recovery)
 		vs_crtc_trigger_recovery(vs_crtc);
 
+	/* clear pending flags in case there is no frame done */
 	atomic_set(&vs_crtc->frames_pending, 0);
 	DPU_ATRACE_INT_PID_FMT(atomic_read(&vs_crtc->frames_pending), vs_crtc->trace_pid,
 			       "frames_pending[%u]", crtc->index);
 	vs_crtc->frame_transfer_pending = false;
 	vs_crtc->ltm_hist_query_pending = false;
 
+	/* signal error fence */
 	spin_lock_irqsave(&dc->int_lock, flags);
 	if (vs_crtc->event) {
 		if (vs_crtc->event->base.fence)
@@ -1136,6 +1181,84 @@ static void vs_crtc_handle_flip_error(struct drm_crtc *crtc, int error)
 		vs_crtc_send_vblank_event_locked(crtc);
 	}
 	spin_unlock_irqrestore(&dc->int_lock, flags);
+}
+
+static void vs_crtc_update_irq_statuses(struct vs_crtc *vs_crtc)
+{
+	struct device *dev = vs_crtc->dev;
+	struct vs_dc *dc = dev_get_drvdata(dev);
+
+	vs_dc_update_irq_statuses(dc);
+}
+
+static void vs_crtc_trigger_frame_coredump(struct vs_crtc *vs_crtc, int frames_pending,
+					   bool te_changed, bool transfer_pending,
+					   enum drm_vs_power_state old_pwr,
+					   enum drm_vs_power_state new_pwr)
+{
+	struct device *dev = vs_crtc->dev;
+	struct vs_dc *dc = dev_get_drvdata(dev);
+	static char reason[192] = {};
+
+	scnprintf(reason, sizeof(reason),
+		  "Frame %s timeout on %s; TE %s; frame transfer %s; power state %d->%d;",
+		  (frames_pending > 1) ? "done" : "start", vs_crtc->base.name,
+		  te_changed ? "changed" : "unchanged",
+		  transfer_pending ? "pending" : "not pending", old_pwr, new_pwr);
+
+	vs_dc_coredump(dc, reason);
+}
+
+/**
+ * vs_crtc_record_frame_timeout() - records a frame start/done timeout
+ * @vs_crtc: handle for affected crtc
+ * @old_te_count: te count when the wait for the frame start/done began
+ * @old_crtc_state: record of the previous atomic state for the crtc (debugging)
+ * @wait_time_jiffies: how long the wait was, in jiffies
+ * @during_disable: whether the timeout occurred during pipeline disable
+ *
+ * Records the frame start or frame done timeout. Does so in the drm logs,
+ * in the display ftrace, and potentially triggers a coredump associated with
+ * the timeout.
+ */
+void vs_crtc_record_frame_timeout(struct vs_crtc *vs_crtc, int old_te_count,
+				  struct drm_crtc_state *old_crtc_state,
+				  unsigned long wait_time_jiffies, bool during_disable)
+{
+	struct device *dev = vs_crtc->dev;
+	struct vs_dc *dc = dev_get_drvdata(dev);
+	struct drm_crtc *crtc = &vs_crtc->base;
+	struct drm_crtc_state *new_crtc_state = crtc->state;
+	struct vs_crtc_state *vs_crtc_state = to_vs_crtc_state(new_crtc_state);
+	u8 display_id = to_vs_display_id(dc, crtc);
+	int new_te_count = atomic_read(&vs_crtc->te_count);
+	int frames_pending = atomic_read(&vs_crtc->frames_pending); /* only for normal */
+	bool te_changed = (new_te_count != old_te_count);
+	bool is_frame_done_error = during_disable || (frames_pending > 1);
+
+	if (is_frame_done_error) {
+		trace_disp_frame_done_timeout(display_id, vs_crtc_state->output_id, vs_crtc);
+		atomic_inc(&vs_crtc->frame_done_timeout);
+	} else {
+		trace_disp_frame_start_timeout(display_id, vs_crtc_state->output_id, vs_crtc);
+		atomic_inc(&vs_crtc->frame_start_timeout);
+	}
+	DRM_DEV_ERROR(
+		dev,
+		"%s: frame %s timed out during %s after %u ms, vrefresh at (%u Hz), TE count %s, frames_pending %d, transfer pending %d\n",
+		crtc->name, is_frame_done_error ? "done" : "start",
+		during_disable ? "disable" : "wait_for_flip_done",
+		jiffies_to_msecs(wait_time_jiffies), drm_mode_vrefresh(&new_crtc_state->mode),
+		te_changed ? "changed" : "unchanged", frames_pending,
+		vs_crtc->frame_transfer_pending);
+
+	if (!vs_crtc->recovery.count && dc->coredump_en) {
+		enum drm_vs_power_state old_pwr = to_vs_crtc_state(old_crtc_state)->power_state;
+		enum drm_vs_power_state new_pwr = to_vs_crtc_state(new_crtc_state)->power_state;
+
+		vs_crtc_trigger_frame_coredump(vs_crtc, frames_pending, te_changed,
+					       vs_crtc->frame_transfer_pending, old_pwr, new_pwr);
+	}
 }
 
 void vs_crtc_wait_for_flip_done(struct drm_crtc *crtc, struct drm_atomic_state *state)
@@ -1150,8 +1273,7 @@ void vs_crtc_wait_for_flip_done(struct drm_crtc *crtc, struct drm_atomic_state *
 	u8 display_id = to_vs_display_id(dc, crtc);
 	int min_fps;
 	bool missing_fs_int = false;
-	int old_te_count, new_te_count;
-	int frames_pending;
+	int old_te_count;
 	unsigned long wait_time_jiffies;
 
 	DPU_ATRACE_BEGIN(__func__);
@@ -1183,28 +1305,21 @@ void vs_crtc_wait_for_flip_done(struct drm_crtc *crtc, struct drm_atomic_state *
 	}
 
 	if (!completion_done(&commit->flip_done)) {
-		new_te_count = atomic_read(&vs_crtc->te_count);
-		frames_pending = atomic_read(&vs_crtc->frames_pending);
-
-		if (frames_pending > 1) {
-			trace_disp_frame_done_timeout(display_id, vs_crtc);
-			atomic_inc(&vs_crtc->frame_done_timeout);
-		} else {
-			trace_disp_frame_start_timeout(display_id, vs_crtc);
-			atomic_inc(&vs_crtc->frame_start_timeout);
+		/* trigger DPU register dump on frame start/done error */
+		if (!vs_crtc->recovery.count && dc->hw_reg_dump_options) {
+			DRM_DEV_ERROR(dev, "%s: collect register dump\n", crtc->name);
+			dc_hw_collect_reg_dump(dev, dc->hw_reg_dump_options, DC_HW_REG_BANK_ACTIVE);
 		}
 
-		DRM_DEV_ERROR(dev,
-			      "%s: frame %s timed out after %u ms, vrefresh at (%u Hz)%s, frames pending %d, transfer pending %d",
-			      crtc->name, (frames_pending > 1) ? "done" : "start",
-			      jiffies_to_msecs(wait_time_jiffies),
-			      drm_mode_vrefresh(&new_crtc_state->mode),
-			      (new_te_count == old_te_count) ? "" : ", TE count changed",
-			      frames_pending, vs_crtc->frame_transfer_pending);
+		/* record frame errors */
+		vs_crtc_record_frame_timeout(vs_crtc, old_te_count, old_crtc_state,
+					     wait_time_jiffies, false);
 
+		/* handle errors */
 		vs_crtc_handle_flip_error(crtc, -ETIMEDOUT);
 	} else if (missing_fs_int) {
-		trace_disp_frame_start_missing(display_id, vs_crtc);
+		vs_crtc_update_irq_statuses(vs_crtc);
+		trace_disp_frame_start_missing(display_id, vs_crtc_state->output_id, vs_crtc);
 		dev_warn(dev, "%s: frame start interrupt handler didn't run, dpu is %s\n",
 			 crtc->name, dc->enabled ? "enabled" : "disabled");
 		atomic_inc(&vs_crtc->frame_start_missing);
@@ -1285,7 +1400,7 @@ static void vs_crtc_disable_pipeline(struct drm_crtc *crtc, struct drm_crtc_stat
 	struct device *dev = vs_crtc->dev;
 
 	drm_atomic_helper_disable_planes_on_crtc(old_state, false);
-	vs_crtc->funcs->disable(dev, crtc);
+	vs_crtc->funcs->disable(dev, crtc, old_state);
 }
 
 static void vs_crtc_enter_power_off(struct drm_crtc *crtc, struct drm_crtc_state *old_state)
@@ -1387,6 +1502,12 @@ static void vs_crtc_atomic_begin(struct drm_crtc *crtc, struct drm_atomic_state 
 	struct vs_crtc *vs_crtc = to_vs_crtc(crtc);
 	struct vs_crtc_state *vs_crtc_state = to_vs_crtc_state(crtc->state);
 	struct device *dev = vs_crtc->dev;
+	struct vs_dc *dc = dev_get_drvdata(dev);
+
+	if (vs_crtc_state->needs_recovery && !dc->disable_crtc_recovery) {
+		dev_info(dev, "[CRTC:%d:%s] trigger recovery", crtc->base.id, crtc->name);
+		vs_crtc_trigger_recovery(vs_crtc);
+	}
 
 	if (vs_crtc_state->need_boost_fabrt)
 		WRITE_ONCE(vs_crtc->fboost_state, VS_FABRT_BOOST_PENDING);
@@ -1414,6 +1535,9 @@ static void vs_crtc_atomic_flush(struct drm_crtc *crtc, struct drm_atomic_state 
 		vs_crtc->trace_pid = current->tgid;
 
 	if (vs_crtc_state->skip_update) {
+		u8 display_id = to_vs_display_id(dev_get_drvdata(dev), crtc);
+
+		trace_disp_commit_skip(display_id, crtc->state);
 		DPU_ATRACE_INSTANT_PID_FMT(vs_crtc->trace_pid, "skip_update");
 		dev_dbg(dev, "[CRTC:%d:%s] skip update, bypass commit\n", crtc->base.id,
 			crtc->name);
@@ -1490,16 +1614,16 @@ int vs_crtc_check_power_state(struct drm_atomic_state *state, struct drm_crtc *c
 		new_crtc_state->self_refresh_active, old_vs_crtc_state->power_off_mode,
 		new_vs_crtc_state->power_off_mode);
 
-	/* check if either POWER_OFF_MODE or ACTIVE has changed */
-	if (!new_vs_crtc_state->power_off_mode_changed && !new_crtc_state->active_changed)
-		return 0;
-
 	/* when CRTC is disable, power state is always OFF */
 	if (!new_crtc_state->enable) {
 		new_crtc_state->self_refresh_active = false;
 		new_vs_crtc_state->power_state = VS_POWER_STATE_OFF;
 		goto end;
 	}
+
+	/* check if either POWER_OFF_MODE or ACTIVE has changed */
+	if (!new_vs_crtc_state->power_off_mode_changed && !new_crtc_state->active_changed)
+		return 0;
 
 	/* when CRTC is active, power state is always ON */
 	if (new_crtc_state->active) {
@@ -1523,6 +1647,14 @@ int vs_crtc_check_power_state(struct drm_atomic_state *state, struct drm_crtc *c
 		self_refresh_aware = is_self_refresh_aware(dev, state, new_crtc_state);
 		if (!self_refresh_aware)
 			return -EINVAL;
+
+		if (old_vs_crtc_state->power_state == VS_POWER_STATE_OFF) {
+			dev_err(dev, "[CRTC:%d:%s] invalid power state transition %s->%s\n",
+				crtc->base.id, crtc->name,
+				power_state_names[old_vs_crtc_state->power_state],
+				power_state_names[new_vs_crtc_state->power_state]);
+			return -EINVAL;
+		}
 
 		new_crtc_state->self_refresh_active = true;
 		new_vs_crtc_state->power_state = VS_POWER_STATE_PSR;
@@ -1548,6 +1680,13 @@ static int vs_crtc_atomic_check_skip_update(struct device *dev, struct drm_crtc 
 					    struct drm_crtc_state *crtc_state)
 {
 	struct vs_crtc_state *vs_crtc_state = to_vs_crtc_state(crtc_state);
+
+	if (vs_crtc_state->output_mode & VS_OUTPUT_MODE_CMD_DE_SYNC) {
+		vs_crtc_state->skip_update = false;
+		dev_dbg(dev, "[CRTC:%d:%s] force skip_update = 0 for CMD_DE_SYNC\n", crtc->base.id,
+			crtc->name);
+		return 0;
+	}
 
 	if (vs_crtc_state->force_skip_update) {
 		vs_crtc_state->skip_update = true;
@@ -1641,7 +1780,7 @@ static int vs_crtc_create_hw_capability_blob(struct drm_device *drm_dev, struct 
 		return -EINVAL;
 
 	blob = drm_property_create_blob(drm_dev, sizeof(struct drm_vs_crtc_hw_caps), 0);
-	if (!blob)
+	if (IS_ERR(blob))
 		return -EINVAL;
 
 	hw_caps = blob->data;
@@ -1728,7 +1867,7 @@ struct vs_crtc *vs_crtc_create(const struct dc_hw_display *display, struct drm_d
 			drm_object_attach_property(&crtc->base.base, crtc->prior_gamma_prop, 0);
 		}
 
-		if (display_info->lut_roi) {
+		if (display_info->lut_roi0) {
 			crtc->roi0_gamma_prop =
 				drm_property_create(drm_dev, DRM_MODE_PROP_BLOB, "ROI0_GAMMA", 0);
 
@@ -1736,7 +1875,9 @@ struct vs_crtc *vs_crtc_create(const struct dc_hw_display *display, struct drm_d
 				goto err_cleanup_crtc;
 
 			drm_object_attach_property(&crtc->base.base, crtc->roi0_gamma_prop, 0);
+		}
 
+		if (display_info->lut_roi1) {
 			crtc->roi1_gamma_prop =
 				drm_property_create(drm_dev, DRM_MODE_PROP_BLOB, "ROI1_GAMMA", 0);
 
@@ -1797,6 +1938,12 @@ struct vs_crtc *vs_crtc_create(const struct dc_hw_display *display, struct drm_d
 	if (display_info->rgb_hist) {
 		const int ncount = VS_HIST_STAGE_COUNT + 1; /* number of buffers */
 		const int nsize = ALIGN(sizeof(struct drm_vs_hist_rgb_bins), 64);
+
+		crtc->hist_rgb_prop = drm_property_create_bool(drm_dev, 0, "HISTOGRAM_RGB");
+		if (!crtc->hist_rgb_prop)
+			goto err_cleanup_crtc;
+
+		drm_object_attach_property(&crtc->base.base, crtc->hist_rgb_prop, 0);
 
 		/*
 		 * allocate gem_pool
@@ -1929,9 +2076,8 @@ err_free_crtc:
 	return NULL;
 }
 
-void vs_crtc_handle_frm_start(struct drm_crtc *crtc, bool underrun)
+void vs_crtc_handle_frm_start(struct drm_crtc *crtc)
 {
-	struct vs_crtc_state *vs_crtc_state = to_vs_crtc_state(crtc->state);
 	struct vs_crtc *vs_crtc = to_vs_crtc(crtc);
 	unsigned long flags;
 
@@ -1943,8 +2089,6 @@ void vs_crtc_handle_frm_start(struct drm_crtc *crtc, bool underrun)
 	vs_crtc->ltm_hist_dma_addr_cur = vs_crtc->ltm_hist_dma_addr_nxt;
 	vs_crtc->ltm_hist_dma_addr_nxt = 0;
 	spin_unlock_irqrestore(&vs_crtc->slock_ltm_hist, flags);
-
-	vs_crtc_state->underrun = underrun;
 }
 
 int vs_crtc_get_ltm_hist(struct drm_file *file_priv, struct vs_crtc *vs_crtc, struct dc_hw *hw,

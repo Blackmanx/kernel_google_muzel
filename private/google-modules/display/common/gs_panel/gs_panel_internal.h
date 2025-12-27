@@ -171,8 +171,10 @@ int parse_u32_buf(char *src, size_t src_len, u32 *out, size_t out_len);
  * Meant to be called during common_init function. This sets up, based on the
  * capabilities of the gs_panel_desc (specifically the function capabilities),
  * the various lhbm-related data, threads, and callbacks for the panel.
+ *
+ * Return: 0 on success, -EAGAIN on error requiring retry
  */
-void gs_panel_init_lhbm(struct gs_panel *ctx);
+int gs_panel_init_lhbm(struct gs_panel *ctx);
 /**
  * panel_update_lhbm() - Updates lhbm state to match requested state
  * @ctx: panel struct

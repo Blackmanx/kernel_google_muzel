@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note */
 
-#ifndef __VS_DRM_FOURCC_H__
-#define __VS_DRM_FOURCC_H__
+#ifndef __G2D_DRM_FOURCC_H__
+#define __G2D_DRM_FOURCC_H__
 
 #include <drm/drm_fourcc.h>
 
@@ -11,8 +11,8 @@ extern "C" {
 
 // Upstream fourcc codes used by GPU for compressed formats
 #define DRM_FORMAT_MOD_VENDOR_PVR 0x92
-#define DRM_FORMAT_MOD_PVR_FBCDC_8x8_V12 fourcc_mod_code(PVR, 15)
-#define DRM_FORMAT_MOD_PVR_FBCDC_16x4_V12 fourcc_mod_code(PVR, 16)
+#define DRM_FORMAT_MOD_PVR_FBCDC_8x8_V14 fourcc_mod_code(PVR, 34)
+#define DRM_FORMAT_MOD_PVR_FBCDC_16x4_V14 fourcc_mod_code(PVR, 39)
 
 #define DRM_FORMAT_MOD_VENDOR_VS 0x0b
 
@@ -68,4 +68,4 @@ extern "C" {
 #if defined(__cplusplus)
 }
 #endif
-#endif /* __VS_DRM_FOURCC_H__ */
+#endif /* __G2D_DRM_FOURCC_H__ */

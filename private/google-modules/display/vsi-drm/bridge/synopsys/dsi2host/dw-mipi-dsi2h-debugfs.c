@@ -131,7 +131,7 @@ void dw_create_debugfs_hwv_u64_files(struct dw_mipi_dsi2h *dsi2h)
 
 static int dw_mipi_debugfs_u32_get(void *data, u64 *val)
 {
-	u32 tmp;
+	u32 tmp = 0;
 	struct regmap_field *reg_field = (struct regmap_field *)data;
 
 	regmap_field_read(reg_field, &tmp);
