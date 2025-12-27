@@ -117,5 +117,8 @@
 
 	/* to ensure consistent cache coherency */
 	dma-coherent;
+
+	/* to avoid EOT miss due to design bug exposed by higher backpressure */
+	google,posted-rx-q-data-credits = <0x51>;
 };
 

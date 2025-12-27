@@ -36,10 +36,13 @@
 		input-device-name = "cs40l26_input";	/* input device name */
 		input-device-id = <0>;
 
-		pinctrl-names = "default";
+		pinctrl-names = "default", "sleep";
 		pinctrl-0 = <&haptics2ap_alert_od_l_1v2
 			     &ap2haptics_reset_l_1v2
 			     &ap2haptics_trig_1v2>;
+		pinctrl-1 = <&haptics2ap_alert_od_l_1v2_sleep
+			    &ap2haptics_reset_l_1v2_sleep
+			    &ap2haptics_trig_1v2_sleep>;
 
 		interrupt-parent = <&cpm_pinctrl>;
 		interrupts = <XCPM_SRC_OPT2 0 0>;

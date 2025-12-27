@@ -11,7 +11,7 @@ blocklist fst2.ko
 blocklist trusty-test.ko
 blocklist google_gem_test.ko
 blocklist ebu-google.ko
-blocklist fwtp_cpm.ko
+blocklist google-cpm-tracepoint.ko
 
 # Display
 blocklist gs-panel-common-test.ko

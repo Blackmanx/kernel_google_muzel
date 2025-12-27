@@ -1,4 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0 OR BSD-3-Clause
+
+#include <linux/kconfig.h>
+
 / {
 	reserved_memory: reserved-memory {
 		#address-cells = <0x00000002>;
@@ -174,12 +177,12 @@
 
 		/* 63172KB maps to 48MiB of GME + cipher metadata */
 		gsa-gme@a2400000 {
-			reg = <0x00000000 0xa2400000 0x00000000 0x03db1000>; /* 63172KB */
+			reg = <0x00000000 0xa2400000 0x00000000 0x03db0000>; /* 63168KB */
 			no-map;
 		};
 
-		gsa_reserved_log: gsa_reserved_log@a61b1000 {
-			reg = <0x00000000 0xa61b1000 0x00000000 0x00001000>; /* 4KB */
+		gsa_reserved_log: gsa_reserved_log@a61b0000 {
+			reg = <0x00000000 0xa61b0000 0x00000000 0x00004000>; /* 16KB */
 			no-map;
 		};
 
@@ -208,7 +211,11 @@
 
 		cp_msi_rmem: cp_msi_rmem@f6200000 {
 			compatible = "exynos,modem_if";
+#if IS_ENABLED(CONFIG_ARM64_16K_PAGES)
+			reg = <0x00000000 0xf6200000 0x00000000 0x00004000>; /* 16KB */
+#else
 			reg = <0x00000000 0xf6200000 0x00000000 0x00001000>; /* 4KB */
+#endif
 			rmem_index = <1>;
 		};
 
@@ -230,27 +237,14 @@
 			no-map;
 		};
 
-		cpm_tracepoint_ipc_dma: cpm_tracepoint_ipc_dma {
+		cpm_tracepoint_ipc_dma_buff: cpm_tracepoint_ipc_dma_buff@8cdf4000 {
 			compatible = "shared-dma-pool";
-			/*
-			 * Less than 4MB is needed, but it's the minimum CMA
-			 * config size.
-			 */
-			size = <0x0 0x00400000>; /* 4MB */
-			alignment = <0x0 0x00001000>;
-			/*
-			 * TODO(b/283179225): Workaround for the CPM address
-			 *                    limitation
-			 *
-			 * CPM can't handle the address over 0xA0000000 now on
-			 * gem5.
-			 */
-			alloc-ranges = <0x0 0x80000000 0x0 0x20000000>;
-			reusable;
+			reg = <0x00000000 0x8cdf4000 0x00000000 0x00004000>; /* 16KB */
+			no-map;
 		};
 
 		faceauth_dsp: faceauth_dsp {
-			size = <0x0 0x02000000>; /* 32MB */
+			size = <0x0 0x01000000>; /* 16MB */
 			alignment = <0x0 0x00010000>;
 			alloc-ranges = <0x9 0x80000000 0x80000000>,
 				<0x9 0x00000000 0x80000000>,
@@ -260,7 +254,7 @@
 		};
 
 		faceauth_tpu: faceauth_tpu {
-			size = <0x0 0x01000000>; /* 16MB */
+			size = <0x0 0x02000000>; /* 32MB */
 			alignment = <0x0 0x00010000>;
 			alloc-ranges = <0x9 0x80000000 0x80000000>,
 				<0x9 0x00000000 0x80000000>,
@@ -314,7 +308,7 @@
 		};
 
 		farawimg: farawimg {
-			size = <0x0 0x06400000>; /* 100MB */
+			size = <0x0 0x05000000>; /* 80MB */
 			alignment = <0x0 0x00010000>;
 			alloc-ranges = <0x9 0x80000000 0x80000000>,
 				<0x9 0x00000000 0x80000000>,
@@ -331,12 +325,13 @@
 			reusable;
 		};
 
+#if !IS_ENABLED(CONFIG_ARM64_16K_PAGES)
 		pkvm_iommu_cma: pkvm_iommu_cma {
 			compatible = "pkvm,cma", "shared-dma-pool";
 			size = <0x0 0x00800000>; /* 8MB */
 			reusable;
 		};
-
+#endif
 		vframe: vframe {
 			compatible = "shared-dma-pool";
 			size = <0x0 0x21400000>; /* 532MB */

@@ -7,6 +7,7 @@
  */
 
 #include <dt-bindings/soc/google/exynos-cpif.h>
+#include <linux/kconfig.h>
 
 / {
 	fragment@modemif {
@@ -511,7 +512,11 @@
 						region,index = <SHMEM_MSI>;
 						region,rmem = <1>;
 						region,offset = <0x00000000>;
+#if IS_ENABLED(CONFIG_ARM64_16K_PAGES)
+						region,size = <0x00004000>;
+#else
 						region,size = <0x00001000>;
+#endif
 						region,cached = <0>;
 					};
 					pktproc {

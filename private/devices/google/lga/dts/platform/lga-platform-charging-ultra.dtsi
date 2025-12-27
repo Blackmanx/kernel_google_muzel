@@ -14,7 +14,7 @@
 &google_cpm {
 	google,dc_limit-vbatt_min = <3510000>;
 	google,wlc_cp-start-power_limit = <15000000>; /* 15W start using CP */
-	google,wlc_cp-stop-power_limit = <12000000>; /* 12W stop using CP */
+	google,wlc_cp-stop-power_limit = <10000000>; /* 10W stop using CP */
 
 	/* thermal budgets */
 	google,mdis-thermal-mitigation =

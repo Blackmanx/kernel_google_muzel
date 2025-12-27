@@ -639,11 +639,13 @@
 		#gpio-cells = <2>;
 		gpio-reserved-ranges = <54 1>;
 
+		runtime-pm-capable;
+
 		clocks = <&lsios_gpio_clk>;
 		clock-names = "gpio_clk";
 
-		power-domains = <&lsio_s_cli_gpio_pd>,<&sswrp_lsio_s_pd>;
-		power-domain-names="csr_access_pd","pad_function_pd";
+		power-domains = <&lsio_s_cli_gpio_pd>;
+		power-domain-names="csr_access_pd";
 
 		interrupt-controller;
 		#interrupt-cells = <2>;
@@ -1365,6 +1367,8 @@
 		compatible = "google,lga-hsios-stby-pinctrl";
 
 		reg = <0 0x3C568000 0 0x2000>;
+
+		power-domains = <&hsio_s_ufs_pd>;
 
 		hsios_stby_ufs_refclk: hsios_stby_ufs_refclk {
 			pins = "XHSIOS_UFS_REFCLK";

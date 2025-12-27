@@ -36,6 +36,33 @@
 		group-name = "tmu";
 	};
 
+	thermal_pressure: thermal_pressure {
+		compatible = "google,thermal-pressure-tj";
+		group-name = "tmu";
+
+		active-polling-delay-ms = <100>;
+		passive-polling-delay-ms = <2500>;
+
+		cluster_config {
+			thermal-pressure-big {
+				first-cpu = <&hunterelp_0>;
+				cdev-id = <HW_DT_CDEV_BIG>;
+			};
+			thermal-pressure-big-mid {
+				first-cpu = <&hunter_3>;
+				cdev-id = <HW_DT_CDEV_BIG_MID>;
+			};
+			thermal-pressure-mid {
+				first-cpu = <&hunter_0>;
+				cdev-id = <HW_DT_CDEV_MID>;
+			};
+			thermal-pressure-little {
+				first-cpu = <&hayes_0>;
+				cdev-id = <HW_DT_CDEV_LIT>;
+			};
+		};
+	};
+
 	thermal_zones_laguna: thermal-zones {
 		big_thermal: BIG {
 			polling-delay = <0>;

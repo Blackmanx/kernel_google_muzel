@@ -16,7 +16,7 @@ google_wlc: cps4041@30 {
 	google,wcin_inlim_en-gpio = <&max77779_gpio 0 GPIO_ACTIVE_HIGH>;
 
 	google,high_soc_threshold = <75>;
-	google,rx_fwupdate_option = <0>;
+	google,rx_fwupdate_option = <2>;
 
 	google_wlc_gpio: google_wlc_gpio {
 		gpio-controller;

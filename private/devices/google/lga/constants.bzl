@@ -21,6 +21,7 @@ LGA_MODULE_OUTS = [
     "drivers/hwtracing/coresight/coresight-replicator.ko",
     "drivers/hwtracing/coresight/coresight-stm.ko",
     "drivers/hwtracing/coresight/coresight-tmc.ko",
+    "drivers/hwtracing/coresight/coresight-trbe.ko",
     "drivers/hwtracing/stm/stm_core.ko",
     "drivers/i2c/i2c-dev.ko",
     "drivers/misc/eeprom/at24.ko",

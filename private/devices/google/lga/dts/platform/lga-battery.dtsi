@@ -46,10 +46,11 @@
 				/* rest charging */
 				google,chg-rest-rate = <15>;
 				google,chg-rest-soc = <80>;
-				/* TRICKLE-DEFEND threshold */
-				google,bd-trickle-recharge-soc = <80>;
-				/* Disable TRICKLE-DEFEND, b/259428308 */
-				/* google,bd-trickle-enable; */
+				/* Enable TRICKLE-DEFEND V2 */
+				google,bd-trickle-enable;
+				google,bd-trickle-version = <2>;
+				google,bd-trickle-cnt-threshold = <0>;
+				google,bd-trickle-rate = <6>;
 				/* Battery virtual sensor */
 				google,batt-vs-tz-name = "batt_vs";
 

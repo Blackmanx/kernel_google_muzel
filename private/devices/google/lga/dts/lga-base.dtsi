@@ -306,20 +306,6 @@
 			multi-chan;
 		};
 
-		cpm_tracepoint {
-			compatible = "google,cpm-tracepoint";
-			// TODO(b/283179225): Workaround for the CPM address limitation
-			memory-region = <&cpm_tracepoint_ipc_dma>;
-			mba-dest-channel = <MBOX_DEST_CHAN_CPM_TRACEPOINT>;
-			/*
-			 * Buffer address on CPM side
-			 * remote-buff-addr =
-			 *	{CPM base address} + {CPM SRAM offset} + {CPM tracepoint offset}
-			 */
-			remote-buff-addr = <0x5219000>;
-			mboxes = <&goog_mba_cpm_iface>;
-		};
-
 		ODPM {
 			compatible = "google,odpm";
 			mba-dest-channel = <MBOX_DEST_CHAN_ODPM>;
@@ -612,8 +598,12 @@
 		compatible = "google,ufshc";
 		reg = <0x0 0x3c400000 0x0 0x1000>,
 		      <0x0 0x3c410000 0x0 0x504>,
-		      <0x0 0x3c700000 0x0 0x14000>;
-		reg-names = "ufs_hc", "ufs_top", "ufs_phy_sram";
+		      <0x0 0x3c700000 0x0 0x14000>,
+			  <0x0 0x3c00b108 0x0 0x4>,
+			  <0x0 0x3c00d210 0x0 0x4>,
+			  <0x0 0x3c00e108 0x0 0x4>;
+		reg-names = "ufs_hc", "ufs_top", "ufs_phy_sram", "psm_status_hsios",
+		      "psm_status_ufs_hc", "psm_status_ufs_phy";
 		clocks = <&hsios_gpio_ref_tcx0_clk>, <&hsios_aux_clk>;
 		clock-names = "ref_clk", "aux_clk";
 		interrupts-extended =
@@ -663,15 +653,18 @@
 		ip-idle-index = <IP_IDLE_IDX_UFS>;
 
 		google,enable-phy-calibration;
-		/* TODO(b/348082830): disable 'google,enable-hc-pg' for now */
 		google,enable-phy-patching;
 		google,phy-patching-mode = <2>;
+		google,enable-local-rpm;
+		google,enable-local-swh8;
 	};
 
 	gcdd: gcdd {
 		compatible = "google,crash-debug-dump";
 		freq-names = "LIT", "MID0", "MID1", "BIG";
 		memory-region = <&cdd_header>, <&log_kevents>;
+		reg = <0 0x538c004 0 0x4>;
+		reg-names = "apc_wdt_sub_reason";
 		panic-action = <GO_DEFAULT_ID>;
 		wdt-handle = <&wdt1>;
 	};
@@ -725,7 +718,8 @@
 		compatible = "google,fwtp-cpm";
 		mboxes = <&goog_mba_cpm_iface>;
 		mba-dest-channel = <MBOX_DEST_CHAN_CPM_FWTP>;
-		memory-region = <&cpm_tracepoint_ipc_dma>;
+		memory-region = <&cpm_tracepoint_ipc_dma_buff>;
+		tracepoint-list = "cpm", "cap";
 	};
 
 	fwtp_gdmc: fwtp_gdmc {
@@ -1330,6 +1324,8 @@
 		linux,pci-domain = <0>;
 
 		google,allow-suspend-in-linkup;
+
+		additional-parent-domain = <&CPU_TOP_CL>;
 	};
 
 	pcie1: pcie@3c500000 {
@@ -1379,6 +1375,8 @@
 		interconnect-names = "sswrp-pcie";
 
 		linux,pci-domain = <1>;
+
+		additional-parent-domain = <&CPU_TOP_CL>;
 	};
 
 	pwm0: pwm@3bd90000 {
@@ -1850,7 +1848,7 @@
 				enable-firmware-managed-spu-power = <1>; // Sets bEnableRDPowIsland
 				enable-active-power-management = <1>; // Sets bEnableActivePM
 				// Sets ui32ActivePMLatencyms
-				active-power-management-latency-ms = <3>;
+				active-power-management-latency-ms = <1>;
 
 				sswrp-autosuspend-latency-ms = <18>;
 			};
@@ -2239,7 +2237,6 @@
 			#power-domain-cells = <0>;
 			sswrp-id = <GENPD_LGA_SSWRP_LSIO_S_ID>;
 			on-at-init;
-			rpm-always-on;
 		};
 
 		lsio_s_cli_gpio_pd: lsio_s_cli_gpio_pd {
@@ -2248,16 +2245,6 @@
 			power-domains = <&sswrp_lsio_s_pd>;
 			subdomain-id = <GENPD_LGA_LSIO_CLI_GPIO_ID>;
 			on-at-init;
-			rpm-always-on;
-			use-smc;
-		};
-
-		lsio_s_cli_gpio_irq_safe_pd: lsio_s_cli_gpio_irq_safe_pd {
-			#power-domain-cells = <0>;
-			sswrp-id = <GENPD_LGA_LSIO_S_CLI_GPIO_IRQ_SAFE_ID>;
-			on-at-init;
-			irq-safe;
-			use-smc;
 		};
 
 		// lsio_n
@@ -2586,6 +2573,7 @@
 			};
 
 			tfa_cpu_stats: tfa_cpu_stats@8b20f000 {
+				tf_a;
 				reg = <0 0x8b20f000 0 0x1000>;
 				states = <C2_CORE0>,
 						<C2_CORE1>,
@@ -2754,5 +2742,10 @@
 		compatible = "google,cstate-ctrl";
 		power-domains = <&CPU_TOP_CL>;
 		debugfs-name = "c4";
+	};
+
+	pkvm_prot_reg: pkvm_prot_reg@58c0000 {
+		compatible = "pkvm,protected-region";
+		reg = <0x00 0x58c0000 0x00 0x10000>;
 	};
 };

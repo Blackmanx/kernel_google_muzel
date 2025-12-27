@@ -34,6 +34,8 @@ dw-i3c-master.ko
 dwc3-google.ko
 dwc_dptx.ko
 eh.ko
+fwtp_cpm_module.ko
+fwtp_lib.ko
 gcdd.ko
 gcma.ko
 goog-chip-info.ko
@@ -47,7 +49,6 @@ goog_touch_interface.ko
 google-battery.ko
 google-bms.ko
 google-charger.ko
-google-cpm-tracepoint.ko
 google-cpm.ko
 google-eusb2-repeater.ko
 google-gpdma.ko
@@ -143,6 +144,7 @@ pixel_em.ko
 pixel_metrics.ko
 pixel_stat_mm.ko
 pixel_stat_sysfs.ko
+pixel_trim.ko
 pl330.ko
 power_controller.ko
 regmap-goog-spmi.ko

@@ -71,7 +71,6 @@
 			#clock-cells = <0>;
 			lpcm-id = <LPCM_LSIO_S>;
 			clock-id = <LSIOS_GPIO_CLK>;
-			use-smc;
 		};
 
 		lsios_pwm_clk: lsios_pwm_clk {

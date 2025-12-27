@@ -111,6 +111,11 @@
 		};
 	};
 
+	trbe {
+		compatible = "arm,trace-buffer-extension";
+		interrupts = <GIC_PPI 2 IRQ_TYPE_LEVEL_HIGH 0>;
+	};
+
 	/* An invisible funnel combine cpu clusters trace */
 	cluster_combo_funnel: cluster_combo_funnel {
 		compatible = "arm,coresight-static-funnel";
@@ -192,7 +197,7 @@
 		compatible = "arm,coresight-dynamic-funnel", "arm,primecell";
 		reg = <0 0x23801000 0 0x1000>;
 
-		clocks = <&osc>;
+		clocks = <&cpu_sswrp_tss_clk>;
 		clock-names = "apb_pclk";
 
 		in-ports {
@@ -226,7 +231,7 @@
 		compatible = "arm,coresight-tmc", "arm,primecell";
 		reg = <0 0x23802000 0 0x1000>;
 
-		clocks = <&osc>;
+		clocks = <&cpu_sswrp_tss_clk>;
 		clock-names = "apb_pclk";
 
 		in-ports {

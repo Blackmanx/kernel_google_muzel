@@ -46,6 +46,8 @@
 
 			interconnects = <&icc_gmc SSWRP_G2D &icc_gmc GMC>;
 			interconnect-names = "sswrp-g2d";
+
+			devfreq = <&g2d_freq>;
 		};
 	};
 };
