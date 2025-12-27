@@ -20,11 +20,25 @@
 
 struct gsu_usecase_config_t {
 	int usecase;
+	int val;
 	const char *name;
+	/* Add new fields after this */
 	bool is_wireless;
 	bool is_wired;
 	bool is_otg;
+	bool is_charging;
+	bool is_cp;
+	int chg_index; /* this is just used to determine if a charger has changed */
+
+	/* do not add after */
 	struct hlist_node hnode;
+};
+
+enum bms_usecase_charger_index {
+	BMS_USECASE_CHARGER_INDEX_INVALID,
+	BMS_USECASE_CHARGER_INDEX_MAIN,
+	BMS_USECASE_CHARGER_INDEX_CP,
+	BMS_USECASE_CHARGER_INDEX_HYBRID,
 };
 
 /*
@@ -37,59 +51,122 @@ struct gsu_usecase_config_t {
  * 300-399: WLC Extended Usecases
  */
 #define FOREACH_GSU_USECASE(S)	\
-	S(BMS_USECASE_NO_HOPS, -2, "NO_HOPS", false, false, false),				\
+	S(BMS_USECASE_NO_HOPS, -2, "NO_HOPS", .is_wireless = false, .is_wired = false,		\
+	 .is_otg = false, .is_charging = false, .is_cp = false,					\
+	 .chg_index = BMS_USECASE_CHARGER_INDEX_INVALID),					\
 	/* raw mode, default, */								\
-	S(GSU_RAW_MODE, -1, "RAW", false, false, false),					\
+	S(GSU_RAW_MODE, -1, "RAW", .is_wireless = false, .is_wired = false, .is_otg = false,	\
+	 .is_charging = false, .is_cp = false, .chg_index = BMS_USECASE_CHARGER_INDEX_INVALID),	\
 												\
-	S(GSU_MODE_STANDBY, 0, "Standby", false, false, false),					\
+	S(GSU_MODE_STANDBY, 0, "Standby", .is_wireless = false, .is_wired = false,		\
+	 .is_otg = false, .is_charging = false, .is_cp = false,					\
+	 .chg_index = BMS_USECASE_CHARGER_INDEX_INVALID),					\
 	/* 1-1 wired mode 0x4 */								\
-	S(GSU_MODE_USB_CHG, 1, "USB", false, true, false),					\
+	S(GSU_MODE_USB_CHG, 1, "USB", .is_wireless = false, .is_wired = true, .is_otg = false,	\
+	 .is_charging = false, .is_cp = false, .chg_index = BMS_USECASE_CHARGER_INDEX_MAIN),	\
 	/* 1-1 wired mode 0x5 */								\
-	S(GSU_MODE_USB_CHG_CHARGE_ENABLED, 201, "USB_CHG", false, true, false),			\
+	S(GSU_MODE_USB_CHG_CHARGE_ENABLED, 201, "USB_CHG", .is_wireless = false,		\
+	 .is_wired = true, .is_otg = false, .is_charging = true, .is_cp = false,		\
+	 .chg_index = BMS_USECASE_CHARGER_INDEX_MAIN),						\
 	/* 1-2 wired mode 0x0/0x1 */								\
-	S(GSU_MODE_USB_DC, 2, "USB_DC", false, true, false),					\
+	S(GSU_MODE_USB_DC, 2, "USB_DC", .is_wireless = false, .is_wired = true, .is_otg = false,\
+	 .is_charging = true, .is_cp = true, .chg_index = BMS_USECASE_CHARGER_INDEX_CP),	\
+												\
+	S(GSU_MODE_USB_CHG_HYBRID, 221, "USB_CHG_HYBRID", .is_wireless = false,			\
+	 .is_wired = true, .is_otg = false, .is_charging = true, .is_cp = false,		\
+	 .chg_index = BMS_USECASE_CHARGER_INDEX_HYBRID),					\
 	/* 2-1, 1041, */									\
-	S(GSU_MODE_USB_CHG_WLC_TX, 3, "USB_CHG_RTX", false, true, false),			\
+	S(GSU_MODE_USB_CHG_WLC_TX, 3, "USB_CHG_RTX", .is_wireless = false, .is_wired = true,	\
+	 .is_otg = false, .is_charging = true, .is_cp = false,					\
+	 .chg_index = BMS_USECASE_CHARGER_INDEX_MAIN),						\
 												\
 	/* 3-1, mode 0x4 */									\
-	S(GSU_MODE_WLC_RX, 5, "WLC_RX", true, false, false),					\
+	S(GSU_MODE_WLC_RX, 5, "WLC_RX", .is_wireless = true, .is_wired = false, .is_otg = false,\
+	 .is_charging = false, .is_cp = false, .chg_index = BMS_USECASE_CHARGER_INDEX_MAIN),	\
 	/* 3-1, mode 0x5 */									\
-	S(GSU_MODE_WLC_RX_CHARGE_ENABLED, 305, "WLC_RX_CHG",true, false, false),		\
+	S(GSU_MODE_WLC_RX_CHARGE_ENABLED, 305, "WLC_RX_CHG", .is_wireless = true,		\
+	 .is_wired = false, .is_otg = false, .is_charging = true, .is_cp = false,		\
+	 .chg_index = BMS_USECASE_CHARGER_INDEX_MAIN),						\
 	/* WLC spoofed */									\
-	S(GSU_MODE_WLC_RX_SPOOFED, 300,	"WLC_RX_SPOOF", true, false, false),			\
+	S(GSU_MODE_WLC_RX_SPOOFED, 300,	"WLC_RX_SPOOF", .is_wireless = true, .is_wired = false,	\
+	 .is_otg = false, .is_charging = false, .is_cp = false,					\
+	 .chg_index = BMS_USECASE_CHARGER_INDEX_INVALID),					\
+												\
+	S(GSU_MODE_WLC_RX_HYBRID, 325, "WLC_RX_HYBRID", .is_wireless = true, .is_wired = false,	\
+	 .is_otg = false, .is_charging = true, .is_cp = false,					\
+	 .chg_index = BMS_USECASE_CHARGER_INDEX_HYBRID),					\
 	/* 3-2, mode 0x0 */									\
-	S(GSU_MODE_WLC_DC, 6, "WLC_DC", true, false, false),					\
-	S(GSU_MODE_USB_OTG_WLC_DC, 306, "OTG_WLC_DC", true, false, true),			\
+	S(GSU_MODE_WLC_DC, 6, "WLC_DC", .is_wireless = true, .is_wired = false, .is_otg = false,\
+	 .is_charging = true, .is_cp = true, .chg_index = BMS_USECASE_CHARGER_INDEX_CP),	\
+	S(GSU_MODE_USB_OTG_WLC_DC, 306, "OTG_WLC_DC", .is_wireless = true, .is_wired = false,	\
+	 .is_otg = true, .is_charging = true, .is_cp = true,					\
+	 .chg_index = BMS_USECASE_CHARGER_INDEX_CP),						\
 												\
 	/* 7, 524, */										\
-	S(GSU_MODE_USB_OTG_WLC_RX, 7, "OTG_WLC_RX", true, false, true),				\
-	S(GSU_MODE_USB_OTG_WLC_RX_CHARGE_ENABLED, 307, "OTG_WLC_RX_CHG",true, false, true),	\
-	/* 5-1, 516,*/										\
-	S(GSU_MODE_USB_OTG, 9, "OTG", false, false, true),					\
-	S(GSU_MODE_USB_OTG_FRS, 10, "OTG_FRS", false, false, true),				\
-	/* 6-2, 1056, */									\
-	S(GSU_MODE_WLC_TX, 11, "RTX", false, false, false),					\
-	S(GSU_MODE_USB_OTG_WLC_TX, 12, "OTG_RTX", false, false, true),				\
-	S(GSU_MODE_USB_WLC_RX, 13, "USB_WLC_RX_CHG", false, false, false),			\
+	S(GSU_MODE_USB_OTG_WLC_RX, 7, "OTG_WLC_RX", .is_wireless = true, .is_wired = false,	\
+	 .is_otg = true, .is_charging = false, .is_cp = false,					\
+	 .chg_index = BMS_USECASE_CHARGER_INDEX_INVALID),					\
+	S(GSU_MODE_USB_OTG_WLC_RX_CHARGE_ENABLED, 307, "OTG_WLC_RX_CHG",			\
+	  .is_wireless = true, .is_wired = false, .is_otg = true, .is_charging = true,		\
+	  .is_cp = false, .chg_index = BMS_USECASE_CHARGER_INDEX_MAIN),				\
 												\
-	S(GSU_MODE_DOCK, 14, "DOCK", false, false, false),					\
-	S(GSU_MODE_POGO_VOUT, 15, "POGO_VOUT", false, false, false),				\
-	S(GSU_MODE_USB_CHG_POGO_VOUT, 16, "USB_CHG_POGO_VOUT", false, false, false),		\
-	S(GSU_MODE_USB_OTG_POGO_VOUT, 17, "USB_OTG_POGO_VOUT", false, false, true),		\
+	S(GSU_MODE_USB_OTG_WLC_RX_HYBRID, 329, "OTG_WLC_HYBRID", .is_wireless = true,		\
+	 .is_wired = false, .is_otg = true, .is_charging = true, .is_cp = false,		\
+	 .chg_index = BMS_USECASE_CHARGER_INDEX_HYBRID),					\
+	/* 5-1, 516,*/										\
+	S(GSU_MODE_USB_OTG, 9, "OTG", .is_wireless = false, .is_wired = false, .is_otg = true,	\
+	 .is_charging = false, .is_cp = false, .chg_index = BMS_USECASE_CHARGER_INDEX_INVALID),	\
+	S(GSU_MODE_USB_OTG_FRS, 10, "OTG_FRS", .is_wireless = false, .is_wired = false,		\
+	 .is_otg = true, .is_charging = false, .is_cp = false,					\
+	 .chg_index = BMS_USECASE_CHARGER_INDEX_INVALID),					\
+	/* 6-2, 1056, */									\
+	S(GSU_MODE_WLC_TX, 11, "RTX", .is_wireless = false, .is_wired = false, .is_otg = false,	\
+	 .is_charging =  false, .is_cp = false, .chg_index = BMS_USECASE_CHARGER_INDEX_INVALID),\
+	S(GSU_MODE_USB_OTG_WLC_TX, 12, "OTG_RTX", .is_wireless = false, .is_wired = false,	\
+	 .is_otg = true, .is_charging = false, .is_cp = false,					\
+	 .chg_index = BMS_USECASE_CHARGER_INDEX_INVALID),					\
+	S(GSU_MODE_USB_WLC_RX, 13, "USB_WLC_RX_CHG", .is_wireless = true, .is_wired = false,	\
+	 .is_otg = false, .is_charging = true, .is_cp = false,					\
+	 .chg_index = BMS_USECASE_CHARGER_INDEX_MAIN),						\
+												\
+	S(GSU_MODE_DOCK, 14, "DOCK", .is_wireless = false, .is_wired = false, .is_otg = false,	\
+	 .is_charging = false, .is_cp = false, .chg_index = BMS_USECASE_CHARGER_INDEX_INVALID),	\
+	S(GSU_MODE_DOCK_CHARGE_ENABLED, 314, "DOCK_CHG", .is_wireless = false,			\
+	 .is_wired = false, .is_otg = false, .is_charging = true, .is_cp = false,		\
+	 .chg_index = BMS_USECASE_CHARGER_INDEX_MAIN),						\
+												\
+	/* check max77779_wcin_is_valid if modifying pogo vout */				\
+	S(GSU_MODE_POGO_VOUT, 15, "POGO_VOUT", .is_wireless = false, .is_wired = false,		\
+	 .is_otg = false, .is_charging = false, .is_cp = false,					\
+	 .chg_index = BMS_USECASE_CHARGER_INDEX_INVALID),					\
+	S(GSU_MODE_USB_CHG_POGO_VOUT, 16, "USB_CHG_POGO_VOUT", .is_wireless = false,		\
+	 .is_wired = false, .is_otg = false, .is_charging = false, .is_cp = false,		\
+	 .chg_index = BMS_USECASE_CHARGER_INDEX_INVALID),					\
+	S(GSU_MODE_USB_CHG_POGO_VOUT_CHARGE_ENABLED, 216, "USB_CHG_POGO_VOUT",			\
+	 .is_wireless = false, .is_wired = false, .is_otg = false, .is_charging = true,		\
+	 .is_cp = false, .chg_index = BMS_USECASE_CHARGER_INDEX_MAIN),				\
+	S(GSU_MODE_USB_OTG_POGO_VOUT, 17, "USB_OTG_POGO_VOUT", .is_wireless = false,		\
+	 .is_wired = false, .is_otg = true, .is_charging = false, .is_cp = false,		\
+	 .chg_index = BMS_USECASE_CHARGER_INDEX_INVALID),					\
 												\
 	/* ifpmic firmware update */								\
-	S(GSU_MODE_FWUPDATE, 18, "IFPMIC_FWUPDATE", false, false, false),			\
+	S(GSU_MODE_FWUPDATE, 18, "IFPMIC_FWUPDATE", .is_wireless = false, .is_wired = false,	\
+	 .is_otg = false, .is_charging = false, .is_cp = false,					\
+	 .chg_index = BMS_USECASE_CHARGER_INDEX_INVALID),					\
 	/* WLC fwupdate */									\
-	S(GSU_MODE_WLC_FWUPDATE	, 19, "WLC_FWUPDATE", false, false, false),			\
+	S(GSU_MODE_WLC_FWUPDATE, 19, "WLC_FWUPDATE", .is_wireless = false, .is_wired = false,	\
+	 .is_otg = false, .is_charging = false, .is_cp = false,					\
+	 .chg_index = BMS_USECASE_CHARGER_INDEX_INVALID),					\
 												\
 	/* indicates input_suspend and plugged in */						\
-	S(GSU_MODE_STANDBY_BUCK_ON, 100, "STANDBY_BUCK_ON", false, true, false),		\
+	S(GSU_MODE_STANDBY_BUCK_ON, 100, "STANDBY_BUCK_ON", .is_wireless = false,		\
+	 .is_wired = true, .is_otg = false, .is_charging = false, .is_cp = false,		\
+	 .chg_index = BMS_USECASE_CHARGER_INDEX_INVALID),					\
 
-#define GSU_USECASE_CONFIG(usecase, val, name, is_wireless, is_wired, is_otg)			\
-	{ usecase, name, is_wireless, is_wired, is_otg }					\
+#define GSU_USECASE_CONFIG(...) { __VA_ARGS__ }							\
 
-#define GSU_USECASE_ENUM_CONFIG(usecase, val, name, is_wireless, is_wired, is_otg)		\
-	usecase	= val										\
+#define GSU_USECASE_ENUM_CONFIG(usecase, val, ...)						\
+	usecase = val										\
 
 enum gsu_usecases {
 	FOREACH_GSU_USECASE(GSU_USECASE_ENUM_CONFIG)
@@ -249,5 +326,8 @@ void bms_usecase_uc_setup_notify(struct bms_usecase_data *bms_uc_data, enum gsu_
 const char *bms_usecase_to_str(enum gsu_usecases usecase);
 bool bms_usecase_is_uc_wireless(enum gsu_usecases usecase);
 bool bms_usecase_is_uc_wired(enum gsu_usecases usecase);
+bool bms_usecase_is_uc_charging_enabled(enum gsu_usecases usecase);
+bool bms_usecase_is_chg_changed(enum gsu_usecases from_uc, enum gsu_usecases to_uc);
+bool bms_usecase_is_uc_cp(enum gsu_usecases usecase);
 bool bms_usecase_is_uc_otg(enum gsu_usecases usecase);
 #endif

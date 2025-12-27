@@ -122,6 +122,7 @@ static inline void set_regval(struct max77779_i2cm_info *info,
 	info->reg_vals[reg] = val8;
 }
 
+#if IS_ENABLED(CONFIG_DEBUG_FS)
 static void max77779_i2cm_reset(struct max77779_i2cm_info *info)
 {
         /* disable/reenable ip */
@@ -130,6 +131,7 @@ static void max77779_i2cm_reset(struct max77779_i2cm_info *info)
 	regmap_write(info->regmap, MAX77779_I2CM_CONTROL,
 			   I2CEN_SET(1) | CLOCK_SPEED_SET(info->speed));
 }
+#endif
 
 static void max77779_i2cm_manual_start(struct max77779_i2cm_info *info)
 {
@@ -286,6 +288,10 @@ static int max77779_i2cm_xfer(struct i2c_adapter *adap,
 	unsigned int status; /* result of status register */
 	uint8_t status_err;
 
+	mutex_lock(&info->io_lock);
+
+	regmap_write(info->regmap, MAX77779_I2CM_CONTROL, I2CEN_SET(1));
+
 	set_regval(info, MAX77779_I2CM_INTERRUPT, DONEI_SET(1) | ERRI_SET(1));
 	set_regval(info, MAX77779_I2CM_INTMASK, ERRIM_SET(0) | DONEIM_SET(0));
 	set_regval(info, MAX77779_I2CM_TIMEOUT, info->timeout);
@@ -327,8 +333,6 @@ static int max77779_i2cm_xfer(struct i2c_adapter *adap,
 
 	set_regval(info, MAX77779_I2CM_TXDATA_CNT, txdata_cnt);
 
-	mutex_lock(&info->io_lock);
-
 	err = regmap_raw_write(regmap, MAX77779_I2CM_INTERRUPT,
 			&info->reg_vals[MAX77779_I2CM_INTERRUPT],
 			tx_data_buffer - MAX77779_I2CM_INTERRUPT);
@@ -353,14 +357,14 @@ static int max77779_i2cm_xfer(struct i2c_adapter *adap,
 	if (err)
 		goto xfer_done;
 	status_err = ERROR_GET(status);                 /* bit */
-	if (I2CM_ERR_ADDRESS_NACK(status_err))          /*  2  */
+	if (I2CM_ERR_TIMEOUT(status_err))               /*  1  */
+		err = -ETIMEDOUT;
+	else if (I2CM_ERR_ADDRESS_NACK(status_err))     /*  2  */
 		err = -ENXIO;
 	else if (I2CM_ERR_DATA_NACK(status_err))        /*  3  */
 		err = -ENXIO;
 	else if (I2CM_ERR_RX_FIFO_NA(status_err))       /*  4  */
 		err = -ENOBUFS;
-	else if (I2CM_ERR_TIMEOUT(status_err))          /*  1  */
-		err = -ETIMEDOUT;
 	else if (I2CM_ERR_START_OUT_SEQ(status_err))    /*  5  */
 		err = -EBADMSG;
 	else if (I2CM_ERR_STOP_OUT_SEQ(status_err))     /*  6  */
@@ -369,7 +373,8 @@ static int max77779_i2cm_xfer(struct i2c_adapter *adap,
 		err = -EAGAIN;
 
 	if (err) {
-		dev_err(info->dev, "I2CM status Error (%#04x).\n", status_err);
+		dev_err(info->dev, "addr=0x%02x: I2CM status Error (%#04x).\n",
+				(msgs && num_msgs > 0 ? msgs[0].addr : 0xff), status_err);
 		goto xfer_done;
 	}
 
@@ -409,18 +414,15 @@ xfer_done:
 
 	}
 
-	switch (err) {
-	case 0:
-		break;
-	case (-ETIMEDOUT):
+	if (err == -ETIMEDOUT)
 		max77779_i2cm_recover(info);
-		fallthrough; /* for reset() */
-	case -ENXIO:
-		max77779_i2cm_reset(info);
-		fallthrough; /* for error return */
-	default:
-		dev_err(info->dev, "Xfer Error (%d)\n", err);
-	}
+
+	if (err)
+		dev_err(info->dev, "addr=0x%02x: Xfer Error (%d)\n",
+				(msgs && num_msgs > 0 ? msgs[0].addr : 0xff), err);
+
+	regmap_write(info->regmap, MAX77779_I2CM_CONTROL, I2CEN_SET(0));
+
 	mutex_unlock(&info->io_lock);
 
 	return err ? err : num_msgs;

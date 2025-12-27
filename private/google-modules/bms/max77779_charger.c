@@ -344,7 +344,14 @@ EXPORT_SYMBOL_GPL(max77779_external_chg_mode_write);
 
 int max77779_external_chg_insel_write(struct device *dev, u8 mask, u8 value)
 {
-	return max77779_external_chg_reg_update(dev, MAX77779_CHG_CNFG_12, mask, value);
+	int ret;
+	struct max77779_chgr_data *data = dev_get_drvdata(dev);
+
+	mutex_lock(&data->io_lock);
+	ret = max77779_external_chg_reg_update(dev, MAX77779_CHG_CNFG_12, mask, value);
+	mutex_unlock(&data->io_lock);
+
+	return ret;
 }
 EXPORT_SYMBOL_GPL(max77779_external_chg_insel_write);
 
@@ -3310,6 +3317,43 @@ bool max77779_chg_is_reg(struct device *dev, unsigned int reg)
 }
 EXPORT_SYMBOL_GPL(max77779_chg_is_reg);
 
+static void max77779_check_fet_work(struct work_struct *work)
+{
+	int ret;
+	uint8_t chg_dtls, wcin_dtls, cur_wlc_sel = 0;
+	struct max77779_chgr_data *data = container_of(work, struct max77779_chgr_data,
+						       check_fet_work.work);
+	mutex_lock(&data->io_lock);
+
+	ret = max77779_reg_read(data, MAX77779_CHG_DETAILS_00, &chg_dtls);
+	if (ret < 0)
+		goto unlock;
+
+	ret = max77779_external_chg_insel_read(data->dev, &cur_wlc_sel);
+	if (ret < 0)
+		goto unlock;
+
+	wcin_dtls = _max77779_chg_details_00_wcin_dtls_get(chg_dtls);
+	if ((wcin_dtls == 0x1) && (_max77779_chg_cnfg_12_wcinsel_get(cur_wlc_sel) == 1)) {
+
+		dev_info(data->dev, "Detected fet stuck: Toggling wcin\n");
+		ret = max77779_external_chg_reg_update(data->dev, MAX77779_CHG_CNFG_12,
+						       MAX77779_CHG_CNFG_12_WCINSEL_MASK,
+						       ~MAX77779_CHG_CNFG_12_WCINSEL);
+		if (ret < 0)
+			goto unlock;
+
+		usleep_range(10 * USEC_PER_MSEC, 15 * USEC_PER_MSEC);
+
+		ret = max77779_external_chg_reg_update(data->dev, MAX77779_CHG_CNFG_12,
+						       MAX77779_CHG_CNFG_12_WCINSEL_MASK,
+						       MAX77779_CHG_CNFG_12_WCINSEL);
+	}
+
+unlock:
+	mutex_unlock(&data->io_lock);
+}
+
 static irqreturn_t max77779_chgr_irq(int irq, void *d)
 {
 	struct max77779_chgr_data *data = d;
@@ -3424,6 +3468,8 @@ static irqreturn_t max77779_chgr_irq(int irq, void *d)
 
 		data->charge_done = false;
 		broadcast = true;
+
+		mod_delayed_work(system_wq, &data->check_fet_work, msecs_to_jiffies(60));
 
 		if (data->wcin_psy)
 			power_supply_changed(data->wcin_psy);
@@ -3845,6 +3891,7 @@ int max77779_charger_init(struct max77779_chgr_data *data)
 	INIT_DELAYED_WORK(&data->wcin_inlim_work, max77779_wcin_inlim_work);
 	INIT_DELAYED_WORK(&data->wcin_ema_work, max77779_wcin_ema_work);
 	INIT_DELAYED_WORK(&data->usecase_work, max77779_usecase_work);
+	INIT_DELAYED_WORK(&data->check_fet_work, max77779_check_fet_work);
 
 	data->usecase_wake_lock = wakeup_source_register(NULL, "max77779-usecase");
 	if (!data->usecase_wake_lock) {

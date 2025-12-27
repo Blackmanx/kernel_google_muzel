@@ -79,6 +79,68 @@ bool bms_usecase_is_uc_wired(enum gsu_usecases usecase)
 }
 EXPORT_SYMBOL_GPL(bms_usecase_is_uc_wired);
 
+bool bms_usecase_is_uc_charging_enabled(enum gsu_usecases usecase)
+{
+	struct gsu_usecase_config_t *config;
+
+	hash_for_each_possible(gsu_usecase_table, config, hnode, usecase) {
+		if (config->usecase == usecase)
+			return config->is_charging;
+	}
+
+	dev_err(singleton_bms_uc_data->chg_data->dev, "%s: Error could not find usecase %d\n",
+		__func__, usecase);
+
+	return false;
+}
+EXPORT_SYMBOL_GPL(bms_usecase_is_uc_charging_enabled);
+
+bool bms_usecase_is_chg_changed(enum gsu_usecases from_uc, enum gsu_usecases to_uc)
+{
+	struct gsu_usecase_config_t *config;
+	int from_chg = -1, to_chg = -1;
+
+	hash_for_each_possible(gsu_usecase_table, config, hnode, from_uc) {
+		if (config->usecase == from_uc) {
+			from_chg = config->chg_index;
+			break;
+		}
+	}
+
+	hash_for_each_possible(gsu_usecase_table, config, hnode, to_uc) {
+		if (config->usecase == to_uc) {
+			to_chg = config->chg_index;
+			break;
+		}
+	}
+
+	if (from_chg == -1 || to_chg == -1) {
+		dev_err(singleton_bms_uc_data->chg_data->dev,
+		"%s: Error could not find usecase from_uc:%d chg:%d to_uc:%d chg:%d\n",
+		__func__, from_uc, from_chg, to_uc, to_chg);
+		return 0;
+	}
+
+	return from_chg != to_chg;
+}
+EXPORT_SYMBOL_GPL(bms_usecase_is_chg_changed);
+
+bool bms_usecase_is_uc_cp(enum gsu_usecases usecase)
+{
+	struct gsu_usecase_config_t *config;
+
+	hash_for_each_possible(gsu_usecase_table, config, hnode, usecase) {
+		if (config->usecase == usecase)
+			return config->is_cp;
+	}
+
+	dev_err(singleton_bms_uc_data->chg_data->dev, "%s: Error could not find usecase %d\n",
+		__func__, usecase);
+
+	return false;
+}
+EXPORT_SYMBOL_GPL(bms_usecase_is_uc_cp);
+
 bool bms_usecase_is_uc_otg(enum gsu_usecases usecase)
 {
 	struct gsu_usecase_config_t *config;

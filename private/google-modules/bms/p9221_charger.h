@@ -28,7 +28,7 @@
 #define DCIN_AICL_VOTER				"DCIN_AICL_VOTER"
 #define P9382A_RTX_VOTER			"RTX_VOTER"
 #define THERMAL_DAEMON_VOTER			"THERMAL_DAEMON_VOTER"
-#define HPP_DC_ICL_VOTER			"HPP_VOTER"
+#define HPP_VOTER				"HPP_VOTER"
 #define DD_VOTER				"DD_VOTER"
 #define AUTH_DC_ICL_VOTER			"AUTH_VOTER"
 #define CPOUT_EN_VOTER				"CPOUT_EN_VOTER"
@@ -815,6 +815,7 @@ struct p9221_charger_platform_data {
 	u8				ask_mod_fet;
 	u32				freq_109_icl;
 	u32				freq_109_vout;
+	int				qispec;
 };
 
 struct p9221_charger_ints_bit {
@@ -1138,6 +1139,7 @@ int p9221_set_auth_dc_icl(struct p9221_charger_data *charger, bool enable);
 int p9xxx_sw_ramp_icl(struct p9221_charger_data *charger, const int icl_target);
 int p9xxx_gpio_set_value(struct p9221_charger_data *charger, struct gpio_desc *gpio, int value);
 bool is_ping_freq_fixed_at(struct p9221_charger_data *charger, u32 khz);
+void p9221_uevent(struct p9221_charger_data *charger, u8 id);
 
 void p9xxx_gpio_init(struct p9221_charger_data *charger);
 extern int p9221_chip_init_funcs(struct p9221_charger_data *charger,
@@ -1185,6 +1187,18 @@ enum p9xxx_renego_state {
 	P9XXX_AVAILABLE = 0,
 	P9XXX_SEND_DATA,
 	P9XXX_ENABLE_PROPMODE,
+};
+
+#define UEVENT_ENVP_LEN 20
+
+static char *uevent_source_str[] = {
+	"WLC", "FAN", "RTX"
+};
+
+enum uevent_source {
+	UEVENT_WLC = 0,
+	UEVENT_FAN,
+	UEVENT_RTX,
 };
 
 #define P9221_MA_TO_UA(ma)((ma) * 1000)

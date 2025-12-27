@@ -40,6 +40,12 @@ static int cps4041_set_vout(struct google_wlc_data *chgr, u32 mv)
 	u16 prev_vout_set;
 	u32 pout, pout_low = 0, vout_delta = 0;
 	int ret;
+	u8 val8;
+
+	ret = chgr->chip->chip_get_sys_mode(chgr, &val8);
+	if (ret == 0 && (val8 == RX_MODE_WPC_EPP || val8 == RX_MODE_WPC_EPP_NEGO)) {
+		chgr->chip->reg_write_16(chgr, CPS4041_VOUT_SET_REG, mv);
+	}
 
 	if (mv < GOOGLE_WLC_VOUT_MIN || mv > GOOGLE_WLC_VOUT_MAX) {
 		dev_info(chgr->dev, "Invalid vout setting: %d, skip", mv);
@@ -1082,6 +1088,9 @@ static int cps4041_write_poweron_params(struct google_wlc_data *chgr)
 		chgr->chip->reg_write_8(chgr, CSP4041_GAIN_LINEAR_COEFF_REG,
 					chgr->wlc_dc_debug_gain_linear);
 	}
+	if (chgr->cloak_ping_delay_ms > 0)
+		chgr->chip->reg_write_8(chgr, CPS4041_CLOAK_PING_DELAY_REG,
+					chgr->cloak_ping_delay_ms / 500);
 	chgr->chip->chip_set_dynamic_mod(chgr);
 
 	return 0;
@@ -1417,6 +1426,9 @@ static int cps4041_firmware_request(struct google_wlc_data *chgr,
 	struct wlc_fw_ver ver = { 0 };
 	int ret;
 
+	/* upload stats for errors on loading firmware */
+	chgr->fw_data.needs_update = true;
+
 	if (!chgr->fw_data.update_support)
 		return -EINVAL;
 
@@ -1533,16 +1545,39 @@ static int cps4041_crc_check(struct google_wlc_data *chgr, u64 *crc)
 	u8 val8;
 	u16 val;
 
-	ret = chgr->chip->reg_read_8(chgr, CPS4041_SYS_MODE_REG, &val8);
-	if (val8 != CPS4041_SYS_MODE_BACKPOWER) {
-		dev_err(chgr->dev, "Not in backpower mode");
-		return -EINVAL;
+	/* it takes up to 0.3 + 1 + 2 seconds for waiting mode and crc computation */
+	for (int i = 0; i < 3; i++) {
+		msleep(100);
+		ret = chgr->chip->reg_read_8(chgr, CPS4041_SYS_MODE_REG, &val8);
+		if (ret != 0) {
+			ret = -FWUPDATE_ERROR_I2C;
+			continue;
+		}
+		if (val8 == CPS4041_SYS_MODE_BACKPOWER) {
+			ret = cps4041_chip_set_cmd_reg(chgr, CPS4041_COMMAND_CRC_CHECK, 1000);
+			if (ret != 0)
+				ret = -FWUPDATE_ERROR_I2C;
+			break;
+		}
+		if (val8 == CPS4041_SYS_MODE_EMPTY) {
+			dev_err(chgr->dev, "Empty firmware, mode reg: %#02x", val8);
+			return -FWUPDATE_ERROR_CRC;
+		}
+		dev_err(chgr->dev, "Not in backpower mode, mode reg: %#02x", val8);
+		ret = -FWUPDATE_ERROR_BACKPOWER;
 	}
-	ret = cps4041_chip_set_cmd_reg(chgr, CPS4041_COMMAND_CRC_CHECK, 1000);
+
 	if (ret != 0)
 		return ret;
 
-	ret = chgr->chip->reg_read_16(chgr, CPS4041_CRC_VAL_REG, &val);
+	for (int i = 0; i < 20; i++) {
+		msleep(100);
+		ret = chgr->chip->reg_read_16(chgr, CPS4041_CRC_VAL_REG, &val);
+		if (ret != 0)
+			return -FWUPDATE_ERROR_I2C;
+		if (val != 0)
+			break;
+	}
 	*crc = val;
 
 	return ret;
@@ -1572,6 +1607,7 @@ static int cps4041_chip_fwupdate(struct google_wlc_data *chgr, int step)
 		ret = cps4041_bootloader_download(chgr, bl_data);
 		ret |= cps4041_bootloader_verification(chgr);
 		if (ret < 0) {
+			ret = -FWUPDATE_ERROR_BOOTLOADER;
 			mutex_unlock(&chgr->fwupdate_lock);
 			break;
 		}
@@ -1581,6 +1617,7 @@ static int cps4041_chip_fwupdate(struct google_wlc_data *chgr, int step)
 		DEBUG_I2C_LOG(chgr, "program the firmware");
 		ret = cps4041_program_firmware(chgr, fw_data);
 		if (ret < 0) {
+			ret = -FWUPDATE_ERROR_FLASH;
 			mutex_unlock(&chgr->fwupdate_lock);
 			break;
 		}
@@ -1594,15 +1631,21 @@ static int cps4041_chip_fwupdate(struct google_wlc_data *chgr, int step)
 		ret |= cps4041_chip_reset(chgr);
 		mutex_unlock(&chgr->fwupdate_lock);
 		if (ret == 0 || chgr->fw_data.erase_fw) {
-			chgr->fw_data.update_done = true;
 			ret = cps4041_read_firmware_version(chgr, &chgr->fw_data.ver);
 			if (ret < 0)
 				logbuffer_devlog(chgr->fw_log, chgr->dev,
 						 "fail to read fw version, ret=%d", ret);
-			ret |= cps4041_crc_check(chgr, &chgr->fw_data.ver.crc);
-			if (ret < 0)
+			ret = cps4041_crc_check(chgr, &chgr->fw_data.ver.crc);
+			if (ret < 0) {
 				logbuffer_devlog(chgr->fw_log, chgr->dev,
 						 "fail to read crc, ret=%d", ret);
+			} else if (ret == 0 && chgr->fw_data.ver.crc == 0) {
+				ret = -FWUPDATE_ERROR_FLASH;
+			} else {
+				ret = 0;
+				chgr->fw_data.update_done = true;
+			}
+
 			if (ret == 0)
 				logbuffer_devlog(chgr->fw_log, chgr->dev,
 					"major=%02x,minor=%02x,project_id=%02x,crc=%04llx",
@@ -1623,6 +1666,7 @@ static int cps4041_chip_fwupdate(struct google_wlc_data *chgr, int step)
 				logbuffer_devlog(chgr->fw_log, chgr->dev,
 						 "store fw_tag=0x%08x\n", fw_tag);
 		} else {
+			ret = -FWUPDATE_ERROR_FLASH;
 			logbuffer_devlog(chgr->fw_log, chgr->dev, "firmware download failed\n");
 		}
 
@@ -1631,12 +1675,14 @@ static int cps4041_chip_fwupdate(struct google_wlc_data *chgr, int step)
 		if (chgr->fw_data.ver.crc > 0)
 			break;
 		logbuffer_devlog(chgr->fw_log, chgr->dev, "CRC check start");
+		chgr->fw_data.ver.crc = 0;
 		ret = cps4041_crc_check(chgr, &chgr->fw_data.ver.crc);
 		if (ret < 0 || chgr->fw_data.ver.crc == 0) {
 			chgr->fw_data.update_done = false;
-			chgr->fw_data.update_option = FWUPDATE_FORCE;
 			chgr->fw_data.ver.project_id = chgr->pdata->project_id;
-			chgr->fw_data.status = (ret < 0) ? ret : FWUPDATE_STATUS_FAIL;
+			chgr->fw_data.status = (ret < 0) ? ret : -FWUPDATE_ERROR_CRC;
+			if (chgr->fw_data.status == -FWUPDATE_ERROR_CRC)
+				chgr->fw_data.update_option = FWUPDATE_FORCE;
 			logbuffer_devlog(chgr->fw_log, chgr->dev,
 					 "CRC check failed,ret=%d,crc=0x%04llx\n",
 					 ret, chgr->fw_data.ver.crc);

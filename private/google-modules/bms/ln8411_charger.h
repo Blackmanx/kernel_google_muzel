@@ -318,6 +318,7 @@ struct ln8411_charger {
 	u32			power_offset;
 	u32			power_stable_cnt_goal;
 	u32			wcrx_vol_delay;
+	bool			maintain_fv_cc_max;
 };
 
 /* Direct Charging State */

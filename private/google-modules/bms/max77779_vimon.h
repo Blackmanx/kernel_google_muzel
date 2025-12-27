@@ -105,6 +105,8 @@ struct max77779_vimon_data {
 	int (*direct_reg_read)(struct max77779_vimon_data *data, u8 reg, unsigned int *val);
 	int (*direct_reg_write)(struct max77779_vimon_data *data, u8 reg, unsigned int val);
 	u16 trigger_src;
+
+	struct power_supply *psy;
 };
 
 int max77779_vimon_init(struct max77779_vimon_data *data);

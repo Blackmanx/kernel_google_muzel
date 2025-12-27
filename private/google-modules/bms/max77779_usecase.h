@@ -32,6 +32,8 @@ struct max77779_usecase_data {
 	bool slow_wlc_ilim;	/* ILIM SPEED to slow during WLC */
 	struct gpio_desc *wlc_spoof_gpio;	/* wlcrx thermal throttle */
 	u32 wlc_spoof_vbyp;			/* wlc spoof VBYP */
+	bool ext_rx_otg;			/* ext boost for WLC_RX and OTG */
+	bool ext_bst_on;			/* ext boost state */
 
 	u8 otg_ilim;				/* TODO: TCPM to control this? */
 	u8 otg_vbyp;				/* TODO: TCPM to control this? */

@@ -46,6 +46,7 @@ struct max77779_chgr_data {
 	struct max77779_usecase_data uc_data;
 	struct delayed_work mode_rerun_work;
 
+	struct delayed_work check_fet_work;
 	struct delayed_work usecase_work;
 
 	struct gvotable_election *dc_icl_votable;

@@ -227,6 +227,7 @@ static void gs201_force_standby(struct max77779_usecase_data *uc_data)
 		pr_err("%s: cannot reset insel (%d)\n",
 			__func__, ret);
 
+	uc_data->ext_bst_on = false;
 	gs201_otg_enable(uc_data, false);
 
 	if (!IS_ERR_OR_NULL(uc_data->rtx_ready))
@@ -282,11 +283,62 @@ static int gs201_otg_enable(struct max77779_usecase_data *uc_data, bool enable)
 
 		usleep_range(5 * USEC_PER_MSEC, 5 * USEC_PER_MSEC + 100);
 
+		/*
+		 * if ext_rx_otg is enabled, turn off external boost
+		 * except when wlcrx/otg are using it
+		 */
 		if (!IS_ERR_OR_NULL(uc_data->bst_on))
-			gpiod_set_value_cansleep(uc_data->bst_on, 0);
+			gpiod_set_value_cansleep(uc_data->bst_on, uc_data->ext_bst_on);
 	}
 
 	return 0;
+}
+
+static int gs201_wlcrx_ext_bst_enable(struct max77779_usecase_data *uc_data, bool enable)
+{
+	if (!uc_data->ext_rx_otg)
+		return 0;
+
+	pr_debug("%s: enable:%d\n", __func__, enable);
+
+	if (!IS_ERR_OR_NULL(uc_data->bst_on))
+		gpiod_set_value_cansleep(uc_data->bst_on, enable);
+
+	return 0;
+}
+
+static bool wlcrx_otg_ext_bst_enabled(struct max77779_usecase_data *uc_data,
+				      const int use_case, const int from_uc)
+{
+	if (!uc_data->ext_rx_otg)
+		return false;
+
+	switch (use_case) {
+	case GSU_MODE_USB_OTG:
+	case GSU_MODE_WLC_RX:
+	case GSU_MODE_WLC_RX_CHARGE_ENABLED:
+	case GSU_MODE_WLC_RX_SPOOFED:
+		if (from_uc == GSU_MODE_STANDBY ||
+		    from_uc == GSU_MODE_STANDBY_BUCK_ON ||
+		    from_uc == GSU_MODE_USB_OTG_WLC_RX ||
+		    from_uc == GSU_MODE_USB_OTG_WLC_RX_CHARGE_ENABLED)
+			return true;
+	break;
+
+	case GSU_MODE_USB_OTG_WLC_RX:
+	case GSU_MODE_USB_OTG_WLC_RX_CHARGE_ENABLED:
+		if (from_uc == GSU_MODE_USB_OTG ||
+		    from_uc == GSU_MODE_WLC_RX ||
+		    from_uc == GSU_MODE_WLC_RX_CHARGE_ENABLED ||
+		    from_uc == GSU_MODE_WLC_RX_SPOOFED)
+			return true;
+	break;
+
+	default:
+		return false;
+	}
+
+	return false;
 }
 
 /*
@@ -413,6 +465,9 @@ int gs201_to_usecase(struct max77779_usecase_data *uc_data, int use_case, int fr
 	bool rtx_avail = false;
 	int ret = 0;
 
+	/* read ext bst state for wlcrx/otg usecases */
+	uc_data->ext_bst_on = wlcrx_otg_ext_bst_enabled(uc_data, use_case, from_uc);
+
 	switch (use_case) {
 	case GSU_MODE_USB_OTG:
 	case GSU_MODE_USB_OTG_FRS:
@@ -438,6 +493,9 @@ int gs201_to_usecase(struct max77779_usecase_data *uc_data, int use_case, int fr
 				ret = gs201_otg_enable(uc_data, false);
 			else
 				ret = gs201_otg_mode(uc_data, GSU_MODE_USB_OTG);
+		} else if (from_uc == GSU_MODE_STANDBY ||
+			   from_uc == GSU_MODE_STANDBY_BUCK_ON) {
+			ret = gs201_wlcrx_ext_bst_enable(uc_data, true);
 		}
 		break;
 	case GSU_MODE_USB_CHG:
@@ -466,6 +524,10 @@ int gs201_to_usecase(struct max77779_usecase_data *uc_data, int use_case, int fr
 			gs201_otg_enable(uc_data, false);
 		} else if (from_uc == GSU_MODE_WLC_FWUPDATE) {
 			gs201_wlc_fw_update_enable(uc_data, false);
+		} else if (from_uc == GSU_MODE_WLC_RX ||
+			   from_uc == GSU_MODE_WLC_RX_CHARGE_ENABLED ||
+			   from_uc == GSU_MODE_WLC_RX_SPOOFED) {
+			gs201_wlcrx_ext_bst_enable(uc_data, false);
 		}
 
 		if ((from_uc == GSU_MODE_WLC_TX) && !IS_ERR_OR_NULL(uc_data->rtx_ready))
@@ -1152,6 +1214,9 @@ int gs201_setup_usecases(struct max77779_usecase_data *uc_data,
 
 	/* OPTIONAL: set ILIM speed to slow for WLC */
 	uc_data->slow_wlc_ilim = of_property_read_bool(node, "max77779,slow-wlc-ilim");
+
+	/* OPTIONAL: support external boost for WLC_RX and OTG */
+	uc_data->ext_rx_otg = of_property_read_bool(node, "max77779,ext-rx-otg");
 
 	if (PTR_ERR(uc_data->rtx_ready) == -EPROBE_DEFER)
 		uc_data->rtx_ready = devm_gpiod_get_optional(uc_data->dev, "max77779,rtx-ready", GPIOD_ASIS);

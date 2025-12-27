@@ -36,8 +36,8 @@
 #define USB_CONN_VOTER				"USB_CONN_VOTER"
 #define WLC_MDIS_VOTER				"WLC_MDIS_VOTER"
 #define WLCFW_VOTER				"WLC_FWUPDATE"
-#define EDS_AUTH_VOTER				"EDS_AUTH_VOTER"
-#define EDS_FW_VOTER				"EDS_FW_VOTER"
+#define EDS_VOTER				"EDS_VOTER"
+#define DD_VOTER				"DD_VOTER"
 
 #define GOOGLE_WLC_NOTIFIER_DELAY_MS			100
 #define GOOGLE_WLC_PRESENT_CHECK_INTERVAL_MS		1000
@@ -49,9 +49,10 @@
 #define GOOGLE_WLC_MPP_HEADROOM_MA			25000
 #define GOOGLE_WLC_MPP_RESTRICTED_ICL			400000
 #define GOOGLE_WLC_MPP_MAX_POWER			15000
-#define GOOGLE_WLC_DC_MIN_POWER				12000
+#define GOOGLE_WLC_DC_MIN_POWER				10000
+#define GOOGLE_WLC_MPP_NPM_MAX_POWER			15000
 #define GOOGLE_WLC_MPP_HPM_MAX_POWER			25000
-#define GOOGLE_WLC_EPP_MAX_POWER			15000
+#define GOOGLE_WLC_EPP_MAX_POWER			10000
 #define GOOGLE_WLC_BPP_MAX_POWER			5000
 #define GOOGLE_WLC_PREAUTH_RAMP_TARGET			7500
 #define GOOGLE_WLC_MAX_LOAD_STEP			25000
@@ -121,6 +122,12 @@
 #define DREAM_DEBOUNCE_TIME_S				400
 #define GOOGLE_WLC_IOP_FAIL_TIMEOUT_MS			(10 * 1000)
 #define GOOGLE_WLC_IOP_FAIL_COUNT_MAX			5
+#define GOOGLE_WLC_IOP_VOUT_MV				9000
+#define GOOGLE_WLC_ICL_STABLE_TIME_MS			(30 * 1000)
+#define MPP_NPM_MIN_VOLTAGE				12000
+#define MPP_NPM_MAX_VOLTAGE				14000
+#define MPP25_MAX_OUTPUT_VOLTAGE_MV			19000
+#define GOOGLE_WLC_MPP25_MAX_POWER			25000
 
 #define FWUPDATE_DATA_MINSIZE				8
 #define FWUPDATE_DATA_MAXSIZE				12
@@ -141,6 +148,12 @@
 #define TXID_TYPE_SHIFT					24
 #define TXID_DD_TYPE					0xE0
 #define TXID_DD_TYPE2					0xA0
+#define IOP_MFG_NUM_MAX					10
+#define INCOMPAT_COUNT					5
+
+#define GOOGLE_WLC_IOP_BPP_RAMP_DONE_CHECK_NUM		20
+#define GOOGLE_WLC_IOP_BPP_RAMP_DONE_CHECK_MS		(1 * 1000)
+#define GOOGLE_WLC_RAMP_DONE_ICL_MIN_UA			650000
 
 struct google_wlc_platform_data {
 	struct gpio_desc				*irq_gpio;
@@ -151,6 +164,7 @@ struct google_wlc_platform_data {
 	struct gpio_desc				*wcin_inlim_en_gpio;
 	struct gpio_desc				*det_gpio;
 	struct gpio_desc				*qi22_en_gpio;
+	struct gpio_desc				*qi_version_gpio;
 	struct power_supply				*batt_psy;
 	u8						*bpp_fods;
 	u8						*epp_fods;
@@ -194,6 +208,12 @@ struct google_wlc_platform_data {
 	int						mpp_eds_level_num;
 	int						fwupdate_option;
 	u32						power_mitigate_threshold;
+	int						qispec;
+	u32						iop_vout_mv[IOP_MFG_NUM_MAX];
+	u16						iop_vout_mfg[IOP_MFG_NUM_MAX];
+	int						iop_vout_mfg_num;
+	u32						cloak_ping_delay_ms;
+	u32						iop_bpp_vout_tolerance;
 };
 
 enum google_wlc_status {
@@ -220,6 +240,7 @@ struct icl_loop_status {
 	int						icl_target;
 	int						icl_current_vote;
 	int						icl_next;
+	int						vout;
 };
 
 enum sys_op_mode {
@@ -479,9 +500,13 @@ enum fw_update_option {
 };
 
 enum fw_update_status {
-	FWUPDATE_STATUS_FAIL = -1,
 	FWUPDATE_STATUS_UNKNOWN = 0,
 	FWUPDATE_STATUS_SUCCESS = 1,
+	FWUPDATE_ERROR_CRC = 100,
+	FWUPDATE_ERROR_I2C = 101,
+	FWUPDATE_ERROR_BACKPOWER = 102,
+	FWUPDATE_ERROR_BOOTLOADER = 103,
+	FWUPDATE_ERROR_FLASH = 104,
 };
 
 struct wlc_fw_ver {
@@ -496,6 +521,7 @@ struct wlc_fw_data {
 	struct wlc_fw_ver req_ver;
 	struct wlc_fw_ver cur_ver;
 	int update_option;
+	bool update_check_pending;
 	bool update_done;
 	bool needs_update;
 	bool update_support;
@@ -553,6 +579,19 @@ enum skip_nego_mode {
 	FORCE_25W_NEGO,
 };
 
+enum compatibility_type {
+	COMPAT_GPP = 1,
+	COMPAT_HPP = 2,
+	COMPAT_BPP = 3,
+	COMPAT_EPP = 4,
+	COMPAT_MPP_RESTRICTED = 5,
+	COMPAT_MPP = 6,
+	COMPAT_MPP25 = 7,
+	COMPAT_FORCED_BPP = 127,
+	COMPAT_NOT_SUPPORTED = -1,
+	COMPAT_LOWPOWER = -2,
+};
+
 /* Used for controlling charging by Switch Cap charger */
 struct wlc_dc_data {
 	bool dploss_param_init_ok;
@@ -582,6 +621,13 @@ struct mpp25_data {
 	struct mode_cap_data mode_capabilities;
 };
 
+struct psy_info {
+	int online;
+	int max_power;
+	int voltage_max;
+	int current_max;
+};
+
 struct google_wlc_data {
 	struct device				*dev;
 	struct i2c_client			*client;
@@ -604,6 +650,8 @@ struct google_wlc_data {
 	struct gvotable_election		*hda_tz_votable;
 	struct gvotable_election		*cp_fcc_votable;
 	struct gvotable_election		*dc_avail_votable;
+	struct gvotable_election		*msc_last_votable;
+	struct gvotable_election		*csi_status_votable;
 	/* mutexes */
 	struct mutex				io_lock;
 	struct mutex				status_lock;
@@ -629,10 +677,11 @@ struct google_wlc_data {
 	struct delayed_work			wlc_dc_init_work;
 	struct delayed_work			mpp25_timeout_work;
 	struct delayed_work			wlc_fw_update_work;
-	struct delayed_work			auth_eds_work;
-	struct delayed_work			fw_eds_work;
+	struct delayed_work			eds_work;
 	struct delayed_work			pla_ack_timeout_work;
 	struct delayed_work			check_iop_timeout_work;
+	struct delayed_work			set_iop_vout_work;
+	struct delayed_work			icl_stable_work;
 	/* buck charger icl ramp related */
 	int					icl_now;
 	int					icl_ramp_target_mw;
@@ -653,12 +702,14 @@ struct google_wlc_data {
 	struct wakeup_source			*mpp25_ws;
 	struct wakeup_source			*wlc_disable_ws;
 	struct wakeup_source			*icl_target_ws;
+	struct wakeup_source			*eds_tx_ws;
 	struct logbuffer			*log;
 	struct logbuffer			*fw_log;
 	struct dentry				*debug_entry;
 	/* status or charge session data */
 	enum google_wlc_status			status;
 	enum sys_op_mode			mode;
+	int					gpio_mode;
 	int					disconnect_count;
 	int					last_opfreq;
 	struct google_wlc_stats			chg_data;
@@ -677,11 +728,12 @@ struct google_wlc_data {
 	bool 					mpp25_disabled; /* disable for rest of session */
 	int					cloak_enter_reason;
 	int					usecase;
-	struct completion			disable_completion;
+	struct completion			cloak_completion;
 	struct completion			cal_enter_done;
 	struct completion			cal_renego_done;
 	struct completion			icl_ramp_done;
-	bool					wait_for_disable;
+	bool					wait_for_cloak;
+	bool					wait_for_exit_cloak;
 	int					inlim_setting;
 	bool					inlim_available;
 	bool					wait_for_cal_enter;
@@ -691,6 +743,13 @@ struct google_wlc_data {
 	u32					trigger_dd;
 	ktime_t					online_at;
 	bool					vout_ready;
+	struct psy_info				last_psy_info;
+	bool					iop_bpp;
+	int					compatibility;
+	bool					mpp_initialized;
+	bool					mpp_restricted_set;
+	u8					limit_reason;
+	bool					wlc_dc_to_ramp;
 	/* eds or auth related */
 	u8					*tx_buf;
 	u8					*rx_buf;
@@ -708,8 +767,10 @@ struct google_wlc_data {
 	u16					eds_error_count;
 	u16					eds_total_count;
 	bool					eds_event;
+	bool					wpc_auth_type;
 	/* debug or fwupdate related values */
 	bool					force_bpp;
+	bool					manual_force_bpp;
 	int					online_disable;
 	bool					fwupdate_mode;
 	u32					addr_fw;
@@ -761,6 +822,11 @@ struct google_wlc_data {
 	int					vrect_count;
 	ktime_t					last_vrect;
 	bool					mod_enable;
+	bool					wait_for_dd;
+	bool					lower_qi_version;
+	u32					cloak_ping_delay_ms;
+	bool					bpp_ramp_done_check;
+	u32					bpp_ramp_done_target;
 };
 
 struct google_wlc_bits {

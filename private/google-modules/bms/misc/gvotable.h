@@ -141,6 +141,7 @@ typedef int (*gvotable_v2sfn_t)(char *str, size_t len, const void *);
 int gvotable_v2s_int(char *str,  size_t len, const void *vote);
 int gvotable_v2s_uint(char *str, size_t len, const void *vote);
 int gvotable_v2s_uint_hex(char *str, size_t len, const void *vote);
+int gvotable_v2s_compound(char *str, size_t len, const void *vote);
 void gvotable_set_vote2str(struct gvotable_election *el,
 			   gvotable_v2sfn_t vote2str);
 int gvotable_disable_force_int_entry(struct gvotable_election *el);

@@ -3,6 +3,7 @@
  * Copyright 2019-2022 Google LLC
  */
 
+#include <linux/bitops.h>
 #include <linux/init.h>
 #include <linux/kernel.h>
 #include <linux/list.h>
@@ -248,6 +249,16 @@ int gvotable_v2s_uint_hex(char *str, size_t len, const void *vote)
 	return scnprintf(str, len, "0x%lx", (unsigned long)vote);
 }
 EXPORT_SYMBOL_GPL(gvotable_v2s_uint_hex);
+
+int gvotable_v2s_compound(char *str, size_t len, const void *vote)
+{
+	uint64_t val = (uint64_t)vote;
+	uint32_t high = upper_32_bits(val);
+	uint32_t low = lower_32_bits(val);
+
+	return scnprintf(str, len, "compound(hi=%d, lo=%d)", high, low);
+}
+EXPORT_SYMBOL_GPL(gvotable_v2s_compound);
 
 /* GVotable internal hashing function */
 static u32 gvotable_internal_hash(const char *str)
@@ -804,7 +815,7 @@ int gvotable_set_default_compound(struct gvotable_election *el, int default_hi, 
 {
 	void *default_val;
 
-	default_val = (void *)(((long)default_hi << 32) | default_lo);
+	default_val = (void *)(((long)default_hi << 32) | (unsigned int)default_lo);
 
 	return gvotable_set_default(el, default_val);
 }

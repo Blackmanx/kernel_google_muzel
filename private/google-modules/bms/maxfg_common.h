@@ -28,6 +28,9 @@
 #define BHI_CAP_FCN_COUNT		3
 #define BHI_CAP_FILTER_VALUE_COUNT	2
 
+#define DEFAULT_FORCE_FCR_UPDATE_CYCLE	10
+#define DEFAULT_FCN_FCR_DELTA_THESHOLD	10
+
 enum maxfg_reg_tags {
 	MAXFG_TAG_avgc,
 	MAXFG_TAG_cnfg,
@@ -87,6 +90,7 @@ enum maxfg_reg_tags {
 
 	MAXFG_TAG_fullsocthr,
 	MAXFG_TAG_misccfg,
+	MAXFG_TAG_ichgterm,
 };
 
 enum max17x0x_reg_types {
@@ -94,6 +98,11 @@ enum max17x0x_reg_types {
 	GBMS_ATOM_TYPE_REG = 1,
 	GBMS_ATOM_TYPE_ZONE = 2,
 	GBMS_ATOM_TYPE_SET = 3,
+};
+
+enum maxfg_bypass_chargelimit_mode {
+	MAXFG_BYPASS_MODE_CYCLE_DELTA = 1,
+	MAXFG_BYPASS_MODE_FCN_DELTA = 2,
 };
 
 #define MAX_HIST_FULLCAP	0x3FF
@@ -116,6 +125,25 @@ struct maxfg_eeprom_history {
 };
 #pragma pack()
 
+struct max1720x_eeprom_history {
+	u16 qrtable00;
+	u16 qrtable10;
+	u16 qrtable20;
+	u16 qrtable30;
+	u16 cycles;
+	u16 fullcapnom;
+	u16 rcomp0;
+	u16 tempco;
+	u16 iavgempty;
+	u16 fullcaprep;
+	u16 volttemp;
+	u16 maxmincurr;
+	u16 maxminvolt;
+	u16 maxmintemp;
+	u16 soc;
+	u16 timerh;
+};
+
 /* Capacity Estimation */
 struct gbatt_capacity_estimation {
 	const struct maxfg_reg *bcea;
@@ -133,10 +161,20 @@ struct gbatt_capacity_estimation {
 };
 
 struct aafv_fg_config {
-	u32 cycles;
 	u32 voffset;
 	u32 fullsoc;
 	u32 fus;
+	u32 ichgterm;
+};
+
+struct maxfg_bypss_charglimt {
+	enum maxfg_bypass_chargelimit_mode mode;
+	int last_fullcharge;
+	int fcn_fcr_delta;
+	/* threshold value to trigger full charge, cycle based */
+	int threshold_cycle_delta;
+	/* threshold value to trigger force_fcr_update (10x scaled percentage) */
+	int threshold_fcn_delta;
 };
 
 #define ESTIMATE_DONE		2
@@ -377,7 +415,7 @@ static inline int maxfg_regmap_writeverify(const struct maxfg_regmap *map,
 	maxfg_regmap_writeverify(regmap, what, value, #what)
 /* dump FG model data */
 void dump_model(struct device *dev, u16 model_start, u16 *data, int count);
-int maxfg_get_fade_rate(struct device *dev, int bhi_fcn_count, int *fade_rate, enum gbms_property p);
+int maxfg_get_fade_rate(struct device *dev, int bhi_fcn_count, int *fade_rate);
 const struct maxfg_reg * maxfg_find_by_tag(struct maxfg_regmap *map, enum maxfg_reg_tags tag);
 int maxfg_reg_read(struct maxfg_regmap *map, enum maxfg_reg_tags tag, u16 *val);
 int maxfg_collect_history_data(void *buff, size_t size, bool is_por, u16 designcap, u16 RSense,
@@ -472,10 +510,10 @@ void maxfg_dynrel_log_rel(struct logbuffer *mon, struct device *dev, u16 fstat,
 			     const struct maxfg_dynrel_state *dr_state);
 
 int maxfg_aafv_scan_inputs(const char *inputs, const int input_sz,
-			   struct aafv_fg_config *cfg, const int cfg_max);
-int maxfg_aafv_apply(struct maxfg_regmap *regmap, int aafv,
-		     const struct aafv_fg_config *cfgs, const int cfg_max,
-		     int fus_clear, int fus_shift, int *aafv_cur_index);
+			   struct aafv_fg_config* cfg, const int cfg_max);
+int maxfg_aafv_apply(struct logbuffer *mon, struct device *dev, struct maxfg_regmap *regmap,
+		     int aafv, const struct aafv_fg_config *cfgs, const int cfg_max,
+		     int fus_clear, int fus_shift, bool *fus_set, int *aafv_cur_index);
 int maxfg_aafv_restore_fus(struct maxfg_regmap *regmap, int fus_clear, int fus_shift, u16 fus);
 int maxfg_aafv_init(struct device_node *node, const char *prop,
 		    struct aafv_fg_config *config, int *config_limits);
@@ -484,7 +522,15 @@ ssize_t maxfg_aafv_config_store(struct device *dev, const int batt_id,
 				struct aafv_fg_config *aafv_cfgs, int *aafv_config_limits);
 ssize_t maxfg_aafv_config_show(struct aafv_fg_config *cfgs, const int config_limits,
 			       const int batt_id, char *buf);
+int maxfg_reset_max_min(struct maxfg_regmap *regmap);
 
-
+int maxfg_init_bypass_charge_limit(struct maxfg_regmap *regmap, struct device_node *node,
+				   struct maxfg_bypss_charglimt *limit);
+int maxfg_update_bypass_charge_limit(struct logbuffer *lb, struct device *dev,
+				     struct maxfg_regmap *regmap,
+				     struct maxfg_bypss_charglimt *limit, int cycle);
+bool maxfg_need_force_fullcharge(struct logbuffer *lb, struct device *dev,
+				 struct maxfg_regmap *regmap, struct maxfg_bypss_charglimt *limit,
+				 int cycle);
 
 #endif  // MAXFG_COMMON_H_

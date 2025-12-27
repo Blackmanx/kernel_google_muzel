@@ -81,15 +81,15 @@ properties:
 
   bpp_mdis_pwr:
     description: thermal table use for BPP charger
-    $ref: /schemas/types.yaml#/definitions/uint32-arrary
+    $ref: /schemas/types.yaml#/definitions/uint32-array
 
   epp_mdis_pwr:
     description: thermal table use for EPP charger
-    $ref: /schemas/types.yaml#/definitions/uint32-arrary
+    $ref: /schemas/types.yaml#/definitions/uint32-array
 
   mpp_mdis_pwr:
     description: thermal table use for MPP charger
-    $ref: /schemas/types.yaml#/definitions/uint32-arrary
+    $ref: /schemas/types.yaml#/definitions/uint32-array
 
   google,has_wlc_dc:
     description: Support charge pump
@@ -97,11 +97,11 @@ properties:
 
   mpp_eds_soc:
     description: soc table of eds icl use for MPP charger
-    $ref: /schemas/types.yaml#/definitions/uint32-arrary
+    $ref: /schemas/types.yaml#/definitions/uint32-array
 
   mpp_eds_icl:
     description: icl table used to define the limits of icl during eds in accordance with the soc table above
-    $ref: /schemas/types.yaml#/definitions/uint32-arrary
+    $ref: /schemas/types.yaml#/definitions/uint32-array
 
   google,wlc_mod_depth_max:
     description: max depth for dynamic modulation
@@ -109,6 +109,22 @@ properties:
 
   google,wlc_mod_soc:
     description: soc level reached for activating dynamic modulation
+    $ref: /schemas/types.yaml#/definitions/uint32
+
+  google,wlc_qispec:
+    description: supported qi version and mode
+    $ref: /schemas/types.yaml#/definitions/uint32
+
+  google,iop_vout_mfg:
+    description: The mfg-id of specific Tx that need to set different Vout
+    $ref: /schemas/types.yaml#/definitions/uint16-array
+
+  google,iop_vout_mv:
+    description: The Vout configure value for the Tx list in google,iop_vout_mfg
+    $ref: /schemas/types.yaml#/definitions/uint32-array
+
+  google,wlc_iop_bpp_vout_tolerance_mv:
+    description: The Vout tolerance threshold for check if need to decrease ICL for low-gain BPP chargers
     $ref: /schemas/types.yaml#/definitions/uint32
 
 required:

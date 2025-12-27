@@ -28,6 +28,9 @@
 #define VIMON_DBG_TEMP_BUFFER_SZ	32
 #define VIMON_DBG_CLIENT_MAX_OUTPUT	4
 
+#define VIMON_LOGBUFFER_MAX_ENTRIES	16
+#define VIMON_LOGBUFFER_MAX_LEN	96
+
 struct vimon_client_info {
 	u16 mask;
 	int count;
@@ -35,6 +38,8 @@ struct vimon_client_info {
 	struct vimon_client_callbacks *client_cb;
 	struct list_head list;
 };
+
+static struct logbuffer *vimon_monitor_lb;
 
 static void on_debug_sample_ready(void *private, const enum vimon_trigger_source reason,
 				  const u16 *data, const size_t len)
@@ -78,6 +83,40 @@ static struct vimon_client_callbacks debug_cb_impl = {
 	.on_sample_ready = on_debug_sample_ready,
 	.on_removed = on_debug_removed,
 	.extra_trigger = debug_extra_trigger,
+};
+
+static void bms_vimon_cb_on_sample(void *private, const enum vimon_trigger_source reason,
+				   const u16 *data, const size_t len)
+{
+	int tag = (int)(intptr_t)private;
+	const size_t count = len / sizeof(u16);
+	char temp[VIMON_LOGBUFFER_MAX_LEN];
+	size_t pos = 0, i;
+
+	/* the count is always even number(voltage/current pair) */
+	for (i = 0; i + 1 < count; i += 2) {
+		pos += scnprintf(&temp[pos], VIMON_LOGBUFFER_MAX_LEN - pos, " %04x %04x",
+				 data[i], data[i + 1]);
+		if (((i + 2) % VIMON_LOGBUFFER_MAX_ENTRIES) == 0) {
+			gbms_logbuffer_prlog(vimon_monitor_lb, LOGLEVEL_INFO, 0, LOGLEVEL_INFO,
+					     "%d: %s", tag, temp);
+			pos = 0;
+		}
+	}
+
+	if (pos)
+		gbms_logbuffer_prlog(vimon_monitor_lb, LOGLEVEL_INFO, 0, LOGLEVEL_INFO,
+				     "%d: %s", tag, temp);
+}
+
+static void bms_vimon_cb_removed(void *private)
+{
+	/* int tag = (int)(uintptr_t)private; */
+}
+
+struct vimon_client_callbacks bms_monitor_cb = {
+	.on_sample_ready = bms_vimon_cb_on_sample,
+	.on_removed = bms_vimon_cb_removed,
 };
 
 static LIST_HEAD(vimon_clients);
@@ -154,26 +193,19 @@ static void vimon_update_callback_mask(struct max77779_vimon_data *data)
 
 	data->trigger_src = new_mask;
 }
-
-int vimon_register_callback(struct device *dev, const u16 mask, const int count, void *private,
-			    struct vimon_client_callbacks *cb)
+static inline struct vimon_client_info *vimon_alloc_client_info(struct max77779_vimon_data *data)
 {
-	struct max77779_vimon_data *data = dev_get_drvdata(dev);
-	struct vimon_client_info *client;
-	int ret;
-
 	if (!vimon_cache_pool)
-		return -ENOMEM;
+		return NULL;
 
-	client = (struct vimon_client_info *)
-		  gen_pool_alloc(vimon_cache_pool, sizeof(struct vimon_client_info));
-	if (!client)
-		return -ENOMEM;
+	return (struct vimon_client_info *)
+		gen_pool_alloc(vimon_cache_pool, sizeof(struct vimon_client_info));
+}
 
-	client->mask = mask;
-	client->count = count;
-	client->private_data = private;
-	client->client_cb = cb;
+static inline void vimon_add_client(struct max77779_vimon_data *data,
+				    struct vimon_client_info *client)
+{
+	int ret;
 
 	pm_stay_awake(data->dev);
 
@@ -193,6 +225,23 @@ int vimon_register_callback(struct device *dev, const u16 mask, const int count,
 	mutex_unlock(&data->vimon_lock);
 
 	pm_relax(data->dev);
+}
+
+int vimon_register_callback(struct device *dev, const u16 mask, const int count, void *private,
+			    struct vimon_client_callbacks *cb)
+{
+	struct max77779_vimon_data *data = dev_get_drvdata(dev);
+	struct vimon_client_info *client = vimon_alloc_client_info(data);
+
+	if (!client)
+		return -ENOMEM;
+
+	client->mask = mask;
+	client->count = count;
+	client->private_data = private;
+	client->client_cb = cb;
+
+	vimon_add_client(data, client);
 
 	return 0;
 }
@@ -590,9 +639,37 @@ static ssize_t latest_buff_show(struct device *dev, struct device_attribute *att
 }
 static DEVICE_ATTR_RO(latest_buff);
 
+static ssize_t bms_monitor_store(struct device *dev, struct device_attribute *attr,
+				 const char *buf, size_t count)
+{
+	struct max77779_vimon_data *data = dev_get_drvdata(dev);
+	struct vimon_client_info *client;
+	int mask, cnt, tag;
+
+	if (sscanf(buf, "%d %d %d", &tag, &mask, &cnt) != 3) {
+		dev_err(data->dev, "invalid argument: format should be tag mask counter\n");
+		return -EINVAL;
+	}
+
+	client = vimon_alloc_client_info(data);
+	if (!client)
+		return -ENOMEM;
+
+	client->mask = mask;
+	client->count = cnt;
+	client->private_data = (void *)(intptr_t)tag;
+	client->client_cb = &bms_monitor_cb;
+
+	vimon_add_client(data, client);
+
+	return count;
+}
+static DEVICE_ATTR_WO(bms_monitor);
+
 static struct attribute *max77779_vimon_attrs[] = {
 	&dev_attr_bvim_cfg.attr,
 	&dev_attr_latest_buff.attr,
+	&dev_attr_bms_monitor.attr,
 	NULL,
 };
 
@@ -881,6 +958,40 @@ vimon_rearm_interrupt:
 	return IRQ_HANDLED;
 }
 
+static int vimon_power_supply_get_property(
+	struct power_supply *psy,
+	enum power_supply_property psp,
+	union power_supply_propval *val)
+{
+	struct max77779_vimon_data *data = power_supply_get_drvdata(psy);
+
+	if (!data)
+		return -ENODEV;
+
+	switch (psp) {
+	case POWER_SUPPLY_PROP_STATUS:
+		val->intval = POWER_SUPPLY_STATUS_UNKNOWN;
+		break;
+
+	default:
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+static const enum power_supply_property vimon_power_supply_props[] = {
+	POWER_SUPPLY_PROP_STATUS,
+};
+
+static const struct power_supply_desc psy_desc = {
+	.name = "vimon",
+	.type = POWER_SUPPLY_TYPE_UNKNOWN,
+	.properties = vimon_power_supply_props,
+	.num_properties = 1,
+	.get_property = vimon_power_supply_get_property,
+};
+
 /*
  * Initialization requirements
  * struct max77779_vimon_data *data
@@ -896,6 +1007,7 @@ int max77779_vimon_init(struct max77779_vimon_data *data)
 	uint16_t cfg_mask_lower_bits = 0;
 	unsigned long min_alloc_order;
 	int ret;
+	struct power_supply_config psy_cfg = {};
 
 	/* VIMON can be used to profile battery drain during reboot */
 	running = max77779_vimon_is_running(data);
@@ -936,7 +1048,7 @@ int max77779_vimon_init(struct max77779_vimon_data *data)
 	if (ret)
 		data->max_cnt = MAX77779_VIMON_DEFAULT_MAX_CNT;
 
-	ret = of_property_read_u32(dev->of_node, "max77779,max_triggers", &data->max_cnt);
+	ret = of_property_read_u32(dev->of_node, "max77779,max_triggers", &data->max_triggers);
 	if (ret)
 		data->max_triggers = MAX77779_VIMON_DEFAULT_MAX_TRIGGERS;
 
@@ -961,6 +1073,17 @@ int max77779_vimon_init(struct max77779_vimon_data *data)
 			dev_warn(dev, "Failed to get irq thread.\n");
 	} else {
 		dev_warn(dev, "irq not setup\n");
+	}
+
+	/* register vimon in power_supply subsystem */
+	psy_cfg.of_node = dev->of_node;
+	psy_cfg.drv_data = data;
+
+	data->psy = devm_power_supply_register(dev, &psy_desc, &psy_cfg);
+	if (IS_ERR(data->psy)) {
+		ret = PTR_ERR(data->psy);
+		dev_err(dev, "Couldn't register '%s' as power supply, ret=%d\n",
+				psy_desc.name, ret);
 	}
 
 	ret = max77779_vimon_init_fs(data);
@@ -996,6 +1119,8 @@ int max77779_vimon_init(struct max77779_vimon_data *data)
 				     mem_size, -1);
 		}
 	}
+
+	vimon_monitor_lb = logbuffer_register("bms_vimon");
 
 	return 0;
 }
@@ -1035,7 +1160,10 @@ void max77779_vimon_remove(struct max77779_vimon_data *data)
 		debugfs_remove(data->de);
 	if (data->irq)
 		free_irq(data->irq, data);
+	if (vimon_monitor_lb)
+		logbuffer_unregister(vimon_monitor_lb);
 }
+
 EXPORT_SYMBOL_GPL(max77779_vimon_remove);
 
 MODULE_DESCRIPTION("max77779 VIMON Driver");

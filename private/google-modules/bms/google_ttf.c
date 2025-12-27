@@ -82,7 +82,7 @@ int ttf_pwr_ibatt(const struct gbms_ce_tier_stats *ts)
 }
 
 /* nominal voltage tier index for this soc */
-int ttf_pwr_vtier_idx(const struct batt_ttf_stats *stats, int soc)
+static int ttf_pwr_vtier_idx(const struct batt_ttf_stats *stats, int soc)
 {
 	int i;
 
@@ -220,15 +220,14 @@ static int ttf_pwr_equiv_icl(const struct gbms_charging_event *ce_data,
  */
 static int ttf_pwr_ratio(const struct batt_ttf_stats *stats,
 			 const struct gbms_charging_event *ce_data,
-			 int soc)
+			 int soc, int vbatt_idx)
 {
 	const struct gbms_chg_profile *profile = ce_data->chg_profile;
-	int cc_max, vbatt_idx, temp_idx;
+	int cc_max, temp_idx;
 	int avg_cc, equiv_icl;
 	int ratio;
 
 	/* regular charging tier */
-	vbatt_idx = ttf_pwr_vtier_idx(stats, soc);
 	if (vbatt_idx < 0)
 		return -EINVAL;
 
@@ -336,7 +335,7 @@ static int ttf_ref_elap(const struct batt_ttf_stats *stats, int soc)
 /* elap time for a single soc% */
 static int ttf_elap(ktime_t *estimate, const struct batt_ttf_stats *stats,
 		    const struct gbms_charging_event *ce_data,
-		    int soc)
+		    int soc, int tier_idx)
 {
 	ktime_t elap;
 	int ratio;
@@ -348,7 +347,7 @@ static int ttf_elap(ktime_t *estimate, const struct batt_ttf_stats *stats,
 		return -EINVAL;
 	}
 
-	ratio = ttf_pwr_ratio(stats, ce_data, soc);
+	ratio = ttf_pwr_ratio(stats, ce_data, soc, tier_idx);
 	if (ratio < 0) {
 		pr_debug("%s %d: negative ratio=%d\n", __func__, soc, ratio);
 		return -EINVAL;
@@ -369,7 +368,7 @@ static int ttf_elap(ktime_t *estimate, const struct batt_ttf_stats *stats,
  */
 int ttf_soc_estimate(ktime_t *res, struct batt_ttf_stats *stats,
 		     const struct gbms_charging_event *ce_data,
-		     qnum_t soc, qnum_t last)
+		     qnum_t soc, qnum_t last, int tier_idx)
 {
 	int ssoc_in;
 	ktime_t elap, estimate = 0;
@@ -394,7 +393,7 @@ int ttf_soc_estimate(ktime_t *res, struct batt_ttf_stats *stats,
 	frac = (int)qnum_nfracdgt(soc, 2);
 	if (frac) {
 
-		ratio = ttf_elap(&elap, stats, ce_data, qnum_toint(soc));
+		ratio = ttf_elap(&elap, stats, ce_data, qnum_toint(soc), tier_idx);
 		if (ratio >= 0)
 			estimate += (elap * (100 - frac)) / 100;
 		if (ratio > max_ratio)
@@ -411,7 +410,7 @@ int ttf_soc_estimate(ktime_t *res, struct batt_ttf_stats *stats,
 			elap = ce_data->soc_stats.elap[i] * 100;
 		} else {
 			/* future (and soc before ssoc_in) */
-			ratio = ttf_elap(&elap, stats, ce_data, i);
+			ratio = ttf_elap(&elap, stats, ce_data, i, tier_idx);
 			if (ratio < 0) {
 				mutex_unlock(&stats->ttf_lock);
 				return ratio;
@@ -426,7 +425,7 @@ int ttf_soc_estimate(ktime_t *res, struct batt_ttf_stats *stats,
 	/* LAST: first 2 digits of the fractional part of soc if any */
 	frac = (int)qnum_nfracdgt(last, 2);
 	if (frac) {
-		ratio = ttf_elap(&elap, stats, ce_data, qnum_toint(last));
+		ratio = ttf_elap(&elap, stats, ce_data, qnum_toint(last), tier_idx);
 		if (ratio >= 0)
 			estimate += ktime_divns((elap * frac), 100);
 		if (ratio > max_ratio)
@@ -532,7 +531,7 @@ int ttf_soc_cstr_combine(char *buff, int size, const struct ttf_soc_stats *soc_r
 /* return the weight to apply to this change */
 static ktime_t ttf_soc_qual_elap(const struct batt_ttf_stats *stats,
 				 const struct gbms_charging_event *ce_data,
-				 int i)
+				 int i, int tier_idx)
 {
 	const struct ttf_soc_stats *src = &ce_data->soc_stats;
 	const struct ttf_soc_stats *dst = &stats->soc_stats;
@@ -548,7 +547,7 @@ static ktime_t ttf_soc_qual_elap(const struct batt_ttf_stats *stats,
 		return 0;
 
 	/* weight the adapter, discard if ratio is too high (poor adapter) */
-	ratio = ttf_pwr_ratio(stats, ce_data, i);
+	ratio = ttf_pwr_ratio(stats, ce_data, i, tier_idx);
 	if (ratio <= 0 || ratio > limit) {
 		pr_debug("%d: ratio=%d limit=%d\n", i, ratio, limit);
 		return 0;
@@ -643,7 +642,7 @@ static void ttf_soc_update(struct batt_ttf_stats *stats,
 			continue;
 
 		/* average the elap time at soc */
-		elap = ttf_soc_qual_elap(stats, ce_data, i);
+		elap = ttf_soc_qual_elap(stats, ce_data, i, ttf_pwr_vtier_idx(stats, i));
 		if (elap)
 			stats->soc_stats.elap[i] = elap;
 

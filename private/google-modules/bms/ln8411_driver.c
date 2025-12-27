@@ -89,8 +89,8 @@
 
 /* maximum retry counter for restarting charging */
 #define LN8411_MAX_RETRY_CNT			3	/* retries */
-#define LN8411_MAX_EAGAIN_RETRY_CNT		10	/* retries */
-#define LN8411_MAX_EAGAIN_DEBOUNCE_CNT	3
+#define LN8411_MAX_EAGAIN_RETRY_CNT		3	/* retries */
+#define LN8411_MAX_EAGAIN_DEBOUNCE_CNT		3
 #define LN8411_MAX_LOW_BATT_RETRY_CNT		10	/* retries */
 #define LN8411_MAX_RX_VOL_RETRY_CNT		3	/* retries */
 
@@ -1320,14 +1320,16 @@ static int ln8411_set_iin_cc_from_power(struct ln8411_charger *ln8411)
 {
 	int power_tgt = ln8411_get_power(ln8411);
 	unsigned long long iin;
+	int ret;
 
 	/* power limit based control for MPP HPM (25W) */
 	iin = ((unsigned long long)power_tgt * 1000) / (ln8411->ta_vol / 1000);
 	iin = iin * 1000;
 	ln8411->iin_cc = min_t(int, ln8411_get_iin_limit(ln8411), iin);
-	dev_info(ln8411->dev, "%s: iin_cc=%d, power=%d, ta_vol=%d\n",
-			__func__, ln8411->iin_cc, power_tgt, ln8411->ta_vol);
-	return 0;
+	ret = ln8411_set_input_current(ln8411, ln8411->iin_cc);
+	dev_info(ln8411->dev, "%s: iin_cc=%d, power=%d, ta_vol=%d (%d)\n",
+			__func__, ln8411->iin_cc, power_tgt, ln8411->ta_vol, ret);
+	return ret;
 }
 
 static int ln8411_set_ta_pwr(struct ln8411_charger *ln8411, int power)
@@ -1435,7 +1437,7 @@ static int ln8411_stop_charging(struct ln8411_charger *ln8411)
 	 * TODO: use defaults when these are negative or zero at startup
 	 * NOTE: cc_max is twice of IIN + headroom
 	 */
-	if (!ln8411->cal_mode) {
+	if (!ln8411->cal_mode && !ln8411->maintain_fv_cc_max) {
 		ln8411->cc_max = -1;
 		ln8411->fv_uv = -1;
 
@@ -1443,6 +1445,9 @@ static int ln8411_stop_charging(struct ln8411_charger *ln8411)
 		ln8411->new_vfloat = 0;
 		ln8411->new_iin = 0;
 	}
+
+	if (ln8411->maintain_fv_cc_max)
+		ln8411->maintain_fv_cc_max = false;
 
 	/* used to start DC and during errors */
 	ln8411->retry_cnt = 0;
@@ -2917,20 +2922,27 @@ static int ln8411_power_cal(struct ln8411_charger *ln8411)
 	int iin, iin_cc, vbus, power, rx_vol;
 	bool power_stable = 0;
 	int power_tgt;
+	int ret;
 
 	mutex_lock(&ln8411->lock);
 
 	ln8411->timer_period = ln8411->wcrx_vol_delay;
 
-	if (ln8411_check_error(ln8411)) {
-		ln8411_send_rx_message(ln8411, WLC_CAL_ERROR, 0);
-		goto done;
-	}
-
 	if (ln8411->charging_state != DC_STATE_CAL) {
 		dev_info(ln8411->dev, "%s: charging_state=%u->%u\n", __func__,
 			 ln8411->charging_state, DC_STATE_CAL);
 		ln8411->charging_state = DC_STATE_CAL;
+	}
+
+	ret = ln8411_check_error(ln8411);
+	if (ret == -EAGAIN) {
+		ln8411->timer_period = 0;
+		goto resched_work;
+	}
+
+	if (ret && ret != -EAGAIN) {
+		ln8411_send_rx_message(ln8411, WLC_CAL_ERROR, 0);
+		goto done;
 	}
 
 	iin_cc = ln8411_get_iin_limit(ln8411);
@@ -2986,12 +2998,13 @@ static int ln8411_power_cal(struct ln8411_charger *ln8411)
 		goto done;
 	}
 
+resched_work:
 	mod_delayed_work(ln8411->dc_wq, &ln8411->timer_work,
 			 msecs_to_jiffies(ln8411->timer_period));
 
 done:
 	mutex_unlock(&ln8411->lock);
-	return 0;
+	return ret;
 }
 
 /* <0 error, 0 no new limits, >0 new limits */
@@ -4351,6 +4364,8 @@ static void ln8411_timer_work(struct work_struct *work)
 
 	case TIMER_POWER_CAL:
 		ret = ln8411_power_cal(ln8411);
+		if (ret < 0)
+			goto error;
 		break;
 
 	/*
@@ -4490,9 +4505,11 @@ error:
 			ln8411->ret_state = ln8411->charging_state;
 			ln8411->ret_timer_id = ln8411->timer_id;
 			ln8411->charging_state = DC_STATE_ERROR_RECOVER;
-			ln8411->ta_vol += WCRX_VOL_ERROR_STEP;
-			ln8411->timer_id = TIMER_PDMSG_SEND;
-			ln8411->timer_period = 0;
+			if (!ln8411->cal_mode) {
+				ln8411->ta_vol += WCRX_VOL_ERROR_STEP;
+				ln8411->timer_id = TIMER_PDMSG_SEND;
+				ln8411->timer_period = 0;
+			}
 			mod_delayed_work(ln8411->dc_wq, &ln8411->timer_work, 0);
 		} else {
 			ret = ln8411_error_recover(ln8411);
@@ -4828,7 +4845,7 @@ int ln8411_input_current_limit(struct ln8411_charger *ln8411)
 	if (!ln8411->mains_online)
 		return -ENODATA;
 
-	return ln8411->iin_reg;
+	return ln8411->iin_cc;
 }
 
 /* Returns the constant charge current requested from GCPM */
@@ -5431,10 +5448,12 @@ static int ln8411_gbms_mains_set_property(struct power_supply *psy,
 		break;
 
 	case GBMS_PROP_ENABLE_SWITCH_CAP:
-		if (val->prop.intval)
+		if (val->prop.intval) {
 			ln8411_set_charging_enabled(ln8411, PPS_INDEX_WLC);
-		else
+		} else {
+			ln8411->maintain_fv_cc_max = true;
 			ln8411_set_charging_enabled(ln8411, 0);
+		}
 		break;
 
 	case GBMS_PROP_WLC_LOAD_DECREASE:

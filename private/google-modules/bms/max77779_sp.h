@@ -15,6 +15,7 @@
 #define MDLV_ADDR				20
 #define WLFW_ADDR				22
 #define QI22_ADDR				26
+#define AAWC_ADDR				32
 #define RS_TAG_LENGTH				4
 #define SU_TAG_LENGTH				1
 #define RSOC_TAG_LENGTH				2
@@ -27,6 +28,7 @@
 #define MDLV_TAG_LENGTH				1
 #define WLFW_TAG_LENGTH				4
 #define QI22_TAG_LENGTH				4
+#define AAWC_TAG_LENGTH				4
 
 
 #define MAX77779_SP_DATA		0x80

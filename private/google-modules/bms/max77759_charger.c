@@ -111,8 +111,6 @@ static u8 max77759_int_mask[MAX77759_CHG_INT_COUNT] = {
 	  MAX77759_CHG_INT_INLIM_I_MASK |
 	  MAX77759_CHG_INT_MASK_THM2_M_MASK),
 	(u8)~(MAX77759_CHG_INT2_MASK_INSEL_M |
-	  MAX77759_CHG_INT2_MASK_SYS_UVLO1_M |
-	  MAX77759_CHG_INT2_MASK_SYS_UVLO2_M |
 	  MAX77759_CHG_INT2_MASK_CHG_STA_TO_M |
 	  MAX77759_CHG_INT2_MASK_CHG_STA_DONE_M),
 };
@@ -2998,9 +2996,7 @@ static irqreturn_t max77759_chgr_irq(int irq, void *client)
 		return IRQ_NONE;
 
 	chg_int_clr[0] = chg_int[0];
-	chg_int_clr[1] = chg_int[1] & (~MAX77759_CHG_INT2_BAT_OILO_I &
-					~MAX77759_CHG_INT2_SYS_UVLO2_I &
-					~MAX77759_CHG_INT2_SYS_UVLO1_I);
+	chg_int_clr[1] = chg_int[1];
 
 	ret = max77759_writen(data->regmap, MAX77759_CHG_INT, /* NOTYPO */
                               chg_int_clr, sizeof(chg_int_clr));
@@ -3010,7 +3006,7 @@ static irqreturn_t max77759_chgr_irq(int irq, void *client)
 		return IRQ_NONE;
 	}
 
-	pr_debug("INT : %02x %02x\n", chg_int[0], chg_int[1]);
+	dev_info_ratelimited(data->dev, "INT : %02x %02x\n", chg_int[0], chg_int[1]);
 
 	/* No need to monitor wcin_inlim when on USB */
 	if (chg_int[0] & MAX77759_CHG_INT_CHGIN_I_MASK) {

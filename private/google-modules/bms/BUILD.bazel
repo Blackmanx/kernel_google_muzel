@@ -631,8 +631,10 @@ ddk_module(
         "//private/google-modules/power/mitigation:__subpackages__",
     ],
     deps = [
+        ":google-bms",
         ":internal_headers",
         "//common:all_headers_aarch64",
+        "//private/google-modules/bms/misc:bms-misc",
         "//private/google-modules/soc/gs:headers",
     ],
 )
