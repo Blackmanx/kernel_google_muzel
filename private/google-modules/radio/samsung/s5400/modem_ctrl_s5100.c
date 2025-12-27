@@ -2654,6 +2654,8 @@ static int s5100_poweroff_pcie(struct modem_ctl *mc, bool force_off)
 #endif
 
 	mc->pcie_powered_on = false;
+	reinit_completion(&mc->pcie_power_on_cmpl);
+
 #if IS_ENABLED(CONFIG_GOOGLE_CRASH_DEBUG_DUMP)
 	update_google_cdd_modem_stat(mc, CDD_EVENT_PCIE_LINK, false);
 #endif
@@ -2761,6 +2763,9 @@ int s5100_poweron_pcie(struct modem_ctl *mc, enum link_mode mode)
 	if (!boot_on)
 		mif_gpio_set_value(&mc->cp_gpio[CP_GPIO_AP2CP_WAKEUP], 1, 5);
 
+	if (!boot_on && mif_gpio_get_value(&mc->cp_gpio[CP_GPIO_AP2CP_WAKEUP], true) == 0)
+		mif_err("Cannot set AP2CP_WAKEUP\n");
+
 	print_mc_state(mc);
 
 	spin_lock_irqsave(&mc->pcie_tx_lock, flags);
@@ -2815,6 +2820,8 @@ int s5100_poweron_pcie(struct modem_ctl *mc, enum link_mode mode)
 		mc->l1ss_disable = false;
 
 	mc->pcie_powered_on = true;
+	complete_all(&mc->pcie_power_on_cmpl);
+
 #if IS_ENABLED(CONFIG_GOOGLE_CRASH_DEBUG_DUMP)
 	update_google_cdd_modem_stat(mc, CDD_EVENT_PCIE_LINK, true);
 #endif
@@ -3179,6 +3186,21 @@ static int send_panic_to_cp_notifier(struct notifier_block *nb,
 	return NOTIFY_DONE;
 }
 
+static int s5100_wait_for_pcie_power(struct modem_ctl *mc)
+{
+	unsigned long timeout = msecs_to_jiffies(PCIE_TIMEOUT_MS);
+
+	if (mc->pcie_powered_on)
+		return 0;
+
+	if (!wait_for_completion_timeout(&mc->pcie_power_on_cmpl, timeout)) {
+		mif_err("Timeout waiting for modem PCIe to power on\n");
+		return -ETIMEDOUT;
+	}
+
+	return 0;
+}
+
 #if IS_ENABLED(CONFIG_CPIF_AP_SUSPEND_DURING_VOICE_CALL)
 static int s5100_call_state_notifier(struct notifier_block *nb,
 		unsigned long action, void *nb_data)
@@ -3202,6 +3224,9 @@ static int s5100_call_state_notifier(struct notifier_block *nb,
 			&mc->call_off_work);
 		break;
 	case MODEM_VOICE_CALL_ON:
+		if (s5100_wait_for_pcie_power(mc))
+			return NOTIFY_BAD;
+
 		mc->pcie_voice_call_on = true;
 #if IS_ENABLED(CONFIG_GOOGLE_CRASH_DEBUG_DUMP)
 		update_google_cdd_modem_stat(mc, CDD_EVENT_VOICE_CALL, true);

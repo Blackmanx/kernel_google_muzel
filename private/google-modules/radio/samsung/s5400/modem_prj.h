@@ -750,6 +750,9 @@ struct modem_ctl {
 	bool device_suspended;
 	bool l1ss_disable;
 
+	/* completion for waiting for PCIe power on */
+	struct completion pcie_power_on_cmpl;
+
 #if IS_ENABLED(CONFIG_CPIF_AP_SUSPEND_DURING_VOICE_CALL)
 	bool pcie_voice_call_on;
 	struct work_struct call_on_work;

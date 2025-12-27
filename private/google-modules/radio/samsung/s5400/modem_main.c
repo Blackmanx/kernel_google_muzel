@@ -128,6 +128,9 @@ static struct modem_ctl *create_modemctl_device(struct platform_device *pdev,
 	spin_lock_init(&modemctl->tx_timer_lock);
 	init_completion(&modemctl->init_cmpl);
 	init_completion(&modemctl->off_cmpl);
+ #if IS_ENABLED(CONFIG_LINK_DEVICE_PCIE)
+	init_completion(&modemctl->pcie_power_on_cmpl);
+ #endif
 
 	/* init modemctl device for getting modemctl operations */
 	ret = call_modem_init_func(modemctl, pdata);
