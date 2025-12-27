@@ -51,12 +51,12 @@ max77779,config {
 			0xC9 0xC8FF	/* nThermCfg2 Register */
 		>;
 		max77779,fg-aafv = /bits/ 32 <
-			200     0   95  0xff
-			400    20   90  0xff
-			600    40   85  0xff
-			800    60   80  0xff
-			1000   80   75  0xff
-			2000  100   70  0xff
+			  0   95  0xf  0x02ad
+			 20   90  0xf  0x0157
+			 40   85  0xf  0x0157
+			 60   80  0xf  0x0157
+			 80   75  0xf  0x0157
+			100   70  0xf  0x0157
 		>;
 	};
 
@@ -100,12 +100,12 @@ max77779,config {
 			0xC9 0xC8FF	/* nThermCfg2 Register */
 		>;
 		max77779,fg-aafv = /bits/ 32 <
-			200     0   95  0xff
-			400    20   90  0xff
-			600    40   85  0xff
-			800    60   80  0xff
-			1000   80   75  0xff
-			2000  100   70  0xff
+			  0   95  0xf  0x0298
+			 20   90  0xf  0x014c
+			 40   85  0xf  0x014c
+			 60   80  0xf  0x014c
+			 80   75  0xf  0x014c
+			100   70  0xf  0x014c
 		>;
 	};
 
@@ -148,6 +148,14 @@ max77779,config {
 			0xB7 0x2240	/* nConvgCfg */
 			0xC9 0xC8FF	/* nThermCfg2 Register */
 		>;
+		max77779,fg-aafv = /bits/ 32 <
+			  0   95  0xf  0x02a4
+			 20   90  0xf  0x0152
+			 40   85  0xf  0x0152
+			 60   80  0xf  0x0152
+			 80   75  0xf  0x0152
+			100   70  0xf  0x0152
+		>;
 	};
 
 	/* BC79_MT5_2mOhm_ATL_3501_RC2_Proxy.INI, b/342241505#comment4 */
@@ -189,12 +197,12 @@ max77779,config {
 			0xC9 0xC8FF    /* nThermCfg2 Register */
 		>;
 		max77779,fg-aafv = /bits/ 32 <
-			200     0   95  0xff
-			400    20   90  0xff
-			600    40   85  0xff
-			800    60   80  0xff
-			1000   80   75  0xff
-			2000  100   70  0xff
+			  0   95  0xf  0x029b
+			 20   90  0xf  0x014e
+			 40   85  0xf  0x014e
+			 60   80  0xf  0x014e
+			 80   75  0xf  0x014e
+			100   70  0xf  0x014e
 		>;
 	};
 
@@ -237,12 +245,12 @@ max77779,config {
 			0xC9 0xC8FF    /* nThermCfg2 Register */
 		>;
 		max77779,fg-aafv = /bits/ 32 <
-			200     0   95  0xff
-			400    20   90  0xff
-			600    40   85  0xff
-			800    60   80  0xff
-			1000   80   75  0xff
-			2000  100   70  0xff
+			  0   95  0xf  0x029b
+			 20   90  0xf  0x014e
+			 40   85  0xf  0x014e
+			 60   80  0xf  0x014e
+			 80   75  0xf  0x014e
+			100   70  0xf  0x014e
 		>;
 	};
 };

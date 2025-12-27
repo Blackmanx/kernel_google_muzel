@@ -77,7 +77,7 @@
 				aur_con_heavy = <4>;
 				gpu_con_heavy = <4>;
 				tpu_con_heavy = <4>;
-				cpu0_con_heavy = <8>;
+				cpu0_con_heavy = <2>;
 				cpu1a_con_heavy = <8>;
 				cpu1b_con_heavy = <8>;
 				cpu2_con_heavy = <8>;
@@ -146,7 +146,8 @@
 				oilo2_vdrp2_en;
 				vimon_pwr_loop_en;
 				cpu0_cluster = <0>;
-				cpu1_cluster = <2>;
+				cpu1a_cluster = <2>;
+				cpu1b_cluster = <5>;
 				cpu2_cluster = <7>;
 				vdroop_int_mask = <0xDF>;   /* BATOILO1 only */
 				intb_int_mask = <0x0>;   /* All passed */
@@ -226,7 +227,8 @@
 				freq_qos {
 					oilo1 {
 						cpucl0 = <1632000 1632000>;
-						cpucl1 = <1267000 1267000>;
+						cpucl1a = <1267000 1267000>;
+						cpucl1b = <1267000 1267000>;
 						cpucl2 = <1920000 1920000>;
 						gpu = <748000 748000>;
 						tpu = <825600 825600>;
@@ -234,9 +236,19 @@
 					};
 					pre_uvlo {
 						cpucl0 = <1632000 1632000>;
-						cpucl1 = <2092000 2092000>;
+						cpucl1a = <2092000 2092000>;
+						cpucl1b = <2092000 2092000>;
 						cpucl2 = <2457000 2457000>;
 						gpu = <748000 748000>;
+						tpu = <825600 825600>;
+						gxp = <710400 710400>;
+					};
+					userspace {
+						cpucl0 = <1881000 1555000>;
+						cpucl1a = <2284000 1670000>;
+						cpucl1b = <2284000 1670000>;
+						cpucl2 = <2457000 1920000>;
+						gpu = <864000 633000>;
 						tpu = <825600 825600>;
 						gxp = <710400 710400>;
 					};

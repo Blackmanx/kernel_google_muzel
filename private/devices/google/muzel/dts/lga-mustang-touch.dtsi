@@ -19,6 +19,7 @@
 	goog,offload-caps-coord-filter;
 	goog,v4l2-enabled;
 	goog,offload-enabled;
+	goog,touch-sim-enabled;
 
 	goog,lptw-suppress-coords-enabled;
 	goog,lptw-tracking-area = <499 845 2052 2398>;

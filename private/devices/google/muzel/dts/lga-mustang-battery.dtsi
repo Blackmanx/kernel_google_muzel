@@ -45,6 +45,19 @@
 		google,aacr-ref-fade10 = <  0 100  100>;
 		google,aafv-ref-cycles = <200 400 600 800 1000 1001>;
 		google,aafv-ref-offset = <  0  20  40  60   80  100>;
+		google,aacc-chg-temp = <0 550>;
+		google,aacc-chg-weights = < /* units: 1/1000 cycles */
+			100 100 100 100 100 100 100 100 100 100 /* soc:  1 ~  10, temp_idx: 0 */
+			  0   0   0   0   0   0   0   0   0   0 /* soc: 11 ~  20, temp_idx: 0 */
+			  0   0   0   0   0   0   0   0   0   0 /* soc: 21 ~  30, temp_idx: 0 */
+			  0   0   0   0   0   0   0   0   0   0 /* soc: 31 ~  40, temp_idx: 0 */
+			  0   0   0   0   0   0   0   0   0   0 /* soc: 41 ~  50, temp_idx: 0 */
+			  0   0   0   0   0   0   0   0   0   0 /* soc: 51 ~  60, temp_idx: 0 */
+			  0   0   0   0   0   0   0   0   0   0 /* soc: 61 ~  70, temp_idx: 0 */
+			  0   0   0   0   0   0   0   0   0   0 /* soc: 71 ~  80, temp_idx: 0 */
+			  0   0   0   0   0   0   0   0   0   0 /* soc: 81 ~  90, temp_idx: 0 */
+			  0   0   0   0   0   0   0   0   0   0 /* soc: 91 ~ 100, temp_idx: 0 */
+		>;
 	};
 	google,batt-id-2-cos {
 		google,batt-id = <2>;
@@ -52,6 +65,19 @@
 		google,aacr-ref-fade10 = <  0 100  100>;
 		google,aafv-ref-cycles = <200 400 600 800 1000 1001>;
 		google,aafv-ref-offset = <  0  20  40  60   80  100>;
+		google,aacc-chg-temp = <0 550>;
+		google,aacc-chg-weights = < /* units: 1/1000 cycles */
+			100 100 100 100 100 100 100 100 100 100 /* soc:  1 ~  10, temp_idx: 0 */
+			  0   0   0   0   0   0   0   0   0   0 /* soc: 11 ~  20, temp_idx: 0 */
+			  0   0   0   0   0   0   0   0   0   0 /* soc: 21 ~  30, temp_idx: 0 */
+			  0   0   0   0   0   0   0   0   0   0 /* soc: 31 ~  40, temp_idx: 0 */
+			  0   0   0   0   0   0   0   0   0   0 /* soc: 41 ~  50, temp_idx: 0 */
+			  0   0   0   0   0   0   0   0   0   0 /* soc: 51 ~  60, temp_idx: 0 */
+			  0   0   0   0   0   0   0   0   0   0 /* soc: 61 ~  70, temp_idx: 0 */
+			  0   0   0   0   0   0   0   0   0   0 /* soc: 71 ~  80, temp_idx: 0 */
+			  0   0   0   0   0   0   0   0   0   0 /* soc: 81 ~  90, temp_idx: 0 */
+			  0   0   0   0   0   0   0   0   0   0 /* soc: 91 ~ 100, temp_idx: 0 */
+		>;
 	};
 	google,batt-id-5-watl {
 		google,batt-id = <5>;
@@ -59,6 +85,19 @@
 		google,aacr-ref-fade10 = <  0 100  100>;
 		google,aafv-ref-cycles = <200 400 600 800 1000 1001>;
 		google,aafv-ref-offset = <  0  20  40  60   80  100>;
+		google,aacc-chg-temp = <0 550>;
+		google,aacc-chg-weights = < /* units: 1/1000 cycles */
+			100 100 100 100 100 100 100 100 100 100 /* soc:  1 ~  10, temp_idx: 0 */
+			  0   0   0   0   0   0   0   0   0   0 /* soc: 11 ~  20, temp_idx: 0 */
+			  0   0   0   0   0   0   0   0   0   0 /* soc: 21 ~  30, temp_idx: 0 */
+			  0   0   0   0   0   0   0   0   0   0 /* soc: 31 ~  40, temp_idx: 0 */
+			  0   0   0   0   0   0   0   0   0   0 /* soc: 41 ~  50, temp_idx: 0 */
+			  0   0   0   0   0   0   0   0   0   0 /* soc: 51 ~  60, temp_idx: 0 */
+			  0   0   0   0   0   0   0   0   0   0 /* soc: 61 ~  70, temp_idx: 0 */
+			  0   0   0   0   0   0   0   0   0   0 /* soc: 71 ~  80, temp_idx: 0 */
+			  0   0   0   0   0   0   0   0   0   0 /* soc: 81 ~  90, temp_idx: 0 */
+			  0   0   0   0   0   0   0   0   0   0 /* soc: 91 ~ 100, temp_idx: 0 */
+		>;
 	};
 	google,batt-id-17-atl {
 		google,batt-id = <17>;

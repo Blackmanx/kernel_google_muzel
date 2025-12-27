@@ -67,4 +67,6 @@
 	mpp_eds_soc = <80 95>;
 	mpp_eds_icl = <300000 100000>;
 	google,wlc_mod_depth_max = /bits/ 8 <0x0A>;
+	google,wlc_qispec = <0x2003>;
+	google,cloak_ping_delay_ms = <1000>;
 };

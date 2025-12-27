@@ -1656,6 +1656,10 @@
 				/* Power sequence */
 				power-seq = <&rear_main_camera_power_seq>;
 
+				/* Thread priority */
+				/* Match with other bus devices */
+				transaction-thread-priority = <99>;
+
 				i2c-lock-group-id = <0>;
 			};
 
@@ -1691,6 +1695,10 @@
 					"regulator";
 				power-down-seq-delays-us =
 					<0>;
+
+				/* Thread priority */
+				/* Match with other bus devices */
+				transaction-thread-priority = <99>;
 			};
 
 			/* EEPROM SMAUG for UW */
@@ -1721,6 +1729,10 @@
 					"regulator";
 				power-down-seq-delays-us =
 					<0>;
+
+				/* Thread priority */
+				/* Match with other bus devices */
+				transaction-thread-priority = <99>;
 
 				i2c-lock-group-id = <2>;
 			};
@@ -1781,6 +1793,10 @@
 					 1000
 					 0
 					 0>;
+
+				/* Thread priority */
+				/* Match with other bus devices */
+				transaction-thread-priority = <99>;
 			};
 
 			/* EEPROM SMAUG for TAOTIE Front */
@@ -1811,6 +1827,10 @@
 					"regulator";
 				power-down-seq-delays-us =
 					<0>;
+
+				/* Thread priority */
+				/* Match with other bus devices */
+				transaction-thread-priority = <99>;
 
 				i2c-lock-group-id = <1>;
 			};
@@ -1847,6 +1867,10 @@
 					"regulator";
 				power-down-seq-delays-us =
 					<0>;
+
+				/* Thread priority */
+				/* Match with other bus devices */
+				transaction-thread-priority = <99>;
 			};
 
 			/* ============== END OF EEPROM CONFIG 1 ============== */
@@ -1896,6 +1920,10 @@
 					 0
 					 0>;
 
+				/* Thread priority */
+				/* Match with other bus devices */
+				transaction-thread-priority = <99>;
+
 				i2c-lock-group-id = <0>;
 			};
 
@@ -1931,6 +1959,10 @@
 					"regulator";
 				power-down-seq-delays-us =
 					<0>;
+
+				/* Thread priority */
+				/* Match with other bus devices */
+				transaction-thread-priority = <99>;
 			};
 
 			/* ============== END OF EEPROM CONFIG 2 ============== */

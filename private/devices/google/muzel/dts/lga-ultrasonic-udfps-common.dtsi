@@ -15,6 +15,7 @@
 		pinctrl-names = "default";
 		pinctrl-0 = <&udfps2ap_int_l_1v2>;
 		qcom,ipc-gpio = <UDFPS2AP_INT_L_1V2(0)>;
+		spi-gpio-provider = <&lsios_pinctrl>;
 	};
 };
 

@@ -48,12 +48,12 @@ max77779,config {
 			0xC9 0xC8FF	/* nThermCfg2 Register */
 		>;
 		max77779,fg-aafv = /bits/ 32 <
-			200     0   95  0xff
-			400    20   90  0xff
-			600    40   85  0xff
-			800    60   80  0xff
-			1000   80   75  0xff
-			2000  100   70  0xff
+			  0   95  0xf  0x0276
+			 20   90  0xf  0x013b
+			 40   85  0xf  0x013b
+			 60   80  0xf  0x013b
+			 80   75  0xf  0x013b
+			100   70  0xf  0x013b
 		>;
 	};
 
@@ -97,12 +97,12 @@ max77779,config {
 			0xC9 0xC8FF	/* nThermCfg2 Register */
 		>;
 		max77779,fg-aafv = /bits/ 32 <
-			200     0   95  0xff
-			400    20   90  0xff
-			600    40   85  0xff
-			800    60   80  0xff
-			1000   80   75  0xff
-			2000  100   70  0xff
+			  0   95  0xf  0x0276
+			 20   90  0xf  0x013b
+			 40   85  0xf  0x013b
+			 60   80  0xf  0x013b
+			 80   75  0xf  0x013b
+			100   70  0xf  0x013b
 		>;
 	};
 };
