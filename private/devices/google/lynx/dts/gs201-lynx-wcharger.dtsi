@@ -78,6 +78,7 @@
 
 		google,iop_en;		/* IOP enable */
 		google,light_load;	/* Calibration light load */
+		google,wlc_qispec = <0x1200>;
 
 		p9xxx_gpio: p9xxx_gpio {
 			gpio-controller;

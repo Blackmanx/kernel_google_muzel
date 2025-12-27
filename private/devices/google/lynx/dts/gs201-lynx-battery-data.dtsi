@@ -50,12 +50,12 @@ maxim,config {
 			/* 0x002e */	0x0400	/* CGain */
 		>;
 		maxim,fg-aafv = /bits/ 32 <
-			200     0   95  0xff
-			400    20   90  0xff
-			600    40   85  0xff
-			800    60   80  0xff
-			1000   80   75  0xff
-			2000  130   63  0xff
+			  0   95  0xf  0x0560
+			 20   90  0xf  0x02b0
+			 40   85  0xf  0x02b0
+			 60   80  0xf  0x02b0
+			 80   75  0xf  0x02b0
+			130   63  0xf  0x02b0
 		>;
 	};
 	/* 1_L10_ATL_031522_RC2_INI_0830.txt http://b/244371981#comment1 */
@@ -105,12 +105,12 @@ maxim,config {
 			/* 0x002e */	0x0400	/* CGain */
 		>;
 		maxim,fg-aafv = /bits/ 32 <
-			200     0   95  0xff
-			400    20   90  0xff
-			600    40   85  0xff
-			800    60   80  0xff
-			1000   80   75  0xff
-			2000  130   63  0xff
+			  0   95  0xf  0x0560
+			 20   90  0xf  0x02b0
+			 40   85  0xf  0x02b0
+			 60   80  0xf  0x02b0
+			 80   75  0xf  0x02b0
+			130   63  0xf  0x02b0
 		>;
 	};
 	/* 2_L10_COS_031622_RC2_INI_Rev7.txt http://b/323608826#comment10 */
@@ -160,12 +160,12 @@ maxim,config {
 			/* 0x002e */	0x0400	/* CGain */
 		>;
 		maxim,fg-aafv = /bits/ 32 <
-			200     0   95  0xff
-			400    20   90  0xff
-			600    40   85  0xff
-			800    60   80  0xff
-			1000   80   75  0xff
-			2000  130   63  0xff
+			  0   95  0xf  0x0560
+			 20   90  0xf  0x02b0
+			 40   85  0xf  0x02b0
+			 60   80  0xf  0x02b0
+			 80   75  0xf  0x02b0
+			130   63  0xf  0x02b0
 		>;
 	};
 	/* 3_L10_LSN_061322_RC2_INI_Rev8.txt http://b/323608826#comment10 */
@@ -215,12 +215,12 @@ maxim,config {
 			/* 0x002e */	0x0400	/* CGain */
 		>;
 		maxim,fg-aafv = /bits/ 32 <
-			200     0   95  0xff
-			400    20   90  0xff
-			600    40   85  0xff
-			800    60   80  0xff
-			1000   80   75  0xff
-			2000  130   63  0xff
+			  0   95  0xf  0x0560
+			 20   90  0xf  0x02b0
+			 40   85  0xf  0x02b0
+			 60   80  0xf  0x02b0
+			 80   75  0xf  0x02b0
+			130   63  0xf  0x02b0
 		>;
 	};
 
