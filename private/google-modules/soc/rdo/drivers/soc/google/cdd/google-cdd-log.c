@@ -511,6 +511,7 @@ static void google_cdd_print_irq(void)
 
 void google_cdd_print_log_report(void)
 {
+
 	if (unlikely(!google_cdd_get_enable()))
 		return;
 

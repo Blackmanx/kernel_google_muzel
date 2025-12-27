@@ -142,7 +142,7 @@ enum bcl_usb_mode {
 
 #define is_debug_accessory_detected(cc1, cc2) \
 	((((cc1) == TYPEC_CC_RP_DEF) || ((cc1) == TYPEC_CC_RP_1_5) || ((cc1) == TYPEC_CC_RP_3_0)) && \
-	 (((cc1) == TYPEC_CC_RP_DEF) || ((cc1) == TYPEC_CC_RP_1_5) || ((cc1) == TYPEC_CC_RP_3_0)))
+	 (((cc2) == TYPEC_CC_RP_DEF) || ((cc2) == TYPEC_CC_RP_1_5) || ((cc2) == TYPEC_CC_RP_3_0)))
 
 #define FLOATING_CABLE_INSTANCE_THRESHOLD	5
 #define AUTO_ULTRA_LOW_POWER_MODE_REENABLE_MS	600000
@@ -244,11 +244,11 @@ static ssize_t registers_show(struct device *dev, struct device_attribute *attr,
 	struct max77759_plat *chip = max777x9_get_drvdata(dev);
 	struct regmap *regmap = chip->data.regmap;
 	int ret, offset = 0, addr;
-	u8 tmp;
+	u32 tmp;
 
 	for (addr = 0; addr < MAX77759_REG_COUNT; addr++) {
 		/* regmap_bulk_read is incompatible with SPMI, moving to individual reads */
-		ret = max77759_read8(regmap, addr, &tmp);
+		ret = regmap_read(regmap, addr, &tmp);
 		if (ret < 0)
 			continue;
 
@@ -1558,6 +1558,52 @@ static void ext_bst_ovp_clear_work(struct kthread_work *work)
 		check_and_clear_ext_bst(chip);
 }
 
+static void check_and_enable_debug_accessory_if_present(struct max77759_plat *chip)
+{
+	struct google_shim_tcpci *tcpci = chip->tcpci;
+	struct logbuffer *log = chip->log;
+	unsigned int pwr_status;
+	int ret;
+
+	ret = regmap_read(tcpci->regmap, TCPC_POWER_STATUS, &pwr_status);
+	LOG(LOG_LVL_DEBUG, log, "TCPC_ALERT_POWER_STATUS status:0x%x", pwr_status);
+	if (ret < 0)
+		return;
+	/*
+	 * Enable data path when TCPC signals sink debug accessory connected
+	 * and disable when disconnected.
+	 */
+	if ((!chip->debug_acc_connected && (pwr_status & TCPC_POWER_STATUS_DBG_ACC_CON)) ||
+	    (chip->debug_acc_connected && !(pwr_status & TCPC_POWER_STATUS_DBG_ACC_CON))) {
+		mutex_lock(&chip->data_path_lock);
+		chip->debug_acc_connected = pwr_status & TCPC_POWER_STATUS_DBG_ACC_CON ? 1 : 0;
+		chip->data_role = TYPEC_DEVICE;
+		/*
+		 * Renable BC1.2 upon disconnect if disabled. Needed for
+		 * sink-only mode such as fastbootd/Recovery.
+		 */
+		if (chip->attached && !chip->debug_acc_connected && !bc12_get_status(chip->bc12))
+			bc12_enable(chip->bc12, true);
+		chip->attached = chip->debug_acc_connected;
+		enable_data_path_locked(chip);
+		mutex_unlock(&chip->data_path_lock);
+
+		/* Log Debug Accessory to Device Compliance Warnings, or Remove from List. */
+		update_compliance_warnings(chip, COMPLIANCE_WARNING_DEBUG_ACCESSORY,
+					   chip->debug_acc_connected);
+
+		LOG(LOG_LVL_DEBUG, log,
+		    "Debug accessory %s", chip->debug_acc_connected ? "connected" : "disconnected");
+		if (!chip->debug_acc_connected && modparam_conf_sbu) {
+			ret = max77759_write8(tcpci->regmap, TCPC_VENDOR_SBUSW_CTRL,
+					      SBUSW_SERIAL_UART);
+			LOG(LOG_LVL_DEBUG, log,
+				"SBU switch enable %s", ret < 0 ? "fail" : "success");
+		}
+		usb_psy_set_attached_state(chip->usb_psy_data, chip->attached);
+	}
+}
+
 static void process_power_status(struct max77759_plat *chip)
 {
 	struct google_shim_tcpci *tcpci = chip->tcpci;
@@ -1637,39 +1683,7 @@ static void process_power_status(struct max77759_plat *chip)
 		tcpm_cc_change(tcpci->port);
 	}
 
-	/*
-	 * Enable data path when TCPC signals sink debug accesssory connected
-	 * and disable when disconnected.
-	 */
-	if ((!chip->debug_acc_connected && (pwr_status & TCPC_POWER_STATUS_DBG_ACC_CON)) ||
-	    (chip->debug_acc_connected && !(pwr_status & TCPC_POWER_STATUS_DBG_ACC_CON))) {
-		mutex_lock(&chip->data_path_lock);
-		chip->debug_acc_connected = pwr_status & TCPC_POWER_STATUS_DBG_ACC_CON ? 1 : 0;
-		chip->data_role = TYPEC_DEVICE;
-		/*
-		 * Renable BC1.2 upon disconnect if disabled. Needed for
-		 * sink-only mode such as fastbootd/Recovery.
-		 */
-		if (chip->attached && !chip->debug_acc_connected && !bc12_get_status(chip->bc12))
-			bc12_enable(chip->bc12, true);
-		chip->attached = chip->debug_acc_connected;
-		enable_data_path_locked(chip);
-		mutex_unlock(&chip->data_path_lock);
-
-		/* Log Debug Accessory to Device Compliance Warnings, or Remove from List. */
-		update_compliance_warnings(chip, COMPLIANCE_WARNING_DEBUG_ACCESSORY,
-					   chip->debug_acc_connected);
-
-		LOG(LOG_LVL_DEBUG, log,
-		    "Debug accessory %s", chip->debug_acc_connected ? "connected" : "disconnected");
-		if (!chip->debug_acc_connected && modparam_conf_sbu) {
-			ret = max77759_write8(tcpci->regmap, TCPC_VENDOR_SBUSW_CTRL,
-					      SBUSW_SERIAL_UART);
-			LOG(LOG_LVL_DEBUG, log,
-			    "SBU switch enable %s", ret < 0 ? "fail" : "success");
-		}
-		usb_psy_set_attached_state(chip->usb_psy_data, chip->attached);
-	}
+	check_and_enable_debug_accessory_if_present(chip);
 }
 
 static void process_tx(struct max77759_plat *chip, u16 status)
@@ -2011,13 +2025,13 @@ unlock:
 static irqreturn_t _max77759_irq_locked(struct max77759_plat *chip, u16 status,
 					struct logbuffer *log)
 {
-	u16 vendor_status = 0, vendor_status2 = 0, raw;
+	u16 raw;
 	struct google_shim_tcpci *tcpci = chip->tcpci;
 	int ret;
 	const u16 mask = status & TCPC_ALERT_RX_BUF_OVF ? status &
 		~(TCPC_ALERT_RX_STATUS | TCPC_ALERT_RX_BUF_OVF) :
 		status & ~TCPC_ALERT_RX_STATUS;
-	u8 reg_status;
+	u8 reg_status, vendor_status = 0, vendor_status2 = 0;
 	bool contaminant_cc_update_handled = false, invoke_tcpm_for_cc_update = false,
 		port_clean = false;
 	unsigned int pwr_status;
@@ -2083,22 +2097,26 @@ static irqreturn_t _max77759_irq_locked(struct max77759_plat *chip, u16 status,
 			goto reschedule;
 
 		/* Clear VENDOR_ALERT*/
-		ret = max77759_read16(tcpci->regmap, TCPC_VENDOR_ALERT,
-				      &vendor_status);
+		ret = max77759_read8(tcpci->regmap, TCPC_VENDOR_ALERT,
+				     &vendor_status);
 		if (ret < 0)
 			goto reschedule;
-		LOG(LOG_LVL_DEBUG, log, "TCPC_VENDOR_ALERT 0x%x", vendor_status);
+		LOG(LOG_LVL_DEBUG, log, "TCPC_VENDOR_ALERT1 0x%x",
+		    vendor_status);
 
 		process_bc12_alert(chip->bc12, vendor_status);
-		ret = max77759_write16(tcpci->regmap, TCPC_VENDOR_ALERT,
-				       vendor_status);
+		ret = max77759_write8(tcpci->regmap, TCPC_VENDOR_ALERT,
+				      vendor_status);
 
-		ret = max77759_read16(tcpci->regmap, TCPC_VENDOR_ALERT2, &vendor_status2);
+		ret = max77759_read8(tcpci->regmap, TCPC_VENDOR_ALERT2,
+				     &vendor_status2);
 		if (ret < 0)
 			goto reschedule;
-		LOG(LOG_LVL_DEBUG, log, "TCPC_VENDOR_ALERT2 0x%x", vendor_status2);
+		LOG(LOG_LVL_DEBUG, log, "TCPC_VENDOR_ALERT2 0x%x",
+		    vendor_status2);
 
-		ret = max77759_write16(tcpci->regmap, TCPC_VENDOR_ALERT2, vendor_status2);
+		ret = max77759_write8(tcpci->regmap, TCPC_VENDOR_ALERT2,
+				      vendor_status2);
 		if (ret < 0)
 			goto reschedule;
 	}
@@ -2190,10 +2208,24 @@ static irqreturn_t _max77759_irq_locked(struct max77759_plat *chip, u16 status,
 			max77759_manual_vbus_handling_on_cc_change(chip, new_cc1, new_cc2);
 			max77759_cache_cc(chip, new_cc1, new_cc2);
 			/* Check for missing-rp non compliant power source */
-			if (!regmap_read(tcpci->regmap, TCPC_POWER_STATUS, &pwr_status) &&
-			    !chip->usb_throttled && !chip->toggle_disable_status)
-				check_missing_rp(chip, !!(pwr_status & TCPC_POWER_STATUS_VBUS_PRES),
-						 chip->cc1, chip->cc2);
+			if (!regmap_read(tcpci->regmap, TCPC_POWER_STATUS, &pwr_status)) {
+				/* Check for missing-rp non compliant power source */
+				if (!chip->usb_throttled && !chip->toggle_disable_status)
+					check_missing_rp(chip,
+							 !!(pwr_status &
+							    TCPC_POWER_STATUS_VBUS_PRES),
+							 chip->cc1, chip->cc2);
+				/*
+				 * For cases where power_status alert does not fire,
+				 * checking for debug_accessory here helps detecting it.
+				 * Explicitly check for CC terminations as the
+				 * POWER_STATUS_REG.DEBUG_ACC_CONN gets set much before
+				 * causing the compliance warning to flagged much earlier which
+				 * makes the logs less readable.
+				 */
+				if (is_debug_accessory_detected(new_cc1, new_cc2))
+					check_and_enable_debug_accessory_if_present(chip);
+			}
 			/* TCPM has detected valid CC terminations */
 			if (!tcpm_port_is_toggling(tcpci->port)) {
 				chip->floating_cable_or_sink_detected = 0;
@@ -2475,12 +2507,13 @@ static int max77759_start_toggling(struct google_shim_tcpci *tcpci,
 
 	/* Kick debug accessory state machine when enabling toggling for the first time */
 	if (chip->first_toggle) {
-		 if (!IS_ERR_OR_NULL(chip->in_switch_gpio) && is_debug_accessory_detected(cc1, cc2)) {
-			 LOG(LOG_LVL_DEBUG, chip->log, "[%s]: Kick Debug accessory FSM", __func__);
-			 ovp_operation(chip, OVP_RESET);
-		  }
-		  chip->first_toggle_time_since_boot = ktime_get_boottime();
-		  chip->first_toggle = false;
+		if (!IS_ERR_OR_NULL(chip->in_switch_gpio) &&
+		    is_debug_accessory_detected(cc1, cc2)) {
+			LOG(LOG_LVL_DEBUG, chip->log, "[%s]: Kick Debug accessory FSM", __func__);
+			ovp_operation(chip, OVP_RESET);
+		}
+		chip->first_toggle_time_since_boot = ktime_get_boottime();
+		chip->first_toggle = false;
 	}
 
 	/* Renable BC1.2*/
@@ -2805,9 +2838,14 @@ static int max77759_usb_set_role(struct usb_role_switch *sw, enum usb_role role)
 		}
 	}
 
-	/* Renable BC1.2 */
+	/*
+	 * Renable BC1.2 upon disconnect if disabled. Needed for sink-only mode
+	 * such as fastbootd/Recovery. As this is on a data role change event,
+	 * BC1.2 state shall be cleared to prepare for the next detection.
+	 */
 	if (chip->attached && !attached && !bc12_get_status(chip->bc12))
 		bc12_enable(chip->bc12, true);
+
 	/*
 	 * To prevent data stack enumeration failure, previously there
 	 * was a 300msec delay here
@@ -2818,13 +2856,6 @@ static int max77759_usb_set_role(struct usb_role_switch *sw, enum usb_role role)
 	enable_data_path_locked(chip);
 	mutex_unlock(&chip->data_path_lock);
 	usb_psy_set_attached_state(chip->usb_psy_data, chip->attached);
-
-	/*
-	 * Renable BC1.2 upon disconnect if disabled. Needed for sink-only mode such as
-	 * fastbootd/Recovery.
-	 */
-	if (chip->attached && !attached && !bc12_get_status(chip->bc12))
-		bc12_enable(chip->bc12, true);
 
 	/*
 	 * Clear COMPLIANCE_WARNING_INPUT_POWER_LIMITED which tracks AICL_ACTIVE only upon

@@ -55,11 +55,13 @@ typedef fwtp_error_code_t(fwtp_if_send_message)(struct fwtp_if *fwtp_if,
  *
  * @platform: FWTP interface platform record.
  * @send_message: Function used to send a message.
+ * @send_message_ctx: Context for send message function.
  * @peer_protocol_version: FWTP protocol version of the IPC peer.
  */
 struct fwtp_if {
 	struct fwtp_if_platform platform;
 	fwtp_if_send_message *send_message;
+	void *send_message_ctx;
 	int peer_protocol_version;
 };
 

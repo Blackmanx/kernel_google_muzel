@@ -279,6 +279,22 @@ static void vh_swap_writepage(void *data,
 	*sis_flag &= ~SWP_SYNCHRONOUS_IO;
 }
 
+static void vh_kvmalloc_high_order_skip_direct_reclaim(void *data,
+		size_t size, gfp_t *gfp_flags, bool *use_vmalloc)
+{
+	/* Return early if size is 0, as get_order(0) is undefined. */
+	if (size == 0)
+		return;
+
+	/*
+	 * If the allocation order meets or exceeds the threshold, clear
+	 * __GFP_DIRECT_RECLAIM to prevent potential latency spikes from
+	 * direct reclaim.
+	 */
+	if (get_order(size) > PAGE_ALLOC_COSTLY_ORDER)
+		*gfp_flags &= ~__GFP_DIRECT_RECLAIM;
+}
+
 static void reset_page_oem_fields(unsigned long *check_flags)
 {
 	*check_flags = *check_flags & ~(1UL << PG_oem_reserved_1);
@@ -405,6 +421,11 @@ static int vh_mm_init(void)
 
 	ret = register_trace_android_vh_swap_writepage(
 		vh_swap_writepage, NULL);
+	if (ret)
+		goto out_err;
+
+	ret = register_trace_android_vh_kvmalloc_node_use_vmalloc(
+		vh_kvmalloc_high_order_skip_direct_reclaim, NULL);
 	if (ret)
 		goto out_err;
 

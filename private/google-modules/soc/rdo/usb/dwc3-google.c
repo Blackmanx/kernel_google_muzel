@@ -1107,6 +1107,14 @@ static int dwc3_google_probe(struct platform_device *pdev)
 	device_wakeup_disable(gdwc3->dev);
 	device_wakeup_disable(&gdwc3->dwc3->dev);
 
+	/*
+	 * b/429048940: flush the set role work item to make sure current_dr_role is set before
+	 * allowing runtime PM to kick in
+	 */
+	struct dwc3 *dwc = platform_get_drvdata(gdwc3->dwc3);
+
+	flush_work(&dwc->drd_work);
+
 	pm_runtime_allow(dev);
 	pm_runtime_allow(&gdwc3->dwc3->dev);
 	/*

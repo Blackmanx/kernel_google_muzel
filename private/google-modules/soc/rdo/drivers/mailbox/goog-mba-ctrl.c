@@ -295,7 +295,7 @@ static void goog_mba_ctrl_trigger_host_irq(struct goog_mba_ctrl_info *mbox_info)
 	mba_writel(mbox_info, SET_HOST_IRQ, CLIENT_IRQ_TRIG_OFFSET);
 }
 
-static void goog_mba_ctrl_disable_client_irq(struct goog_mba_ctrl_info *mbox_info)
+static void goog_mba_ctrl_disable_client_irq_locked(struct goog_mba_ctrl_info *mbox_info)
 {
 	u32 val;
 
@@ -305,7 +305,7 @@ static void goog_mba_ctrl_disable_client_irq(struct goog_mba_ctrl_info *mbox_inf
 	mba_writel(mbox_info, val, CLIENT_IRQ_CONFIG_OFFSET);
 }
 
-static void goog_mba_ctrl_enable_client_irq(struct goog_mba_ctrl_info *mbox_info)
+static void goog_mba_ctrl_enable_client_irq_locked(struct goog_mba_ctrl_info *mbox_info)
 {
 	u32 val;
 
@@ -386,7 +386,13 @@ static int goog_mba_ctrl_startup(struct mbox_chan *chan)
 {
 	struct goog_mba_ctrl_info *mbox_info = dev_get_drvdata(chan->mbox->dev);
 
-	goog_mba_ctrl_enable_client_irq(mbox_info);
+	mutex_lock(&mbox_info->channel_lock);
+	if (!mbox_info->active_channels) {
+		enable_irq(mbox_info->irq);
+		goog_mba_ctrl_enable_client_irq_locked(mbox_info);
+	}
+	mbox_info->active_channels++;
+	mutex_unlock(&mbox_info->channel_lock);
 
 	return 0;
 }
@@ -395,8 +401,13 @@ static void goog_mba_ctrl_shutdown(struct mbox_chan *chan)
 {
 	struct goog_mba_ctrl_info *mbox_info = dev_get_drvdata(chan->mbox->dev);
 
-	goog_mba_ctrl_disable_client_irq(mbox_info);
-	synchronize_irq(mbox_info->irq);
+	mutex_lock(&mbox_info->channel_lock);
+	mbox_info->active_channels--;
+	if (!mbox_info->active_channels) {
+		goog_mba_ctrl_disable_client_irq_locked(mbox_info);
+		disable_irq(mbox_info->irq);
+	}
+	mutex_unlock(&mbox_info->channel_lock);
 }
 
 static struct mbox_chan_ops goog_mba_ctrl_chan_ops = {
@@ -503,8 +514,18 @@ static int goog_mba_ctrl_request_irq(struct goog_mba_ctrl_info *mbox_info,
 		return -EINVAL;
 	}
 
+	/*
+	 * Don't enable interrupt by default for two reasons:
+	 *  1. The mailbox controller does not need to handle interrupts when no clients
+	 *     are active, as the interrupt source is also disabled.
+	 *  2. This prevents client callbacks from being invoked before a channel has
+	 *     been formally requested.
+	 *
+	 * Interrupts will be enabled by the .startup callback when a client requests
+	 * a mailbox channel.
+	 */
 	ret = devm_request_irq(dev, mbox_info->irq, goog_mba_ctrl_isr,
-			       IRQF_TRIGGER_HIGH | IRQF_NO_SUSPEND,
+			       IRQF_TRIGGER_HIGH | IRQF_NO_SUSPEND | IRQF_NO_AUTOEN,
 			       dev_name(dev), dev);
 	if (ret != 0) {
 		dev_err(dev, "failed to register interrupt handler: %d\n", ret);
@@ -529,6 +550,7 @@ static int goog_mba_ctrl_probe(struct platform_device *pdev)
 
 	mbox_info->dev = dev;
 	spin_lock_init(&mbox_info->lock);
+	mutex_init(&mbox_info->channel_lock);
 
 	ret = goog_mba_ctrl_ioremap(mbox_info, pdev);
 	if (ret)
@@ -578,6 +600,14 @@ static int goog_mba_ctrl_probe(struct platform_device *pdev)
 		return ret;
 	}
 
+	goog_mba_ctrl_disable_client_irq_locked(mbox_info);
+	goog_mba_ctrl_clr_intrs(mbox_info);
+
+	ret = goog_mba_ctrl_request_irq(mbox_info, pdev);
+	if (ret)
+		return ret;
+
+
 	platform_set_drvdata(pdev, mbox_info);
 
 	ret = devm_mbox_controller_register(dev, mbox);
@@ -585,13 +615,6 @@ static int goog_mba_ctrl_probe(struct platform_device *pdev)
 		dev_err(dev, "failed to register mailbox controller: %d\n", ret);
 		return ret;
 	}
-
-	goog_mba_ctrl_disable_client_irq(mbox_info);
-	goog_mba_ctrl_clr_intrs(mbox_info);
-
-	ret = goog_mba_ctrl_request_irq(mbox_info, pdev);
-	if (ret)
-		return ret;
 
 	return 0;
 }

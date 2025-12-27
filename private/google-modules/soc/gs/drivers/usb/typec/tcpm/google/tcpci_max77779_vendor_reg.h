@@ -4,11 +4,11 @@
  *
  */
 
-#ifndef __TCPCI_MAX77759_VENDOR_REG_H
-#define __TCPCI_MAX77759_VENDOR_REG_H
+#ifndef __TCPCI_MAX77779_VENDOR_REG_H
+#define __TCPCI_MAX77779_VENDOR_REG_H
 
-#define CHG_CNFG_00                              0xB9
-#define MODE_MASK                               GENMASK(2, 0)
+#define CHG_CNFG_00                             0xBC
+#define MODE_MASK                               GENMASK(3, 0)
 #define MODE_BUCK_ON                            0x4
 #define MODE_BOOST_ON                           0xA
 #define MODE_OFF                                0x0
@@ -42,6 +42,8 @@
 #define TCPC_VENDOR_VCON_CTRL			0x8b
 #define VCNILIM_MASK				GENMASK(2, 0)
 #define VCNILIM_300_MA				0x2
+
+#define VENDOR_WDG_CTRL				0x8a
 
 #define TCPC_VENDOR_CC_CTRL1			0x8c
 #define CCCONNDRY				BIT(7)
@@ -117,4 +119,6 @@
 #define SBUCLAMPDIS				BIT(3)
 #define SBURPCTRL_ULP_EN			BIT(2)
 
-#endif /* __TCPCI_MAX77759_VENDOR_REG_H */
+#define TCPC_VENDOR_SBU_CTRL2			0x97
+
+#endif /* __TCPCI_MAX77779_VENDOR_REG_H */

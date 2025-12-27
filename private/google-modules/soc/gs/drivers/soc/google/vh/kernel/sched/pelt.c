@@ -6,7 +6,14 @@
 #include <trace/events/power.h>
 #include <trace/hooks/systrace.h>
 
+#if IS_ENABLED(CONFIG_SOC_GS101) || IS_ENABLED(CONFIG_SOC_GS201) || IS_ENABLED(CONFIG_SOC_ZUMA)
+#include <performance/gs_perf_mon/gs_perf_mon.h>
+#else
+#include <perf/core/gs_perf_mon.h>
+#endif
+
 #include "sched_priv.h"
+#include "sched_events.h"
 
 #define LOAD_AVG_MAX 47742
 
@@ -210,4 +217,127 @@ u64 approximate_runtime(unsigned long util)
 	}
 
 	return runtime * (TICK_USEC/USEC_PER_MSEC);
+}
+
+static inline u64
+scale_mem_preasure(u64 delta, struct vendor_task_struct *vp, int cpu)
+{
+	u64 cycle_delta = vp->mp_stats->mp.current_cycle - vp->mp_stats->mp.last_cycle;
+	u64 stall_delta = vp->mp_stats->mp.current_stall - vp->mp_stats->mp.last_stall;
+	int cluster = pixel_cpu_to_cluster[cpu];
+
+	/* This does happen occasionally for unknown reason. */
+	if (cycle_delta > stall_delta)
+		return delta * stall_delta / cycle_delta;
+
+	/* Fallback approach if cycle_delta <= stall_delta */
+	if (vp->mp_stats->pmu_stats.cycle[cluster])
+		return delta * vp->mp_stats->pmu_stats.stall[cluster] /
+			vp->mp_stats->pmu_stats.cycle[cluster];
+
+	return 0;
+}
+
+static __always_inline u32
+accumulate_sum_mp(u64 delta, struct vendor_task_struct *vp, int on_rq, int running, int cpu)
+{
+	u32 contrib = (u32)delta;
+	u64 periods;
+
+	delta += vp->mp_stats->mp.period_contrib;
+	periods = delta / 1024;
+
+	if (periods) {
+		vp->mp_stats->mp.mem_pressure_sum =
+			decay_load((u64)(vp->mp_stats->mp.mem_pressure_sum), periods);
+
+		delta %= 1024;
+		if (on_rq) {
+			contrib = __accumulate_pelt_segments(periods,
+					1024 - vp->mp_stats->mp.period_contrib, delta);
+		}
+	}
+	vp->mp_stats->mp.period_contrib = delta;
+
+	if (running) {
+		/* Only do the scale down if it is running. */
+		contrib = scale_mem_preasure(contrib, vp, cpu);
+		vp->mp_stats->mp.mem_pressure_sum += contrib << SCHED_CAPACITY_SHIFT;
+	}
+
+	return periods;
+}
+
+static int
+___update_mem_pressure(u64 now, struct sched_entity *se, int cpu, int on_rq, int running)
+{
+	u64 delta;
+	u64 cycle, stall;
+	struct task_struct *p = task_of(se);
+	struct vendor_task_struct *vp = get_vendor_task_struct(p);
+
+	if (cpu == raw_smp_processor_id() &&
+	    !read_perf_event_local(cpu, CORE_STALL_INDEX, &stall) &&
+	    !read_perf_event_local(cpu, CORE_CYCLE_INDEX, &cycle)) {
+		if (cycle > stall) {
+			raw_spin_lock(&vp->lock);
+			vp->mp_stats->mp.last_cycle = vp->mp_stats->mp.current_cycle;
+			vp->mp_stats->mp.last_stall = vp->mp_stats->mp.current_stall;
+			vp->mp_stats->mp.current_cycle = cycle;
+			vp->mp_stats->mp.current_stall = stall;
+			raw_spin_unlock(&vp->lock);
+		}
+	}
+
+
+	delta = now - vp->mp_stats->mp.last_update_time;
+	/*
+	 * This should only happen when time goes backwards, which it
+	 * unfortunately does during sched clock init when we swap over to TSC.
+	 */
+	if ((s64)delta < 0) {
+		vp->mp_stats->mp.last_update_time = now;
+		return 0;
+	}
+
+	delta >>= 10;
+	if (!delta)
+		return 0;
+
+	vp->mp_stats->mp.last_update_time += delta << 10;
+
+	if (!on_rq)
+		running = 0;
+
+	if (!accumulate_sum_mp(delta, vp, on_rq, running, cpu))
+		return 0;
+
+	return 1;
+}
+
+static inline u32 get_pelt_divider_mp(struct vendor_task_struct *vp)
+{
+	return PELT_MIN_DIVIDER + vp->mp_stats->mp.period_contrib;
+}
+
+static void
+___update_memory_pressure_avg(struct sched_entity *se)
+{
+	struct task_struct *p = task_of(se);
+	struct vendor_task_struct *vp = get_vendor_task_struct(p);
+
+	u32 divider = get_pelt_divider_mp(vp);
+
+	WRITE_ONCE(vp->mp_stats->mp.mem_pressure_avg, vp->mp_stats->mp.mem_pressure_sum / divider);
+}
+
+int __update_load_avg_mem_pressure(u64 now, struct cfs_rq *cfs_rq, struct sched_entity *se)
+{
+	if (___update_mem_pressure(now, se, cfs_rq->rq->cpu, !!se->on_rq, cfs_rq->curr == se)) {
+		___update_memory_pressure_avg(se);
+		trace_per_task_memory_pressure(task_of(se), get_mem_pressure(task_of(se)));
+		return 1;
+	}
+
+	return 0;
 }

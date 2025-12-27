@@ -49,6 +49,9 @@ struct goog_mba_ctrl_info {
 
 	struct mbox_controller mbox;
 
+	/* protect active_channels and shared IRQ configuration. */
+	struct mutex channel_lock;
+	u32 active_channels; /* Number of active channels */
 	u32 msg_buf_size; /* size of the common message registers (in words) */
 	u32 payload_size; /* size of the protocol payload (in words) */
 	u32 *payload; /* message payload received from remote */

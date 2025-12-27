@@ -24,6 +24,12 @@
 #define FWTP_ENTRY_TYPE_BASIC_TRACE 1ULL
 #define FWTP_ENTRY_TYPE_ABSOLUTE_TIMESTAMP 2ULL
 #define FWTP_ENTRY_TYPE_TRACE_WITH_DATA 3ULL
+#define FWTP_ENTRY_TYPE_TRACE_WITH_DATA32 4ULL
+#define FWTP_LL_ENTRY_TYPE_TRACE_WITH_DATA 5ULL
+#define FWTP_LL_ENTRY_TYPE_DATA 6ULL
+#define FWTP_LL_ENTRY_TYPE_TRACE_BEGIN 7ULL
+#define FWTP_LL_ENTRY_TYPE_TRACE_END 8ULL
+#define FWTP_LL_ENTRY_TYPE_TRACE_COUNTER 9ULL
 
 /* Define basic entry fields. */
 #define FWTP_BASIC_ENTRY_NAME_SHIFT 32
@@ -49,6 +55,25 @@
 #define FWTP_ENTRY_WITH_DATA_WORD_COUNT(data_word) \
 	FWTP_ENTRY_WITH_DATA_WORD_COUNT_FROM_SIZE( \
 		FWTP_ENTRY_WITH_DATA_SIZE(data_word))
+
+/* Define trace with 32-bit data fields. */
+#define FWTP_ENTRY_WITH_32BIT_DATA_DATA_SHIFT 0
+#define FWTP_ENTRY_WITH_32BIT_DATA_DATA_MASK ((1ULL << 32) - 1ULL)
+
+/* Define low-latency trace with data fields. */
+#define FWTP_LL_BASE_ENTRY0_TYPE_SHIFT 58
+#define FWTP_LL_BASE_ENTRY0_TYPE_MASK ((1ULL << 6) - 1ULL)
+#define FWTP_LL_ENTRY_TYPE(entry_word)                      \
+	(((entry_word) >> FWTP_LL_BASE_ENTRY0_TYPE_SHIFT) & \
+	 FWTP_LL_BASE_ENTRY0_TYPE_MASK)
+#define FWTP_LL_BASE_ENTRY0_TIMESTAMP_SHIFT 0
+#define FWTP_LL_BASE_ENTRY0_TIMESTAMP_MASK ((1ULL << 56) - 1ULL)
+#define FWTP_LL_BASE_ENTRY1_NAME_SHIFT 0
+#define FWTP_LL_BASE_ENTRY1_NAME_MASK ((1ULL << 24) - 1ULL)
+
+/* Define low-latency data fields. */
+#define FWTP_LL_ENTRY_WITH_DATA_DATA_SHIFT 32
+#define FWTP_LL_ENTRY_WITH_DATA_DATA_MASK ((1ULL << 32) - 1ULL)
 
 /*
  * Returns an absolute timestamp entry with the current timestamp specified by

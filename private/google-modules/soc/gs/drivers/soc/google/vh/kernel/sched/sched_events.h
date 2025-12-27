@@ -571,10 +571,10 @@ TRACE_EVENT(sched_cpu_util_rt,
 
 	TP_PROTO(int cpu, unsigned long capacity_orig, unsigned long capacity, unsigned long util,
 		 unsigned long exit_lat, unsigned long cpu_importance, bool task_fits,
-		 bool task_fits_original, bool overutilized, bool is_idle),
+		 bool task_fits_original, bool is_idle),
 
 	TP_ARGS(cpu, capacity_orig, capacity, util, exit_lat, cpu_importance, task_fits,
-		task_fits_original, overutilized, is_idle),
+		task_fits_original, is_idle),
 
 	TP_STRUCT__entry(
 		__field(int,		cpu)
@@ -585,7 +585,6 @@ TRACE_EVENT(sched_cpu_util_rt,
 		__field(unsigned long,	cpu_importance)
 		__field(bool,		task_fits)
 		__field(bool,		task_fits_original)
-		__field(bool,		overutilized)
 		__field(bool,		is_idle)
 	),
 
@@ -598,15 +597,14 @@ TRACE_EVENT(sched_cpu_util_rt,
 		__entry->cpu_importance	    = cpu_importance;
 		__entry->task_fits	    = task_fits;
 		__entry->task_fits_original = task_fits_original;
-		__entry->overutilized	    = overutilized;
 		__entry->is_idle	    = is_idle;
 	),
 
 	TP_printk("cpu=%d capacity_orig=%lu capacity=%lu util=%lu exit_lat=%lu cpu_importance=%lu "\
-		  "task_fits=%d task_fits_original=%d overutilized=%d is_idle=%d",
+		  "task_fits=%d task_fits_original=%d is_idle=%d",
 		__entry->cpu, __entry->capacity_orig, __entry->capacity, __entry->util,
 		__entry->exit_lat, __entry->cpu_importance, __entry->task_fits,
-		__entry->task_fits_original, __entry->overutilized, __entry->is_idle)
+		__entry->task_fits_original, __entry->is_idle)
 );
 
 TRACE_EVENT(sched_find_least_loaded_cpu,
@@ -681,6 +679,57 @@ TRACE_EVENT(sched_select_task_rq_rt,
 	TP_printk("pid=%d comm=%s task_util=%lu prev_cpu=%d target=%d new_cpu=%d sync_wakeup=%d",
 		__entry->pid, __entry->comm, __entry->task_util, __entry->prev_cpu, __entry->target,
 		__entry->new_cpu, __entry->sync_wakeup)
+);
+
+TRACE_EVENT(per_task_memory_pressure,
+
+	TP_PROTO(struct task_struct *tsk, unsigned long mem_pressure),
+
+	TP_ARGS(tsk, mem_pressure),
+
+	TP_STRUCT__entry(
+		__array(char,		comm, TASK_COMM_LEN)
+		__field(pid_t,		pid)
+		__field(unsigned long,  mem_pressure)
+		),
+
+	TP_fast_assign(
+		memcpy(__entry->comm, tsk->comm, TASK_COMM_LEN);
+		__entry->pid              = tsk->pid;
+		__entry->mem_pressure     = mem_pressure;
+		),
+
+	TP_printk("pid=%d comm=%s mem_pressure_avg=%lu",
+		  __entry->pid,  __entry->comm, __entry->mem_pressure)
+);
+
+TRACE_EVENT(per_task_pmu_stats,
+
+	TP_PROTO(struct task_struct *p, int cpu, s64 cycle_delta, s64 stall_delta, s64 inst_delta),
+
+	TP_ARGS(p, cpu, cycle_delta, stall_delta, inst_delta),
+
+	TP_STRUCT__entry(
+		__array(char,		comm, TASK_COMM_LEN)
+		__field(pid_t,		pid)
+		__field(int,		cpu)
+		__field(s64,		cycle_delta)
+		__field(s64,		stall_delta)
+		__field(s64,		inst_delta)
+		),
+
+	TP_fast_assign(
+		memcpy(__entry->comm, p->comm, TASK_COMM_LEN);
+		__entry->pid              = p->pid;
+		__entry->cpu              = cpu;
+		__entry->cycle_delta      = cycle_delta;
+		__entry->stall_delta      = stall_delta;
+		__entry->inst_delta       = inst_delta;
+		),
+
+	TP_printk("pid=%d comm=%s cpu=%d cycle_delta=%lld stall_delta=%lld inst_delta=%lld",
+		  __entry->pid,  __entry->comm, __entry->cpu, __entry->cycle_delta,
+		  __entry->stall_delta, __entry->inst_delta)
 );
 
 #endif /* _SCHED_EVENTS_H */

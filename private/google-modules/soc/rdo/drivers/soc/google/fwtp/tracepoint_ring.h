@@ -71,7 +71,8 @@ enum tracepoint_ring_version {
 struct tracepoint_ring {
 	uint32_t magic;
 	uint16_t version;
-	uint8_t reserved[2];
+	uint8_t low_latency;
+	uint8_t reserved;
 	uint32_t timestamp_hz;
 	uint32_t size;
 	uint32_t head_offset;
@@ -80,6 +81,7 @@ struct tracepoint_ring {
 };
 STATIC_ASSERT((sizeof_field(struct tracepoint_ring, magic) +
 	       sizeof_field(struct tracepoint_ring, version) +
+	       sizeof_field(struct tracepoint_ring, low_latency) +
 	       sizeof_field(struct tracepoint_ring, reserved) +
 	       sizeof_field(struct tracepoint_ring, timestamp_hz) +
 	       sizeof_field(struct tracepoint_ring, size) +

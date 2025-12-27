@@ -1235,7 +1235,7 @@ static int google_cpm_tp_probe(struct platform_device *pdev)
 	}
 
 	/* TODO(b/283179225): Workaround for the CPM address limitation */
-	if (cpm_tp->dma_size + cpm_tp->dma_phys >= 0xA0000000) {
+	if (cpm_tp->dma_size + cpm_tp->dma_phys > 0xA0000000) {
 		dev_err(dev,
 			"CPM can't handle the address over 0xA0000000 now on gem5.\n");
 		ret = -ENOMEM;
@@ -1277,8 +1277,14 @@ static int google_cpm_tp_probe(struct platform_device *pdev)
 	initialize_cpm_tracepoint_decoder();
 
 	for (tp_req = TP_REQUEST_INFO; tp_req < NUM_TP_REQUESTS; ++tp_req) {
-		ret = google_cpm_tp_get_buff_addr(
-			cpm_tp, tp_req, &tp_buffer_phys, &tp_buffer_size);
+		phys_addr_t tp_buffer_page_phys;
+		u32 tp_buffer_phys_page_offset;
+		u32 tp_buffer_page_size;
+
+		/* Get the CPM tracepoint buffer address. */
+		ret = google_cpm_tp_get_buff_addr(cpm_tp, tp_req,
+						  &tp_buffer_phys,
+						  &tp_buffer_size);
 		if (ret) {
 			dev_err(dev,
 				"Failed to get the remote buffer address: %d\n",
@@ -1286,24 +1292,38 @@ static int google_cpm_tp_probe(struct platform_device *pdev)
 			goto free_mbox_channel;
 		}
 
+		/*
+		 * The CPM tracepoint buffer may not be aligned to a kernel
+		 * page boundary. Get the address of the kernel page containing
+		 * the start of the CPM tracepoint buffer, the offset of the
+		 * start of the tracepoint buffer within that page, and the size
+		 * of all kernel pages fully containing the CPM tracepoint
+		 * buffer.
+		 */
+		tp_buffer_page_phys = PAGE_ALIGN_DOWN(tp_buffer_phys);
+		tp_buffer_phys_page_offset =
+			tp_buffer_phys - tp_buffer_page_phys;
+		tp_buffer_page_size =
+			PAGE_ALIGN(tp_buffer_phys_page_offset + tp_buffer_size);
+
 		dev_dbg(dev,
 			"Physical starting address of tracepoint buffer #%d: %pap",
 			(int)tp_req, (void *)tp_buffer_phys);
 
-		if (!PAGE_ALIGNED(tp_buffer_phys)) {
-			dev_warn(dev,
-				 "Tracepoint buff #%d addr not page aligned: %pap\n",
-				 (int)tp_req, (void *)tp_buffer_phys);
-		}
-
-		tp_buffer_virt =
-			devm_ioremap(cpm_tp->dev, tp_buffer_phys,
-				     tp_buffer_size);
+		/*
+		 * Map all of the kernel pages containing the CPM tracepoint
+		 * buffer. The start of the CPM tracepoint buffer will be at
+		 * some offset from the start of the first mapped page. Only use
+		 * addresses within the actual CPM tracepoint buffer.
+		 */
+		tp_buffer_virt = devm_ioremap(cpm_tp->dev, tp_buffer_page_phys,
+					      tp_buffer_page_size);
 		if (IS_ERR(tp_buffer_virt)) {
 			ret = PTR_ERR(tp_buffer_virt);
 			goto free_mbox_channel;
 		}
-		cpm_tp->ring_buf_info_list[tp_req].buffer = tp_buffer_virt;
+		cpm_tp->ring_buf_info_list[tp_req].buffer =
+			tp_buffer_virt + tp_buffer_phys_page_offset;
 		cpm_tp->ring_buf_info_list[tp_req].num_tracepoints =
 			tp_buffer_size / sizeof(struct google_cpm_tp);
 

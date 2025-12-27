@@ -76,13 +76,11 @@ filegroup(
     srcs = glob([
         # Standard pixel headers
         "include/**/*.h",
-        "include/**/uapi/*.h",
     ] + [
         # List of headers needed by external modules
         "drivers/dma-buf/heaps/samsung/samsung-dma-heap.h",
         "drivers/soc/google/vh/include/pixel_em.h",
         "drivers/soc/google/vh/include/sched.h",
-        "drivers/usb/dwc3/google-role-sw.h",
         "drivers/usb/host/xhci-exynos.h",
         "drivers/usb/host/xhci-goog-dma.h",
         "drivers/usb/typec/tcpm/google/google_tcpci_shim.h",

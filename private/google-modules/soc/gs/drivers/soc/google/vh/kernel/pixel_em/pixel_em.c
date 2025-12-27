@@ -1749,3 +1749,4 @@ MODULE_LICENSE("GPL v2");
 MODULE_AUTHOR("Vincent Palomares");
 MODULE_DESCRIPTION("Pixel Energy Model Driver");
 MODULE_DEVICE_TABLE(of, pixel_em_of_match);
+MODULE_SOFTDEP("pre: exynos-acme");

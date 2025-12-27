@@ -65,9 +65,10 @@ struct google_pcie {
 	struct dw_pcie *pci;
 	void __iomem *top_base;
 	void __iomem *phy_sram_base;
+	void __iomem *sii_base;
+	size_t top_size;
 	size_t phy_sram_size;
 	size_t sii_size;
-	void __iomem *sii_base;
 	u32 curr_mapped_busdev;
 
 	struct gpio_desc *perstn_gpio;

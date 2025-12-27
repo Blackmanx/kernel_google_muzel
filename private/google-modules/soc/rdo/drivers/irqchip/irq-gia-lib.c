@@ -1261,7 +1261,7 @@ static struct trace_array *gia_trace_init(void)
 {
 	struct trace_array *trace_instance;
 
-	trace_instance = trace_array_get_by_name("irq_gia_google");
+	trace_instance = trace_array_get_by_name_ext("irq_gia_google", "irq_gia");
 	if (!trace_instance) {
 		pr_err("Interrupts trace instance creation/retrieve did not succeed\n");
 		return NULL;

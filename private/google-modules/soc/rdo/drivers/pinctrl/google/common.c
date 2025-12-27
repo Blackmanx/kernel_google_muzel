@@ -141,7 +141,17 @@ static int google_pinctrl_attach_power_domain(struct google_pinctrl *gctl)
 						 RPM_AUTOSUSPEND_DELAY_MS);
 		pm_runtime_use_autosuspend(gctl->dev);
 		pm_runtime_set_active(gctl->dev);
-		pm_runtime_forbid(gctl->dev);
+
+		/*
+		 * Hold a reference that will be dropped at the end of probe
+		 * unless the device is not `runtime-pm-capable`. NOTE that
+		 * we call this function instead of pm_runtime_get_sync()
+		 * because we _know_ we're already active (see the call above)
+		 * and in general calling `pm_runtime_get_sync()` isn't so
+		 * legit before calling `pm_runtime_enable()`.
+		 */
+		pm_runtime_get_noresume(gctl->dev);
+
 		devm_pm_runtime_enable(gctl->dev);
 
 		gctl->rpm_capable = of_property_read_bool(gctl->dev->of_node, "runtime-pm-capable");
@@ -1842,7 +1852,7 @@ int google_pinctrl_probe(struct platform_device *pdev,
 		dev_err(&pdev->dev, "Failed to init pinctrl debugfs\n");
 
 	if (gctl->rpm_capable)
-		pm_runtime_allow(&pdev->dev);
+		pm_runtime_put(&pdev->dev);
 
 	return 0;
 

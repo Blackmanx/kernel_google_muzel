@@ -1453,14 +1453,6 @@ static int google_dpphy_exit(struct phy *phy)
 
 	mutex_lock(&gphy->lock);
 
-	tca_gcfg.reg_value = readl(gphy->dptx_tca_regs_base + TCA_GCFG_OFFSET);
-	tca_gcfg.bf.auto_mode_en = 1;
-	writel(tca_gcfg.reg_value, gphy->dptx_tca_regs_base + TCA_GCFG_OFFSET);
-
-	tca_clk_rst.reg_value = readl(gphy->dptx_tca_regs_base + TCA_CLK_RST_OFFSET);
-	tca_clk_rst.bf.tca_ref_clk_en = 0;
-	writel(tca_clk_rst.reg_value, gphy->dptx_tca_regs_base + TCA_CLK_RST_OFFSET);
-
 	gphy->phy_users &= ~COMBO_PHY_USER_DP;
 	/* Tear down ComboPHY is DP is last PHY user */
 	if (!gphy->phy_users) {
@@ -1478,6 +1470,14 @@ static int google_dpphy_exit(struct phy *phy)
 	} else {
 		dev_warn(gphy->dev, "%s: phy_state is not COMBO_PHY_TCA_READY\n", __func__);
 	}
+
+	tca_gcfg.reg_value = readl(gphy->dptx_tca_regs_base + TCA_GCFG_OFFSET);
+	tca_gcfg.bf.auto_mode_en = 1;
+	writel(tca_gcfg.reg_value, gphy->dptx_tca_regs_base + TCA_GCFG_OFFSET);
+
+	tca_clk_rst.reg_value = readl(gphy->dptx_tca_regs_base + TCA_CLK_RST_OFFSET);
+	tca_clk_rst.bf.tca_ref_clk_en = 0;
+	writel(tca_clk_rst.reg_value, gphy->dptx_tca_regs_base + TCA_CLK_RST_OFFSET);
 
 	mutex_unlock(&gphy->lock);
 	return 0;

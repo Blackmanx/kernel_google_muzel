@@ -12,8 +12,6 @@ obj-$(CONFIG_RDO_EXPERIMENTAL) += experimental/
 # Unconditionally include subdirectories with Kbuild files that
 # conditionally build using Kconfig options.
 obj-y += ap-pmic/
-obj-y += boot-diary/
-obj-y += cap-sysfs/
 obj-y += clk/google/
 obj-y += clocksource/google/sst/
 obj-y += cpm-cli/
@@ -31,7 +29,6 @@ obj-y += gpca/
 obj-y += hardlockup-debug/
 obj-y += interconnect/
 obj-y += ip-idle-notifier/
-obj-y += cpu-lpm-stats/
 obj-y += lpcm/
 obj-y += odpm/
 obj-y += phy/

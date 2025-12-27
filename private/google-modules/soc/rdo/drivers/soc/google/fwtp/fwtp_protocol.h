@@ -35,8 +35,13 @@
 
 /**
  * define FWTP_PROTOCOL_VERSION - FWTP protocol version.
+ *
+ * Version 1: Initial version.
+ * Version 2: Add table_num to fwtp_msg_get_strings.
  */
-#define FWTP_PROTOCOL_VERSION 1
+#define FWTP_PROTOCOL_VERSION FWTP_PROTOCOL_VERSION_2
+#define FWTP_PROTOCOL_VERSION_1 1
+#define FWTP_PROTOCOL_VERSION_2 2
 
 /**
  * enum fwtp_msg_type - Set of FWTP message types.
@@ -118,6 +123,10 @@ struct fwtp_msg_version {
  * read using &struct fwtp_msg_get_strings messages of type
  * &fwtp_msg_type.kFwtpMsgTypeGetStrings.
  *
+ * Some firmwares may use multiple string tables (e.g., CPM may include string
+ * tables for both CPM and CAP tracepoints). The string table to read is
+ * specified by the &fwtp_msg_get_strings.table_num field.
+ *
  * The offset of a string in a tracepoint may include an offset of the start of
  * the string table itself. When looking up a string by its offset within the
  * string table, the string table offset must first be subtracted from the
@@ -140,6 +149,8 @@ struct fwtp_msg_version {
  * struct fwtp_msg_get_strings - FWTP get string table message.
  *
  * @base: Message base.
+ * @table_num: String table number to read.
+ * @reserved: Reserved. Set to zero.
  * @table_size: Size of the string table.
  * @string_table_offset: Offset of start of string table.
  * @chunk_offset: Offset to the start of the chunk in the string table.
@@ -148,6 +159,8 @@ struct fwtp_msg_version {
  */
 struct fwtp_msg_get_strings {
 	struct fwtp_msg_base base;
+	uint8_t table_num;
+	uint8_t reserved[3];
 	uint32_t table_size;
 	uint32_t string_table_offset;
 	uint32_t chunk_offset;

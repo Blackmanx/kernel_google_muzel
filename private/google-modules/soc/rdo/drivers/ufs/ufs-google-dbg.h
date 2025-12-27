@@ -13,4 +13,6 @@ void ufs_google_remove_dbg(struct ufs_hba *hba);
 int ufs_google_init_debugfs(struct ufs_hba *hba);
 void ufs_google_remove_debugfs(struct ufs_hba *hba);
 
+void ufs_google_dbg_register_dump(struct ufs_hba *hba);
+
 #endif /* _UFS_GOOGLE_DBG_H_ */

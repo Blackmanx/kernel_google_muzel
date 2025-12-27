@@ -45,7 +45,7 @@ typedef void (*google_pcie_callback_func)(enum google_pcie_callback_type type,
 
 int google_pcie_rc_poweron(int num);
 int google_pcie_rc_poweroff(int num);
-void google_pcie_rc_set_link_down(int num);
+void google_pcie_rc_prepare_for_forced_poweroff(int num);
 int google_pcie_poweron_withspeed(int num, unsigned int speed);
 int google_pcie_set_msi_ctrl_addr(int num, u64 msi_ctrl_addr);
 int google_pcie_link_state(int num);

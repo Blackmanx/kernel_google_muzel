@@ -1,0 +1,35 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+
+load("//build/kernel/kleaf:kernel.bzl", "ddk_module")
+
+filegroup(
+    name = "google_cap_sysfs.kconfig",
+    srcs = [
+        "Kconfig",
+    ],
+    visibility = [
+        "//private/google-modules/soc/rdo:__subpackages__",
+    ],
+)
+
+ddk_module(
+    name = "google_cap_sysfs",
+    out = "google_cap_sysfs.ko",
+    conditional_srcs = {
+        "CONFIG_GOOGLE_CAP_SYSFS": {
+            True: [
+                "google_cap_sysfs.c",
+            ],
+        },
+    },
+    kernel_build = "//private/devices/google/common:kernel",
+    visibility = [
+        "//private/devices/google:__subpackages__",
+        "//private/google-modules/soc/rdo/cpu-lpm-stats:__subpackages__",
+    ],
+    deps = [
+        "//common:all_headers_aarch64",
+        "//private/google-modules/soc/rdo:rdo_soc_headers",
+        "//private/google-modules/soc/rdo:rdo_soc_module",
+    ],
+)

@@ -529,8 +529,9 @@ struct cpm_iface_client *cpm_iface_request_client(struct device *dev,
 {
 	struct cpm_iface_client *client;
 	struct platform_device *pdev;
-	struct device_node *node;
+	struct device_node *node = NULL;
 	unsigned long flags;
+	struct of_phandle_iterator mboxes_iter;
 	int ret;
 
 	if (!dev || !dev->of_node) {
@@ -554,17 +555,20 @@ struct cpm_iface_client *cpm_iface_request_client(struct device *dev,
 			return ERR_PTR(-EBUSY);
 	}
 
-	node = of_parse_phandle(dev->of_node, "mboxes", 0);
-	if (!node) {
-		dev_dbg(dev, "%s: can't parse 'mboxes' property\n", __func__);
-		return ERR_PTR(-ENODEV);
+	of_for_each_phandle(&mboxes_iter, ret, dev->of_node, "mboxes", "mbox-cells", 0) {
+		if (cpm_iface_data->dev->of_node == mboxes_iter.node) {
+			node = mboxes_iter.node;
+			break;
+		}
 	}
 
-	if (cpm_iface_data->dev->of_node != node) {
-		dev_err(dev, "Client's 'mboxes'(%s) doesn't match to CPM interface(%s)\n",
-			node->name, cpm_iface_data->dev->of_node->name);
-		ret = -EINVAL;
-		goto exit_put_node;
+	if (!node) {
+		if (ret)
+			dev_err(dev, "Err:%d when iterating 'mboxes'\n", ret);
+
+		dev_err(dev, "'mboxes' doesn't contain CPM interface(%s)\n",
+			cpm_iface_data->dev->of_node->name);
+		return ERR_PTR(-EINVAL);
 	}
 
 	pdev = of_find_device_by_node(node);
@@ -930,6 +934,16 @@ static void cpm_iface_resp_cb(struct mbox_client *mbox_client, void *msg)
 
 		spin_lock_irqsave(&cpm_iface_data->lock, flags);
 		req = cpm_iface_remove_pending_resp(msg_payload);
+		if (!req) {
+			dev_err(dev,
+				"No token:%u found for response payload: %#10x %#10x %#10x %#10x\n",
+				goog_mba_q_xport_get_token(&msg_payload->header),
+				msg_payload->header, msg_payload->payload[0],
+				msg_payload->payload[1], msg_payload->payload[2]);
+			spin_unlock_irqrestore(&cpm_iface_data->lock, flags);
+			return;
+		}
+
 		session = container_of(req, struct cpm_iface_session, req);
 
 		trace_cpm_iface_resp_cb(cpm_iface_get_session_idx(session), msg_payload);
@@ -1048,7 +1062,7 @@ static void cpm_iface_create_ftrace_instance(struct cpm_iface_data *ci_data)
 	int i;
 	int ret;
 
-	ta = trace_array_get_by_name("goog_cpm_mailbox");
+	ta = trace_array_get_by_name_ext("goog_cpm_mailbox", "goog_mba_ctrl,goog_mba_cpm_iface");
 	if (!ta) {
 		dev_err(dev, "Failed to create trace array\n");
 		return;

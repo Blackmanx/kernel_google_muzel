@@ -13,7 +13,7 @@
 #include <linux/pm_wakeup.h>
 
 #include "tcpci_max77759.h"
-#include "tcpci_max77759_vendor_reg.h"
+#include "tcpci_max77779_vendor_reg.h"
 
 #define SPMI_MAX_EXT_RD_WR_SIZE                 16U
 #define MAX_PD_MSG_SIZE_PER_READ                (SPMI_MAX_EXT_RD_WR_SIZE - \
@@ -37,20 +37,62 @@ static void spmi_access_unlock(void *arg)
 	mutex_unlock(&g_spmi_regmap_lock);
 }
 
-static const struct regmap_range max77759_tcpci_range[] = {
-	regmap_reg_range(MAX77759_MIN_ADDR, MAX77759_MAX_ADDR)
+static const struct regmap_range max77779_tcpci_read_range[] = {
+	regmap_reg_range(TCPC_VENDOR_ID        /* 0x0 */,
+			 TCPC_PD_INT_REV_H     /* 0xb */),
+	regmap_reg_range(TCPC_ALERT            /* 0x10 */,
+			 TCPC_ALERT_EXTENDED   /* 0x21 */),
+	regmap_reg_range(TCPC_COMMAND          /* 0x23 */,
+			 TCPC_CNFG_EXT1        /* 0x2a */),
+	regmap_reg_range(TCPC_MSG_HDR_INFO     /* 0x2e */,
+			 TCPC_RX_BYTE_CNT      /* 0x30 */),
+	regmap_reg_range(TCPC_TRANSMIT         /* 0x50 */,
+			 TCPC_TRANSMIT         /* 0x50 */),
+	regmap_reg_range(TCPC_VBUS_VOLTAGE     /* 0x70 */,
+			 TCPC_VBUS_VOLTAGE_ALARM_LO_CFG_H /* 0x79 */),
+	regmap_reg_range(TCPC_VENDOR_ALERT     /* 0x80 */,
+			 TCPC_VENDOR_SBU_CTRL2 /* 0x97 */),
 };
 
-const struct regmap_access_table max77759_tcpci_write_table = {
-	.yes_ranges = max77759_tcpci_range,
-	.n_yes_ranges = ARRAY_SIZE(max77759_tcpci_range),
+const struct regmap_access_table max77779_tcpci_read_table = {
+	.yes_ranges = max77779_tcpci_read_range,
+	.n_yes_ranges = ARRAY_SIZE(max77779_tcpci_read_range),
 };
 
-static const struct regmap_config max77759_regmap_config = {
+static const struct regmap_range max77779_tcpci_write_range[] = {
+	regmap_reg_range(TCPC_ALERT             /* 0x10 */,
+			 TCPC_POWER_CTRL        /* 0x1c */),
+	regmap_reg_range(TCPC_FAULT_STATUS      /* 0x1f */,
+			 TCPC_FAULT_STATUS      /* 0x1f */),
+	regmap_reg_range(TCPC_ALERT_EXTENDED    /* 0x21 */,
+			 TCPC_ALERT_EXTENDED    /* 0x21 */),
+	regmap_reg_range(TCPC_COMMAND           /* 0x23 */,
+			 TCPC_COMMAND           /* 0x23 */),
+	regmap_reg_range(TCPC_CNFG_EXT1         /* 0x2a */,
+			 TCPC_CNFG_EXT1         /* 0x2a */),
+	regmap_reg_range(TCPC_MSG_HDR_INFO      /* 0x2e */,
+			 TCPC_RX_DETECT         /* 0x2f */),
+	regmap_reg_range(TCPC_TRANSMIT          /* 0x50 */,
+			 TCPC_TX_BYTE_CNT       /* 0x51 */),
+	regmap_reg_range(TCPC_VBUS_SINK_DISCONNECT_THRESH     /* 0x72 */,
+			 TCPC_VBUS_VOLTAGE_ALARM_LO_CFG_H     /* 0x79 */),
+	regmap_reg_range(TCPC_VENDOR_ALERT       /* 0x80 */,
+			 TCPC_VENDOR_ALERT_MASK2 /* 0x83 */),
+	regmap_reg_range(VENDOR_WDG_CTRL         /* 0x8a */,
+			 TCPC_VENDOR_SBU_CTRL2   /* 0x97 */),
+};
+
+const struct regmap_access_table max77779_tcpci_write_table = {
+	.yes_ranges = max77779_tcpci_write_range,
+	.n_yes_ranges = ARRAY_SIZE(max77779_tcpci_write_range),
+};
+
+static const struct regmap_config max77779_regmap_config = {
 	.reg_bits = 16,
 	.val_bits = 8,
-	.max_register = MAX77759_MAX_ADDR,
-	.wr_table = &max77759_tcpci_write_table,
+	.max_register = TCPC_VENDOR_SBU_CTRL2,
+	.rd_table = &max77779_tcpci_read_table,
+	.wr_table = &max77779_tcpci_write_table,
 	.lock = spmi_access_lock,
 	.unlock = spmi_access_unlock,
 };
@@ -61,9 +103,8 @@ static int max777x9_spmi_direct_otg_en(struct max77759_plat *chip, bool en)
 	u8 reg, buffer, cached_usid = sdev->usid;
 	int ret;
 
-	reg = (chip->product_id == MAX77779_PRODUCT_ID) ? MAX77779_BUCK_BOOST_OP :
-							  MAX77759_BUCK_BOOST_OP;
-	buffer = en ? MAX777x9_BUCK_BOOST_SOURCE : MAX777x9_BUCK_BOOST_OFF;
+	reg = CHG_CNFG_00;
+	buffer = en ? MODE_BOOST_ON : MODE_OFF;
 
 	mutex_lock(&g_spmi_regmap_lock);
 	sdev->usid = MAX777x9_BUCK_BOOST_SPMI_SID;
@@ -215,7 +256,7 @@ static int max777x9_spmi_probe(struct spmi_device *sdev)
 
 	mutex_init(&g_spmi_regmap_lock);
 	sdev->dev.init_name = "spmi-max77759tcpc";
-	regmap = devm_regmap_init_spmi_ext(sdev, &max77759_regmap_config);
+	regmap = devm_regmap_init_spmi_ext(sdev, &max77779_regmap_config);
 	if (IS_ERR(regmap)) {
 		dev_err(&sdev->dev, "Regmap init failed");
 		return PTR_ERR(regmap);

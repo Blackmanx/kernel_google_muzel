@@ -11,7 +11,9 @@
 #include <linux/nmi.h>
 #include <linux/notifier.h>
 #include <linux/panic_notifier.h>
+#include <linux/platform_device.h>
 #include <linux/reboot.h>
+#include <linux/rtc.h>
 #include <linux/sched/debug.h>
 #include <soc/google/google-cdd.h>
 #include <soc/google/google-smc.h>
@@ -214,12 +216,24 @@ static unsigned int google_cdd_get_reason(void)
 	return cdd_ctx.reset_reason;
 }
 
-static void google_cdd_set_apc_wdt_sub_reason(unsigned int val)
+static void google_cdd_set_apc_wdt_sub_reason(struct device *dev, unsigned int val)
 {
-	void __iomem *header = google_cdd_get_header_vaddr();
+	void __iomem *header, *apc_wdt_sub_reason;
+	struct platform_device *pdev = to_platform_device(dev);
+	int ret;
 
+	header = google_cdd_get_header_vaddr();
 	if (header)
 		__raw_writel(val, header + CDD_OFFSET_APC_WDT_SUB_REASON);
+
+	apc_wdt_sub_reason = devm_platform_ioremap_resource_byname(pdev, "apc_wdt_sub_reason");
+	ret = IS_ERR(apc_wdt_sub_reason);
+	if (ret) {
+		dev_err(dev, "unable to remap apc_wdt_sub_reason(%d)\n", ret);
+		return;
+	}
+
+	__raw_writel(val, apc_wdt_sub_reason);
 }
 
 static void google_cdd_set_reboot_mode(enum reboot_mode mode)
@@ -517,6 +531,17 @@ static int google_cdd_reboot_handler(struct notifier_block *nb,
 	return NOTIFY_DONE;
 }
 
+static void google_cdd_print_timestamp(void)
+{
+	struct timespec64 ts;
+	struct rtc_time tm;
+
+	ktime_get_real_ts64(&ts);
+	rtc_time64_to_tm(ts.tv_sec - (sys_tz.tz_minuteswest * 60), &tm);
+	pr_info("GCDD Timestamp (%02d-%02d %02d:%02d:%02d)\n",
+		tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec);
+}
+
 static int google_cdd_restart_handler(struct notifier_block *nb,
 				    unsigned long mode, void *cmd)
 {
@@ -549,6 +574,7 @@ static int google_cdd_restart_handler(struct notifier_block *nb,
 	}
 
 exit:
+	google_cdd_print_timestamp();
 	dev_info(cdd_ctx.dev, "ready to do restart.\n");
 	if ((reboot_mode == REBOOT_WARM || reboot_mode == REBOOT_SOFT) &&
 		google_cdd_psci_system_reset2_supported) {
@@ -619,6 +645,7 @@ static int google_cdd_panic_handler(struct notifier_block *nb, unsigned long l, 
 	google_cdd_dump_task_info();
 	google_cdd_output();
 	google_cdd_log_output();
+	google_cdd_print_timestamp();
 	google_cdd_print_log_report();
 
 	google_cdd_do_dpm_policy(cdd_ctx.panic_action, kernel_panic_msg);
@@ -730,7 +757,7 @@ void google_cdd_init_utils(struct device *dev)
 	}
 
 	/* Sign it from CDD_SIGN_WATCHDOG_APC_EARLY to CDD_SIGN_WATCHDOG_APC */
-	google_cdd_set_apc_wdt_sub_reason(CDD_SIGN_WATCHDOG_APC);
+	google_cdd_set_apc_wdt_sub_reason(dev, CDD_SIGN_WATCHDOG_APC);
 
 	cdd_wdd = google_wdt_wdd_get(dev);
 	if (IS_ERR(cdd_wdd)) {

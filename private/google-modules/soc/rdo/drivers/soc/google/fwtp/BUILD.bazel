@@ -40,8 +40,17 @@ ddk_module(
 
 ddk_module(
     name = "fwtp_cpm",
-    srcs = ["fwtp_cpm.c"],
-    out = "fwtp_cpm.ko",
+    srcs = [
+        "cpm_decoder/cpm_trace.h",
+        "cpm_decoder/cpm_tracepoint_decoder.c",
+        "cpm_decoder/cpm_tracepoint_decoder.h",
+        "cpm_decoder/perf_tracepoints.c",
+        "cpm_decoder/perf_tracepoints.h",
+        "cpm_decoder/thermal_tracepoints.c",
+        "cpm_decoder/thermal_tracepoints.h",
+        "fwtp_cpm.c",
+    ],
+    out = "fwtp_cpm_module.ko",
     kernel_build = "//private/devices/google/common:kernel",
     local_defines = ["DYNAMIC_DEBUG_MODULE"],
     visibility = ["//private/devices/google:__subpackages__"],

@@ -22,18 +22,11 @@ services make use of FWTP interfaces.
 The interface must set the ``send_message`` field to a function that may be used
 to send messages through the interface.
 
-.. kernel-doc:: ../private/google-modules/soc/rdo/drivers/soc/google/fwtp/fwtp_ipc_client.h
+.. kernel-doc:: ../private/google-modules/soc/rdo/drivers/soc/google/fwtp/fwtp_if.h
    :identifiers: fwtp_if
 
-.. kernel-doc:: ../private/google-modules/soc/rdo/drivers/soc/google/fwtp/fwtp_ipc_client.h
+.. kernel-doc:: ../private/google-modules/soc/rdo/drivers/soc/google/fwtp/fwtp_if.h
    :identifiers: fwtp_if_send_message
-
-An FWTP interface should be registered using ``fwtp_if_register`` for each
-firmware that produces tracepoints. If the FWTP interface is removed, it should
-be unregistered using ``fwtp_if_unregister``.
-
-.. kernel-doc:: ../private/google-modules/soc/rdo/drivers/soc/google/fwtp/fwtp_ipc_client.c
-   :identifiers: fwtp_if_register fwtp_if_unregister
 
 FWTP interface platform layer
 =============================
@@ -45,6 +38,18 @@ services and definitions.
 .. kernel-doc:: ../private/google-modules/soc/rdo/drivers/soc/google/fwtp/fwtp_platform.h
    :identifiers: fwtp_if_platform FWTP_MALLOC FWTP_FREE FWTP_IF_LOG_ERR
                  FWTP_IF_LOG_WARN
+
+FWTP IPC clients
+================
+
+.. kernel-doc:: ../private/google-modules/soc/rdo/drivers/soc/google/fwtp/fwtp_ipc_client.h
+   :doc: FWTP IPC clients
+
+.. kernel-doc:: ../private/google-modules/soc/rdo/drivers/soc/google/fwtp/fwtp_ipc_client.h
+   :identifiers: fwtp_ipc_client
+
+.. kernel-doc:: ../private/google-modules/soc/rdo/drivers/soc/google/fwtp/fwtp_ipc_client.c
+   :identifiers: fwtp_ipc_client_register fwtp_ipc_client_unregister
 
 FWTP protocol
 =============

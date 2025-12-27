@@ -24,6 +24,11 @@
 
 #include "i2c-designware-core.h"
 
+#define CREATE_TRACE_POINTS
+#define I2C_MASTER_TRACES
+#include "i2c-trace.h"
+#undef I2C_MASTER_TRACES
+
 #define AMD_TIMEOUT_MIN_US	25
 #define AMD_TIMEOUT_MAX_US	250
 #define AMD_MASTERCFG_MASK	GENMASK(15, 0)
@@ -79,8 +84,8 @@ static int i2c_dw_set_timings_master(struct dw_i2c_dev *dev)
 					scl_falling_time,
 					0);	/* No offset */
 	}
-	dev_dbg(dev->dev, "Standard Mode HCNT:LCNT = %d:%d\n",
-		dev->ss_hcnt, dev->ss_lcnt);
+	trace_i2c_dw_set_timings_master_cnts(dev, dev->ss_hcnt, dev->ss_lcnt,
+					     sda_falling_time, scl_falling_time);
 
 	/*
 	 * Set SCL timing parameters for fast mode or fast mode plus. Only
@@ -128,9 +133,9 @@ static int i2c_dw_set_timings_master(struct dw_i2c_dev *dev)
 					1300,	/* tLOW = 1.3 us */
 					scl_falling_time,
 					0);	/* No offset */
+		trace_i2c_dw_set_timings_master_fast_mod_cnts(dev, dev->fs_hcnt, dev->fs_lcnt,
+							      fp_str);
 	}
-	dev_dbg(dev->dev, "Fast Mode%s HCNT:LCNT = %d:%d\n",
-		fp_str, dev->fs_hcnt, dev->fs_lcnt);
 
 	/* Check is high speed possible and fall back to fast mode if not */
 	if ((dev->master_cfg & DW_IC_CON_SPEED_MASK) ==
@@ -157,15 +162,14 @@ static int i2c_dw_set_timings_master(struct dw_i2c_dev *dev)
 						scl_falling_time,
 						0);	/* No offset */
 		}
-		dev_dbg(dev->dev, "High Speed Mode HCNT:LCNT = %d:%d\n",
-			dev->hs_hcnt, dev->hs_lcnt);
+		trace_i2c_dw_set_timings_master_hs_mod_cnts(dev, dev->hs_hcnt, dev->hs_lcnt);
 	}
 
 	ret = i2c_dw_set_sda_hold(dev);
 	if (ret)
 		return ret;
 
-	dev_dbg(dev->dev, "Bus speed: %s\n", i2c_freq_mode_string(t->bus_freq_hz));
+	trace_i2c_dw_set_timings_master_bus_speed(dev, i2c_freq_mode_string(t->bus_freq_hz));
 	return 0;
 }
 
@@ -217,6 +221,8 @@ static void i2c_dw_xfer_init(struct dw_i2c_dev *dev)
 	struct i2c_msg *msgs = dev->msgs;
 	u32 ic_con = 0, ic_tar = 0;
 	unsigned int dummy;
+
+	trace_i2c_dw_xfer_init(dev);
 
 	/* Disable the adapter */
 	__i2c_dw_disable(dev);
@@ -319,6 +325,8 @@ static int amd_i2c_dw_xfer_quirk(struct i2c_adapter *adap, struct i2c_msg *msgs,
 		tx_buf = msgs[msg_wrt_idx].buf;
 		buf_len = msgs[msg_wrt_idx].len;
 
+		trace_i2c_dw_xfer_msg(dev, buf_len);
+
 		if (!(msgs[msg_wrt_idx].flags & I2C_M_RD))
 			regmap_write(dev->map, DW_IC_TX_TL, buf_len - 1);
 		/*
@@ -401,6 +409,8 @@ static int txgbe_i2c_dw_xfer_quirk(struct i2c_adapter *adap, struct i2c_msg *msg
 	for (msg_idx = 0; msg_idx < num_msgs; msg_idx++) {
 		buf = msgs[msg_idx].buf;
 		buf_len = msgs[msg_idx].len;
+
+		trace_i2c_dw_xfer_msg(dev, buf_len);
 
 		for (data_idx = 0; data_idx < buf_len; data_idx++) {
 			if (msg_idx == num_msgs - 1 && data_idx == buf_len - 1)
@@ -499,6 +509,8 @@ i2c_dw_xfer_msg(struct dw_i2c_dev *dev)
 		    buf == msgs[dev->msg_write_idx].buf &&
 		    buf_len == msgs[dev->msg_write_idx].len)
 			need_restart = true;
+
+		trace_i2c_dw_xfer_msg(dev, buf_len);
 
 		while (buf_len > 0 && tx_limit > 0 && rx_limit > 0) {
 			u32 cmd = 0;
@@ -660,12 +672,11 @@ i2c_dw_read(struct dw_i2c_dev *dev)
 	}
 }
 
-static const unsigned int regs2read[] = { DW_IC_RAW_INTR_STAT, DW_IC_TXFLR,
-						       DW_IC_RXFLR, DW_IC_STATUS,
-						       DW_IC_ENABLE_STATUS, DW_IC_CON, DW_IC_TAR,
-						       DW_IC_INTR_MASK, DW_IC_INTR_STAT };
-static const char * const regs_names[] = { "RAWINT", "TXFLR", "RXFLR", "STAT", "EN_STAT",
-						 "CON", "TAR", "IR_MASK", "IR_STAT" };
+static const unsigned int regs2read[] = { DW_IC_RAW_INTR_STAT, DW_IC_TXFLR, DW_IC_RXFLR,
+					  DW_IC_STATUS, DW_IC_ENABLE_STATUS, DW_IC_ENABLE,
+					  DW_IC_CON, DW_IC_TAR, DW_IC_INTR_MASK, DW_IC_INTR_STAT };
+static const char * const regs_names[] = { "RAWINT", "TXFLR", "RXFLR", "STAT", "EN_STAT", "EN",
+					   "CON", "TAR", "IR_MASK", "IR_STAT" };
 #define DUMP_REGS_NUM ARRAY_SIZE(regs2read)
 
 static void dump_regs(struct dw_i2c_dev *dev)
@@ -684,8 +695,8 @@ static void dump_regs(struct dw_i2c_dev *dev)
 	}
 	pr_cont("\n");
 
-	dev_err(dev->dev, "dev_stat:%#lX xfer_stat:%#X\n", dev->status & STATUS_ACTIVE,
-		dev->msg_write_idx & dev->msg_read_idx);
+	dev_err(dev->dev, "dev_stat:%#lX xfer_stat:%#X\n",
+		dev->status & STATUS_ACTIVE, dev->msg_write_idx & dev->msg_read_idx);
 }
 
 /* return true : xfer timeout, false: xfer completed */
@@ -736,7 +747,7 @@ i2c_dw_xfer(struct i2c_adapter *adap, struct i2c_msg msgs[], int num)
 	bool busy_wait_mode = false;
 	int ret;
 
-	dev_dbg(dev->dev, "%s: msgs: %d\n", __func__, num);
+	trace_i2c_dw_xfer(dev, __func__, num);
 
 	ret = pm_runtime_get_sync(dev->dev);
 	if (ret < 0)
@@ -949,11 +960,14 @@ static irqreturn_t i2c_dw_isr(int this_irq, void *dev_id)
 
 	regmap_read(dev->map, DW_IC_ENABLE, &enabled);
 	regmap_read(dev->map, DW_IC_RAW_INTR_STAT, &stat);
+
+	trace_i2c_dw_isr(dev, stat, enabled, dev->status & STATUS_ACTIVE,
+			 dev->msg_write_idx & dev->msg_read_idx);
+
 	if (!enabled || !(stat & ~DW_IC_INTR_ACTIVITY))
 		return IRQ_NONE;
 	if (pm_runtime_suspended(dev->dev) || stat == GENMASK(31, 0))
 		return IRQ_NONE;
-	dev_dbg(dev->dev, "enabled=%#x stat=%#x\n", enabled, stat);
 
 	stat = i2c_dw_read_clear_intrbits(dev);
 

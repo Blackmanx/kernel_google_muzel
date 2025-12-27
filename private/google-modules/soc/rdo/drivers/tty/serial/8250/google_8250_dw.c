@@ -530,7 +530,7 @@ void google_8250_trace_init(struct platform_device *pdev)
 {
 	struct trace_array *trace_instance;
 
-	trace_instance = trace_array_get_by_name("google_8250");
+	trace_instance = trace_array_get_by_name_ext("google_8250", "uart");
 	if (!trace_instance) {
 		dev_err(&pdev->dev, "google_8250 trace instance creation/retrieve did not succeed\n");
 		return;
@@ -794,15 +794,7 @@ static int dw8250_suspend(struct device *dev)
 	if (uart_console(&up->port))
 		console_stop(up->port.cons);
 
-	if (!pm_runtime_suspended(dev)) {
-		pinctrl_pm_select_sleep_state(dev);
-
-		clk_disable_unprepare(data->clk);
-
-		clk_disable_unprepare(data->pclk);
-	}
-
-	return 0;
+	return pm_runtime_force_suspend(dev);
 }
 
 static int dw8250_resume(struct device *dev)
@@ -813,16 +805,7 @@ static int dw8250_resume(struct device *dev)
 
 	trace_dw8250_function_entry(dev, __func__);
 
-	if (!pm_runtime_suspended(dev)) {
-		clk_prepare_enable(data->pclk);
-
-		clk_prepare_enable(data->clk);
-
-		/* reset asserted when comes out of power-off */
-		reset_control_deassert(data->rst);
-	}
-
-	res = dw8250_enable_cli(dev);
+	res = pm_runtime_force_resume(dev);
 	if (res)
 		return res;
 
@@ -830,8 +813,6 @@ static int dw8250_resume(struct device *dev)
 
 	if (uart_console(&up->port))
 		console_start(up->port.cons);
-
-	pinctrl_pm_select_default_state(dev);
 
 	return 0;
 }
@@ -854,19 +835,40 @@ static int dw8250_runtime_suspend(struct device *dev)
 static int dw8250_runtime_resume(struct device *dev)
 {
 	struct dw8250_data *data = dev_get_drvdata(dev);
+	int res;
 
 	trace_dw8250_function_entry(dev, __func__);
 
-	clk_prepare_enable(data->pclk);
+	res = dw8250_enable_cli(dev);
+	if (res)
+		return res;
 
-	clk_prepare_enable(data->clk);
+	res = clk_prepare_enable(data->pclk);
+	if (res)
+		return res;
+
+	res = clk_prepare_enable(data->clk);
+	if (res)
+		goto err_clk;
 
 	/* reset asserted when comes out of power-off */
-	reset_control_deassert(data->rst);
+	res = reset_control_deassert(data->rst);
+	if (res)
+		goto err_reset;
 
-	pinctrl_pm_select_default_state(dev);
+	res = pinctrl_pm_select_default_state(dev);
+	if (res)
+		goto err_pinctrl;
 
 	return 0;
+
+err_pinctrl:
+	reset_control_assert(data->rst);
+err_reset:
+	clk_disable_unprepare(data->clk);
+err_clk:
+	clk_disable_unprepare(data->pclk);
+	return res;
 }
 
 static const struct dev_pm_ops dw8250_pm_ops = {

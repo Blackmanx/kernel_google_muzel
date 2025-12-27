@@ -22,6 +22,8 @@
 #include <soc/google/google-cdd.h>
 #include <soc/google/google_gtc.h>
 
+#include <linux/workqueue.h>
+
 #define NUM_TRACE			(4)
 #define EHLD_STAT_HANDLED_FLAG		(0x80)
 #define CHAR_ARRAY_SIZE			(128)
@@ -58,6 +60,7 @@ struct google_ehld_main {
 	void __iomem			**sgi_base;
 	struct clk			*tss_clk;
 	raw_spinlock_t			lock;
+	struct work_struct		work;
 };
 
 static struct google_ehld_main ehld_main = {
@@ -450,6 +453,19 @@ static int google_ehld_stop_cpu(u32 cpu)
 	return 0;
 }
 
+static void ehld_work_handler(struct work_struct *work)
+{
+	int ret;
+
+	if (ehld_main.suspending)
+		clk_unprepare(ehld_main.tss_clk);
+	else {
+		ret = clk_prepare(ehld_main.tss_clk);
+		if (ret)
+			dev_err(ehld_dev.dev, "Failed to prepare tss_clk: %d\n", ret);
+	}
+}
+
 static int google_ehld_pm_notifier(struct notifier_block *notifier, unsigned long pm_event,
 						void *v)
 {
@@ -481,6 +497,8 @@ static int google_ehld_pm_notifier(struct notifier_block *notifier, unsigned lon
 			ehld_main.gdmc_enabled = false;
 		}
 
+		schedule_work(&ehld_main.work);
+
 		raw_spin_unlock_irqrestore(&ehld_main.lock, flags);
 		break;
 
@@ -497,6 +515,8 @@ static int google_ehld_pm_notifier(struct notifier_block *notifier, unsigned lon
 						NULL, ehld_dev.dev);
 			ehld_main.gdmc_enabled = true;
 		}
+
+		schedule_work(&ehld_main.work);
 
 		raw_spin_unlock_irqrestore(&ehld_main.lock, flags);
 		break;
@@ -742,6 +762,8 @@ static int ehld_probe(struct platform_device *pdev)
 		gdmc_iface_put(ehld_dev.gdmc_iface);
 		return err;
 	}
+
+	INIT_WORK(&ehld_main.work, ehld_work_handler);
 
 	/* Register Call back function to receive messages from GDMC */
 	err = gdmc_register_host_cb(ehld_dev.gdmc_iface, APC_CRITICAL_GDMC_EHLD_SERVICE,

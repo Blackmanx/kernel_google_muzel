@@ -311,7 +311,7 @@ static int fwtp_google_gdmc_probe(struct platform_device *pdev)
 
 	/* Create a Google GDMC firmware tracepoint device record. */
 	fwtp_google_gdmc_dev =
-		kzalloc(sizeof(*fwtp_google_gdmc_dev), GFP_KERNEL);
+		devm_kzalloc(dev, sizeof(*fwtp_google_gdmc_dev), GFP_KERNEL);
 	if (!fwtp_google_gdmc_dev) {
 		dev_err(dev,
 			"Failed to create a Google GDMC firmware tracepoint device record\n");
@@ -397,6 +397,9 @@ static int fwtp_google_gdmc_probe(struct platform_device *pdev)
 	fwtp_dev->dev = dev;
 	fwtp_dev->fwtp_ipc_client.fwtp_if.send_message =
 		fwtp_google_gdmc_send_message;
+	fwtp_dev->printer_ctx.name = "gdmc";
+	fwtp_dev->log_enabled = true;
+	fwtp_dev->ftrace_enabled = true;
 	ret = fwtp_dev_init(fwtp_dev);
 	if (ret) {
 		dev_err(dev,
@@ -479,9 +482,6 @@ static int fwtp_google_gdmc_remove(struct platform_device *pdev)
 
 	/* Deinitialize the base FWTP device. */
 	fwtp_dev_deinit(&(fwtp_google_gdmc_dev->base));
-
-	/* Free the Google GDMC firmware tracepoint device record. */
-	kfree(fwtp_google_gdmc_dev);
 
 	/* Log removal. */
 	dev_dbg(dev, "Removed Google GDMC firmware tracepoint device.\n");

@@ -52,20 +52,21 @@ module_param(early_boot_boost_uclamp_min, uint, 0644);
 static struct mutex thermal_cap_mutex;
 
 unsigned int sched_auto_fits_capacity[CONFIG_VH_SCHED_MAX_CPU_NR];
-unsigned int sched_capacity_margin[CONFIG_VH_SCHED_MAX_CPU_NR] =
-	{ [0 ... CONFIG_VH_SCHED_MAX_CPU_NR - 1] = DEF_UTIL_THRESHOLD };
-unsigned int sched_dvfs_headroom[CONFIG_VH_SCHED_MAX_CPU_NR] =
-	{ [0 ... CONFIG_VH_SCHED_MAX_CPU_NR - 1] = DEF_UTIL_THRESHOLD };
+unsigned int sched_capacity_margin[CONFIG_VH_SCHED_MAX_CPU_NR] = {
+	[0 ... CONFIG_VH_SCHED_MAX_CPU_NR - 1] = DEF_UTIL_THRESHOLD };
 
-unsigned int sched_auto_uclamp_max[CONFIG_VH_SCHED_MAX_CPU_NR] =
-	{ [0 ... CONFIG_VH_SCHED_MAX_CPU_NR - 1] = SCHED_CAPACITY_SCALE };
+unsigned int sched_dvfs_headroom[CONFIG_VH_SCHED_MAX_CPU_NR] = {
+	[0 ... CONFIG_VH_SCHED_MAX_CPU_NR - 1] = DEF_UTIL_THRESHOLD };
 
-unsigned int thermal_cap_margin[CONFIG_VH_SCHED_MAX_CPU_NR] =
-	{ [0 ... CONFIG_VH_SCHED_MAX_CPU_NR - 1] = DEF_THERMAL_CAP_MARGIN };
+unsigned int thermal_cap_margin[CONFIG_VH_SCHED_MAX_CPU_NR] = {
+	[0 ... CONFIG_VH_SCHED_MAX_CPU_NR - 1] = DEF_THERMAL_CAP_MARGIN };
 
-struct thermal_cap thermal_cap[CONFIG_VH_SCHED_MAX_CPU_NR] = {
-	[0 ... CONFIG_VH_SCHED_MAX_CPU_NR - 1].uclamp_max = SCHED_CAPACITY_SCALE,
-	[0 ... CONFIG_VH_SCHED_MAX_CPU_NR - 1].freq = UINT_MAX};
+unsigned int thermal_cap_freq[CONFIG_VH_SCHED_MAX_CPU_NR] = {
+	[0 ... CONFIG_VH_SCHED_MAX_CPU_NR - 1] = UINT_MAX };
+
+unsigned int sched_auto_uclamp_max[SCHED_AUTO_UCLAMP_MAX_NUM_TYPES][CONFIG_VH_SCHED_MAX_CPU_NR] = {
+	[0 ... SCHED_AUTO_UCLAMP_MAX_NUM_TYPES - 1] = {
+		[0 ... CONFIG_VH_SCHED_MAX_CPU_NR - 1] = SCHED_CAPACITY_SCALE }};
 
 unsigned int __read_mostly sched_per_task_iowait_boost_max_value = 0;
 
@@ -79,11 +80,16 @@ bool in_suspend_resume;
 unsigned int vh_sched_max_load_balance_interval;
 unsigned int vh_sched_min_granularity_ns;
 unsigned int vh_sched_wakeup_granularity_ns;
+unsigned int auto_uclamp_max_st_util_threshold;
+
+unsigned int vendor_sched_suspend_resume_boost = SCHED_CAPACITY_SCALE / 4;
 
 unsigned long schedutil_cpu_util_pixel_mod(int cpu, unsigned long util_cfs,
 				 unsigned long max, enum cpu_util_type type,
 				 struct task_struct *p);
 unsigned int map_scaling_freq(int cpu, unsigned int freq);
+
+inline unsigned int get_eff_auto_uclamp_max(struct task_struct *p, int cpu);
 
 extern void rvh_uclamp_eff_get_pixel_mod(void *data, struct task_struct *p, enum uclamp_id clamp_id,
 					 struct uclamp_se *uclamp_max, struct uclamp_se *uclamp_eff,
@@ -219,6 +225,23 @@ void set_next_buddy(struct sched_entity *se)
 			return;
 		cfs_rq_of(se)->next = se;
 	}
+}
+
+static void __clear_buddies_next(struct sched_entity *se)
+{
+	for_each_sched_entity(se) {
+		struct cfs_rq *cfs_rq = cfs_rq_of(se);
+		if (cfs_rq->next != se)
+			break;
+
+		cfs_rq->next = NULL;
+	}
+}
+
+static void clear_buddies(struct cfs_rq *cfs_rq, struct sched_entity *se)
+{
+	if (cfs_rq->next == se)
+		__clear_buddies_next(se);
 }
 
 static inline struct task_group *css_tg(struct cgroup_subsys_state *css)
@@ -832,6 +855,38 @@ static inline unsigned long cpu_vendor_group_util_est(int cpu, bool with, struct
 
 	return util_est;
 }
+
+bool update_auto_max_uclamp_st(struct task_struct *p)
+{
+	unsigned int task_util = max(task_runnable(p), task_util_est(p));
+	struct vendor_task_struct *vp = get_vendor_task_struct(p);
+
+	if (task_util < auto_uclamp_max_st_util_threshold) {
+		vp->auto_uclamp_max_flags &= ~AUTO_UCLAMP_MAX_FLAG_ST;
+		return false;
+	}
+
+	/*
+	 * Only do it if auto_uclamp_max_st_util_threshold is not 0 and
+	 * auto_uclamp_max_st is less than 1024.
+	 */
+	if (auto_uclamp_max_st_util_threshold &&
+	    sched_auto_uclamp_max[SCHED_AUTO_UCLAMP_MAX_ST][task_cpu(p)] < SCHED_CAPACITY_SCALE &&
+	    !(vp->auto_uclamp_max_flags & AUTO_UCLAMP_MAX_FLAG_ST) &&
+	    task_util >= auto_uclamp_max_st_util_threshold) {
+
+		/* Set AUTO_UCLAMP_MAX_FLAG_ST flag so we will only update the
+		 * uclamp once.
+		 */
+		vp->auto_uclamp_max_flags |= AUTO_UCLAMP_MAX_FLAG_ST;
+		uclamp_update_active_locked(p, UCLAMP_MAX);
+
+		return true;
+	}
+
+	return false;
+}
+
 #endif
 
 #if IS_ENABLED(CONFIG_UCLAMP_TASK) && IS_ENABLED(CONFIG_FAIR_GROUP_SCHED)
@@ -1551,13 +1606,14 @@ int find_energy_efficient_cpu(struct task_struct *p, int prev_cpu,
 	long cur_energy, best_energy = LONG_MAX;
 	unsigned long p_util_min = uclamp_is_used() ? uclamp_eff_value_pixel_mod(p, UCLAMP_MIN) : 0;
 	unsigned long p_util_max = uclamp_is_used() ? uclamp_eff_value_pixel_mod(p, UCLAMP_MAX) : 1024;
+	unsigned long p_util_max_orig = p_util_max;
 	unsigned long spare_cap, target_max_spare_cap = 0;
-	unsigned long task_importance = ((p->prio <= DEFAULT_PRIO) ? p_util_min : 0) + p_util_max;
+	unsigned long task_importance = SCHED_CAPACITY_SCALE;
 	unsigned int exit_lat, pd_best_exit_lat, best_exit_lat;
 	bool is_idle, task_fits, util_fits;
 	bool idle_target_found = false, importance_target_found = false;
 	bool prefer_idle = get_prefer_idle(p);
-	unsigned long capacity, wake_util, cpu_importance, pd_least_cpu_importantce;
+	unsigned long capacity, wake_util, next_util, cpu_importance, pd_least_cpu_importantce;
 #if IS_ENABLED(CONFIG_USE_GROUP_THROTTLE)
 	bool group_overutilize;
 	unsigned long group_capacity, wake_group_util;
@@ -1585,7 +1641,7 @@ int find_energy_efficient_cpu(struct task_struct *p, int prev_cpu,
 		prefer_fit = true;
 
 	for (; pd; pd = pd->next) {
-		unsigned long util_min = p_util_min, util_max = p_util_max;
+		unsigned long util_min = p_util_min, util_max = p_util_max_orig;
 		unsigned long rq_util_min, rq_util_max;
 		pd_max_spare_cap_running_rt = 0;
 		pd_max_spare_cap = 0;
@@ -1611,6 +1667,7 @@ int find_energy_efficient_cpu(struct task_struct *p, int prev_cpu,
 			cpu_importance = READ_ONCE(cpu_rq(i)->uclamp[UCLAMP_MIN].value) +
 					   READ_ONCE(cpu_rq(i)->uclamp[UCLAMP_MAX].value);
 			wake_util = cpu_util_without(i, p, capacity);
+			next_util = cpu_util_next(i, p, i);
 #if IS_ENABLED(CONFIG_USE_GROUP_THROTTLE)
 			group_capacity = cap_scale(get_task_group_throttle(p),
 					   arch_scale_cpu_capacity(i));
@@ -1652,8 +1709,10 @@ int find_energy_efficient_cpu(struct task_struct *p, int prev_cpu,
 			 * Consider auto_uclamp_max based on placing the task
 			 * on the ith cpu
 			 */
-			if (get_vendor_task_struct(p)->auto_uclamp_max_flags)
-				util_max = p_util_max = sched_auto_uclamp_max[i];
+			p_util_max = min(p_util_max_orig, get_eff_auto_uclamp_max(p, i));
+			util_max = p_util_max;
+
+			task_importance = ((p->prio <= DEFAULT_PRIO) ? p_util_min : 0) + p_util_max;
 
 			/*
 			 * Skip CPUs that cannot satisfy the capacity request.
@@ -1677,7 +1736,7 @@ int find_energy_efficient_cpu(struct task_struct *p, int prev_cpu,
 				util_max = max(rq_util_max, p_util_max);
 			}
 
-			util_fits = util_fits_cpu(wake_util, util_min, util_max, i);
+			util_fits = util_fits_cpu(next_util, util_min, util_max, i);
 
 
 			cfs_load = cpu_load(cpu_rq(i));
@@ -1833,7 +1892,7 @@ int find_energy_efficient_cpu(struct task_struct *p, int prev_cpu,
 				if (vendor_sched_npi_packing && !is_idle &&
 				    cpu_importance <= DEFAULT_IMPRATANCE_THRESHOLD &&
 				    spare_cap > pd_max_packing_spare_cap && capacity_curr_of(i) >=
-				    ((cpu_util_next(i, p, i) + cpu_util_rt(cpu_rq(i))) *
+				    ((next_util + cpu_util_rt(cpu_rq(i))) *
 				    sched_capacity_margin[i]) >> SCHED_CAPACITY_SHIFT) {
 					pd_max_packing_spare_cap = spare_cap;
 					pd_best_packing_cpu = i;
@@ -2119,19 +2178,52 @@ unsigned long map_util_freq_pixel_mod(unsigned long util, unsigned long freq,
 	return map_scaling_freq(cpu, freq);
 }
 
-static inline struct uclamp_se
+inline unsigned int get_eff_auto_uclamp_max(struct task_struct *p, int cpu)
+{
+	unsigned int uclamp_max_thermal = SCHED_CAPACITY_SCALE;
+	unsigned int uclamp_max_task = SCHED_CAPACITY_SCALE;
+	unsigned int uclamp_max_st = SCHED_CAPACITY_SCALE;
+	bool is_adpf = get_adpf(p, true);
+
+	if (!uclamp_is_used())
+		return SCHED_CAPACITY_SCALE;
+
+	/*
+	 * Adding 1 to ensure we can detect tasks that has
+	 * uclamp_max == uclamp_max_thermal in util_fits_cpu
+	 */
+	uclamp_max_thermal = sched_auto_uclamp_max[SCHED_AUTO_UCLAMP_MAX_THERMAL][cpu];
+	if (uclamp_max_thermal != SCHED_CAPACITY_SCALE) {
+		if (!is_adpf)
+			uclamp_max_thermal++;
+		else
+			uclamp_max_thermal = uclamp_max_thermal * thermal_cap_margin[cpu] >>
+					     SCHED_CAPACITY_SHIFT;
+	}
+
+	/* SCHED_AUTO_UCLAMP_MAX_TASK */
+	if (get_auto_uclamp_max_task(p) && !is_adpf)
+		uclamp_max_task = sched_auto_uclamp_max[SCHED_AUTO_UCLAMP_MAX_TASK][cpu];
+
+	/* SCHED_AUTO_UCLAMP_MAX_ST */
+	if (max(task_runnable(p), task_util_est(p)) < auto_uclamp_max_st_util_threshold)
+		uclamp_max_st = sched_auto_uclamp_max[SCHED_AUTO_UCLAMP_MAX_ST][cpu];
+
+	return min(uclamp_max_thermal, min(uclamp_max_task, uclamp_max_st));
+}
+
+inline struct uclamp_se
 uclamp_tg_restrict_pixel_mod(struct task_struct *p, enum uclamp_id clamp_id)
 {
 	struct uclamp_se uc_req = p->uclamp_req[clamp_id];
+
+#if IS_ENABLED(CONFIG_UCLAMP_TASK_GROUP)
 	struct vendor_task_struct *vp = get_vendor_task_struct(p);
 	struct vendor_inheritance_struct *vi = get_vendor_inheritance_struct(p);
 	bool is_adpf = get_adpf(p, true);
 	int i = 0;
-
-#if IS_ENABLED(CONFIG_UCLAMP_TASK_GROUP)
 	unsigned int tg_min, tg_max, vnd_min, vnd_max, value;
 	unsigned int nice_min = uclamp_none(UCLAMP_MIN), nice_max = uclamp_none(UCLAMP_MAX);
-	unsigned int thermal_uclamp_max = thermal_cap[task_cpu(p)].uclamp_max;
 
 	// Task prio specific restriction
 	get_uclamp_on_nice(p, UCLAMP_MIN, &nice_min);
@@ -2154,12 +2246,6 @@ uclamp_tg_restrict_pixel_mod(struct task_struct *p, enum uclamp_id clamp_id)
 	vnd_min = vg[vp->group].uc_req[UCLAMP_MIN].value;
 	vnd_max = is_adpf ?
 		uclamp_none(UCLAMP_MAX) : vg[vp->group].uc_req[UCLAMP_MAX].value;
-	if (get_auto_uclamp_max(p) && !is_adpf) {
-		vp->auto_uclamp_max_flags |= AUTO_UCLAMP_MAX_FLAG_GROUP;
-		vnd_max = sched_auto_uclamp_max[task_cpu(p)];
-	} else {
-		vp->auto_uclamp_max_flags &= ~AUTO_UCLAMP_MAX_FLAG_GROUP;
-	}
 
 	value = uc_req.value;
 	value = clamp(value, max(nice_min, max(tg_min, vnd_min)),
@@ -2175,7 +2261,7 @@ uclamp_tg_restrict_pixel_mod(struct task_struct *p, enum uclamp_id clamp_id)
 
 	/* Boost tasks during suspend/resume */
 	if (clamp_id == UCLAMP_MIN && in_suspend_resume)
-		value = max(value, SCHED_CAPACITY_SCALE/4);
+		value = max(value, vendor_sched_suspend_resume_boost);
 
 	// For uclamp min, if task has a valid per-task setting that is lower than or equal to its
 	// group value, increase the final uclamp value by 1. This would have effect only on
@@ -2184,15 +2270,8 @@ uclamp_tg_restrict_pixel_mod(struct task_struct *p, enum uclamp_id clamp_id)
 		&& value < SCHED_CAPACITY_SCALE)
 		value = value + 1;
 
-	// adding 1 to ensure we can detect tasks that has
-	// uclamp_max == thermal_uclamp_max in util_fits_cpu
-	if (clamp_id == UCLAMP_MAX && thermal_uclamp_max != SCHED_CAPACITY_SCALE) {
-		if (!is_adpf)
-			value = min(value, thermal_uclamp_max + 1);
-		else
-			value = min(value, min_t(unsigned int, SCHED_CAPACITY_SCALE, thermal_uclamp_max *
-					thermal_cap_margin[task_cpu(p)] >> SCHED_CAPACITY_SHIFT));
-	}
+	if (clamp_id == UCLAMP_MAX && !get_vendor_task_struct(p)->in_feec)
+		value = min(value, get_eff_auto_uclamp_max(p, task_cpu(p)));
 
 	// For low prio unthrottled task, reduce its uclamp.max by 1 which
 	// would affect task importance in cpu_rq thus affect task placement.
@@ -2284,6 +2363,7 @@ void initialize_vendor_group_property(void)
 		vg[i].qos_rampup_multiplier_enable = false;
 
 		vg[i].disable_sched_setaffinity = false;
+		vg[i].disable_sched_setaffinity_mask = false;
 		vg[i].use_batch_policy = false;
 	}
 
@@ -2305,14 +2385,17 @@ void rvh_check_preempt_wakeup_pixel_mod(void *data, struct rq *rq, struct task_s
 	if (!entity_is_task(se) || !entity_is_task(pse))
 		return;
 
-	if(!get_preempt_wakeup(task_of(se)) && get_preempt_wakeup(task_of(pse))) {
-		if (!next_buddy_marked)
-			set_next_buddy(pse);
+	/*
+	 * With NEXT_BUDDY enabled, pse could have been set next buddy already,
+	 * so clear it first to keep behavior sync.
+	 */
+	clear_buddies(cfs_rq_of(pse), pse);
 
+	if (!get_preempt_wakeup(task_of(se)) && get_preempt_wakeup(task_of(pse))) {
+		set_next_buddy(pse);
 		*preempt = true;
 		return;
 	}
-
 }
 
 void rvh_util_est_update_pixel_mod(void *data, struct cfs_rq *cfs_rq, struct task_struct *p,
@@ -2337,6 +2420,9 @@ void rvh_util_est_update_pixel_mod(void *data, struct cfs_rq *cfs_rq, struct tas
 		}
 
 		if (vp->ignore_util_est_update && rampup_multiplier)
+			return;
+
+		if (vp->state_dequeued & TASK_UNINTERRUPTIBLE)
 			return;
 	}
 
@@ -2499,11 +2585,17 @@ void vh_sched_uclamp_validate_pixel_mod(void *data, struct task_struct *tsk,
 
 	if (attr->sched_util_max != AUTO_UCLAMP_MAX_MAGIC) {
 		vtsk->auto_uclamp_max_flags &= ~AUTO_UCLAMP_MAX_FLAG_TASK;
-		return;
+		goto out;
 	}
 
 	*done = true;
 	*ret = 0;
+
+out:
+	if (is_vcpu_task(tsk)) {
+		*done = true;
+		*ret = -EPERM;
+	}
 }
 
 void vh_sched_setscheduler_uclamp_pixel_mod(void *data, struct task_struct *tsk, int clamp_id,
@@ -2522,7 +2614,7 @@ void vh_sched_setscheduler_uclamp_pixel_mod(void *data, struct task_struct *tsk,
 	if (clamp_id == UCLAMP_MAX && value == AUTO_UCLAMP_MAX_MAGIC) {
 		vtsk->auto_uclamp_max_flags |= AUTO_UCLAMP_MAX_FLAG_TASK;
 		uclamp_se_set(&tsk->uclamp_req[UCLAMP_MAX],
-			      sched_auto_uclamp_max[task_cpu(tsk)],
+			      sched_auto_uclamp_max[SCHED_AUTO_UCLAMP_MAX_TASK][task_cpu(tsk)],
 			      true);
 	}
 
@@ -2561,6 +2653,14 @@ void vh_dup_task_struct_pixel_mod(void *data, struct task_struct *tsk, struct ta
 		v_tsk->orig_prio = orig->static_prio;
 		v_tsk->orig_policy = orig->policy;
 	}
+}
+
+void vh_exit_check_pixel_mod(void *data, struct task_struct *tsk)
+{
+	struct vendor_task_struct *vp = get_vendor_task_struct(tsk);
+
+	kfree(vp->mp_stats);
+	vp->mp_stats = NULL;
 }
 
 void rvh_select_task_rq_fair_pixel_mod(void *data, struct task_struct *p, int prev_cpu, int sd_flag,
@@ -2611,7 +2711,9 @@ void rvh_select_task_rq_fair_pixel_mod(void *data, struct task_struct *p, int pr
 	}
 
 	if (sd_flag & SD_BALANCE_WAKE) {
+		get_vendor_task_struct(p)->in_feec = true;
 		*target_cpu = find_energy_efficient_cpu(p, prev_cpu, NULL);
+		get_vendor_task_struct(p)->in_feec = false;
 	}
 
 out:
@@ -2921,8 +3023,17 @@ void rvh_detach_entity_load_avg_pixel_mod(void *data, struct cfs_rq *cfs_rq,
 void rvh_update_load_avg_pixel_mod(void *data, u64 now, struct cfs_rq *cfs_rq,
 				   struct sched_entity *se)
 {
-	if (entity_is_task(se))
+	if (entity_is_task(se)) {
 		update_vendor_group_util(now, cfs_rq, se);
+
+		if (static_key_enabled(&per_task_memory_aware_enable)) {
+			struct task_struct *p = task_of(se);
+			struct vendor_task_struct *vp = get_vendor_task_struct(p);
+
+			if (se->avg.last_update_time && likely(vp->mp_stats))
+				__update_load_avg_mem_pressure(now, cfs_rq, se);
+		}
+	}
 }
 
 void rvh_remove_entity_load_avg_pixel_mod(void *data, struct cfs_rq *cfs_rq,
@@ -2947,7 +3058,7 @@ void rvh_enqueue_task_fair_pixel_mod(void *data, struct rq *rq, struct task_stru
 	if (!static_branch_unlikely(&enqueue_dequeue_ready))
 		return;
 
-	if (!task_on_rq_migrating(p)) {
+	if (!task_on_rq_migrating(p) && !(vp->state_dequeued & TASK_UNINTERRUPTIBLE)) {
 		u64 dequeue_time_ns = sched_clock() - vp->last_dequeue;
 		bool dequeued_enough = dequeue_time_ns >= NSEC_PER_MSEC;
 		bool util_reduced;
@@ -3013,7 +3124,9 @@ void rvh_dequeue_task_fair_pixel_mod(void *data, struct rq *rq, struct task_stru
 	if (!static_branch_unlikely(&enqueue_dequeue_ready))
 		return;
 
-	if (!task_on_rq_migrating(p)) {
+	vp->state_dequeued = READ_ONCE(p->__state);
+
+	if (!task_on_rq_migrating(p) && !(vp->state_dequeued & TASK_UNINTERRUPTIBLE)) {
 		vp->prev_sum_exec_runtime = p->se.sum_exec_runtime;
 		vp->prev_util_dequeued = vp->util_dequeued;
 		vp->util_dequeued = task_util(p);
@@ -3098,8 +3211,8 @@ static int find_target_cap(unsigned int freq, unsigned int cpu)
 	for_each_cpu(cpu, &em_cluster->cpus) {
 		pr_debug("updating CPU:%d uclamp value to :%u freq value to:%u \n",
 			cpu, target_cap, freq);
-		thermal_cap[cpu].uclamp_max = target_cap;
-		thermal_cap[cpu].freq = freq;
+		sched_auto_uclamp_max[SCHED_AUTO_UCLAMP_MAX_THERMAL][cpu] = target_cap;
+		thermal_cap_freq[cpu] = freq;
 	}
 
 	rcu_read_lock();
@@ -3150,7 +3263,7 @@ void update_thermal_freq_cap(unsigned int cpu)
 		return;
 
 	mutex_lock(&thermal_cap_mutex);
-	WARN_ON(!find_target_cap(thermal_cap[cpu].freq, cpu));
+	WARN_ON(!find_target_cap(thermal_cap_freq[cpu], cpu));
 	mutex_unlock(&thermal_cap_mutex);
 }
 EXPORT_SYMBOL_GPL(update_thermal_freq_cap);

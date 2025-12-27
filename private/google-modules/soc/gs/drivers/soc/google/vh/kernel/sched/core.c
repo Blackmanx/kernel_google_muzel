@@ -19,6 +19,8 @@
 #include "sched_priv.h"
 #include "sched_events.h"
 
+#include "../../../../../devfreq/google/governor_memlat.h"
+
 struct vendor_group_list vendor_group_list[VG_MAX];
 
 #if IS_ENABLED(CONFIG_UCLAMP_STATS)
@@ -27,6 +29,7 @@ extern void update_uclamp_stats(int cpu, u64 time);
 
 extern int find_energy_efficient_cpu(struct task_struct *p, int prev_cpu,
 		cpumask_t *valid_mask);
+
 /*
  * Ignore uclamp_min for CFS tasks if
  *
@@ -67,6 +70,10 @@ DEFINE_STATIC_KEY_FALSE(auto_migration_margins_enable);
 
 DEFINE_STATIC_KEY_FALSE(skip_inefficient_opps_enable);
 DEFINE_STATIC_KEY_FALSE(use_em_for_freq_mapping);
+
+DEFINE_STATIC_KEY_FALSE(per_task_memory_aware_enable);
+
+DEFINE_STATIC_KEY_FALSE(update_freq_on_idle_enable);
 
 #define vi_set_adpf(vi, type, value) \
     do { \
@@ -172,9 +179,19 @@ static inline void task_tick_uclamp(struct rq *rq, struct task_struct *curr) {}
 void vh_scheduler_tick_pixel_mod(void *data, struct rq *rq)
 {
 	struct rq_flags rf;
+	bool uclamp_st_updated = false;
+
 	rq_lock(rq, &rf);
 	task_tick_uclamp(rq, rq->curr);
 	__update_util_est_invariance(rq, rq->curr, true);
+	uclamp_st_updated = update_auto_max_uclamp_st(rq->curr);
+
+	if (uclamp_st_updated) {
+		/* rq clock is already updated */
+		rq_clock_skip_update(rq);
+		/* freq may have been updated in entity tick, so use force update here */
+		cpufreq_update_util(rq, SCHED_PIXEL_FORCE_UPDATE);
+	}
 	rq_unlock(rq, &rf);
 
 	/* Check if an RT task needs to move to a better fitting CPU */
@@ -191,13 +208,103 @@ void vh_scheduler_tick_pixel_mod(void *data, struct rq *rq)
 	gs_perf_mon_tick_update_counters();
 }
 
+void reset_task_pmu(struct task_struct *p)
+{
+	struct vendor_task_struct *vp = get_vendor_task_struct(p);
+
+	raw_spin_lock(&vp->lock);
+	memset(&vp->mp_stats->pmu_stats, 0, sizeof(struct pmu_stats_struct));
+	raw_spin_unlock(&vp->lock);
+}
+
+void finish_task_pmu(int cpu, struct task_struct *p, u64 cycle, u64 stall, u64 inst)
+{
+	struct vendor_task_struct *vp = get_vendor_task_struct(p);
+	s64 cycle_delta, stall_delta, inst_delta;
+	u64 last_cycle = vp->mp_stats->pmu_stats.last_cycle[pixel_cpu_to_cluster[cpu]];
+	u64 last_stall = vp->mp_stats->pmu_stats.last_stall[pixel_cpu_to_cluster[cpu]];
+	u64 last_inst = vp->mp_stats->pmu_stats.last_inst[pixel_cpu_to_cluster[cpu]];
+
+
+	/* not prepared yet */
+	if (last_cycle == 0)
+		return;
+
+	/* cycle should not be the same, but stall and inst could be. */
+	if (unlikely(cycle <= last_cycle || stall < last_stall || inst < last_inst))
+		return;
+
+	cycle_delta = cycle - last_cycle;
+	stall_delta = stall - last_stall;
+	inst_delta = inst - last_inst;
+
+	/* possibly overflow, reset the stats */
+	if (unlikely(cycle_delta < 0)) {
+		reset_task_pmu(p);
+		return;
+	}
+
+	/* cycle delta should always > other delta */
+	if (unlikely(cycle_delta <= stall_delta || cycle_delta <= inst_delta))
+		return;
+
+	raw_spin_lock(&vp->lock);
+	vp->mp_stats->pmu_stats.cycle[pixel_cpu_to_cluster[cpu]] += cycle_delta;
+	vp->mp_stats->pmu_stats.stall[pixel_cpu_to_cluster[cpu]] += stall_delta;
+	vp->mp_stats->pmu_stats.inst[pixel_cpu_to_cluster[cpu]] += inst_delta;
+	raw_spin_unlock(&vp->lock);
+	trace_per_task_pmu_stats(p, cpu, cycle_delta, stall_delta, inst_delta);
+}
+
+void prepare_task_pmu(int cpu, struct task_struct *p, u64 cycle, u64 stall, u64 inst)
+{
+	struct vendor_task_struct *vp = get_vendor_task_struct(p);
+
+	raw_spin_lock(&vp->lock);
+	vp->mp_stats->pmu_stats.last_cycle[pixel_cpu_to_cluster[cpu]] = cycle;
+	vp->mp_stats->pmu_stats.last_stall[pixel_cpu_to_cluster[cpu]] = stall;
+	vp->mp_stats->pmu_stats.last_inst[pixel_cpu_to_cluster[cpu]] = inst;
+	raw_spin_unlock(&vp->lock);
+}
+
+void update_task_pmu(int cpu, struct task_struct *prev, struct task_struct *next)
+{
+	u64 cycle, stall, inst;
+
+	if (read_perf_event_local(cpu, CORE_INST_INDEX, &inst) ||
+	    read_perf_event_local(cpu, CORE_STALL_INDEX, &stall) ||
+	    read_perf_event_local(cpu, CORE_CYCLE_INDEX, &cycle))
+		return;
+
+	if (likely(get_vendor_task_struct(prev)->mp_stats))
+		finish_task_pmu(cpu, prev, cycle, stall, inst);
+	if (likely(get_vendor_task_struct(next)->mp_stats))
+		prepare_task_pmu(cpu, next, cycle, stall, inst);
+}
+
 void vh_sched_switch_pixel_mod(void *data, bool preempt, struct task_struct *prev,
 			       struct task_struct *next, unsigned int prev_state)
 {
+	bool force_cpufreq_update = false;
 	struct rq *rq = task_rq(prev);
 
-	if (task_is_running(prev))
+	if (static_branch_likely(&update_freq_on_idle_enable) && !in_suspend_resume)
+		force_cpufreq_update = is_idle_task(next) || is_idle_task(prev);
+
+	if (task_is_running(prev)) {
 		__update_util_est_invariance(rq, prev, rq->nr_running > 1);
+		force_cpufreq_update |= update_auto_max_uclamp_st(prev);
+	}
+
+	force_cpufreq_update |= update_auto_max_uclamp_st(next);
+
+	if (force_cpufreq_update) {
+		/* freq may have been updated in set/put task, so use force update here */
+		cpufreq_update_util(rq, SCHED_PIXEL_FORCE_UPDATE);
+	}
+
+	if (static_key_enabled(&per_task_memory_aware_enable))
+		update_task_pmu(cpu_of(rq), prev, next);
 }
 
 void rvh_enqueue_task_pixel_mod(void *data, struct rq *rq, struct task_struct *p, int flags)
@@ -384,7 +491,8 @@ static void set_performance_inheritance(struct task_struct *p, struct task_struc
 void vh_binder_set_priority_pixel_mod(void *data, struct binder_transaction *t,
 	struct task_struct *p)
 {
-	get_vendor_task_struct(p)->is_binder_task = true;
+	if (!t->is_nested)
+		get_vendor_task_struct(p)->is_binder_task = true;
 
 	if (!t->from)
 		return;

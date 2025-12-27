@@ -15,7 +15,7 @@ ifneq ($(wildcard $(TRUSTY_SYMVERS)),)
 EXTRA_SYMBOLS += $(TRUSTY_SYMVERS)
 endif
 
-GSA_SYMVERS = $(OUT_DIR)/../private/google-modules/soc/gs/drivers/soc/google/gsa/Module.symvers
+GSA_SYMVERS = $(OUT_DIR)/../private/google-modules/soc/gs/drivers/soc/google/gsa/gsa_ko_Module.symvers
 ifneq ($(wildcard $(GSA_SYMVERS)),)
 EXTRA_SYMBOLS += $(GSA_SYMVERS)
 endif

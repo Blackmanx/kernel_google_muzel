@@ -28,9 +28,23 @@ __BEGIN_CDECLS
 #define FWTP_MAX_STRING_TABLE_SIZE (1024 * 1024)
 
 /**
+ * DOC: FWTP IPC clients
+ *
+ * FWTP provides a set of services that may be used by clients to make requests
+ * using IPC. These services may be used to get the tracepoint string table or
+ * print tracepoints.
+ *
+ * In order to use these services, an FWTP client initializes a
+ * &struct fwtp_ipc_client record and registers it using
+ * fwtp_ipc_client_register(). When an FWTP client is done using FWTP, it should
+ * unregister using fwtp_ipc_client_unregister().
+ */
+
+/**
  * struct fwtp_ipc_client - Structure representing an FWTP IPC client.
  *
  * @fwtp_if: FWTP IPC interface.
+ * @string_table_num: String table number.
  * @string_table: Table of tracepoint strings.
  * @string_table_offset: Offset of start of string table.
  * @string_table_size: Size of string table.
@@ -39,6 +53,7 @@ __BEGIN_CDECLS
  */
 struct fwtp_ipc_client {
 	struct fwtp_if fwtp_if;
+	int string_table_num;
 	char *string_table;
 	uint32_t string_table_offset;
 	int string_table_size;
@@ -52,6 +67,8 @@ void fwtp_ipc_client_unregister(struct fwtp_ipc_client *fwtp_ipc_client);
 fwtp_error_code_t
 fwtp_ipc_client_print_tracepoints(struct fwtp_ipc_client *fwtp_ipc_client,
 				  struct fwtp_printer_ctx *printer_ctx);
+void fwtp_ipc_client_printer_ctx_init(struct fwtp_ipc_client *fwtp_ipc_client,
+				      struct fwtp_printer_ctx *printer_ctx);
 
 /**
  * FWTP_IPC_CLIENT_LOG_ERR - Logs an error message for an FWTP IPC client.

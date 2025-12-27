@@ -62,8 +62,6 @@ ddk_module(
     deps = [
         ":tracepoint_header",
         "//common:all_headers_aarch64",
-        "//private/google-modules/perf:gs_perf_headers",
-        "//private/google-modules/perf/core/gs_domain_idle",
         "//private/google-modules/soc/rdo:rdo_soc_headers",
         "//private/google-modules/soc/rdo:rdo_soc_module",
     ],

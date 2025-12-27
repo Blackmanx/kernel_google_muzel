@@ -200,6 +200,7 @@ static struct samsung_dma_heap *__samsung_heap_add(struct device *dev, void *pri
 	pr_info("Registered %s dma-heap successfully\n", heap_name);
 
 	dma_coerce_mask_and_coherent(dma_heap_get_dev(heap->dma_heap), DMA_BIT_MASK(36));
+	dma_set_max_seg_size(dma_heap_get_dev(heap->dma_heap), UINT_MAX);
 
 	return heap;
 }

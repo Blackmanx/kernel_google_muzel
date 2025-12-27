@@ -28,6 +28,11 @@
 
 #include "i2c-designware-core.h"
 
+#define CREATE_TRACE_POINTS
+#define I2C_COMMON_TRACES
+#include "i2c-trace.h"
+#undef I2C_COMMON_TRACES
+
 static char *abort_sources[] = {
 	[ABRT_7B_ADDR_NOACK] =
 		"slave address not acknowledged (7bit mode)",
@@ -422,9 +427,8 @@ int i2c_dw_set_sda_hold(struct dw_i2c_dev *dev)
 		if (!(dev->sda_hold_time & DW_IC_SDA_HOLD_RX_MASK))
 			dev->sda_hold_time |= 1 << DW_IC_SDA_HOLD_RX_SHIFT;
 
-		dev_dbg(dev->dev, "SDA Hold Time TX:RX = %d:%d\n",
-			dev->sda_hold_time & ~(u32)DW_IC_SDA_HOLD_RX_MASK,
-			dev->sda_hold_time >> DW_IC_SDA_HOLD_RX_SHIFT);
+		trace_i2c_dw_set_sda_hold(dev, dev->sda_hold_time & ~(u32)DW_IC_SDA_HOLD_RX_MASK,
+					  dev->sda_hold_time >> DW_IC_SDA_HOLD_RX_SHIFT);
 	} else if (dev->set_sda_hold_time) {
 		dev->set_sda_hold_time(dev);
 	} else if (dev->sda_hold_time) {

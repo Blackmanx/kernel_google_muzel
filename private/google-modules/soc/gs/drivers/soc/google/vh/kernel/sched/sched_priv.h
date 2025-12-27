@@ -16,12 +16,27 @@
 #define LIST_QUEUED         0xa5a55a5a
 #define LIST_NOT_QUEUED     0x5a5aa5a5
 #define LIB_PATH_LENGTH 512
+#define SCHED_AUTO_UCLAMP_MAX_TASK	0
+#define SCHED_AUTO_UCLAMP_MAX_THERMAL	1
+#define SCHED_AUTO_UCLAMP_MAX_ST	2
+#define SCHED_AUTO_UCLAMP_MAX_NUM_TYPES	3
+
+#if IS_ENABLED(CONFIG_TICK_DRIVEN_LATGOV)
+#define CORE_CYCLE_INDEX	PERF_CYCLE_IDX
+#define CORE_STALL_INDEX	PERF_STALL_BACKEND_MEM_IDX
+#define CORE_INST_INDEX		PERF_INST_IDX
+#else
+#define CORE_CYCLE_INDEX	CYCLE_IDX
+#define CORE_STALL_INDEX	STALL_IDX
+#define CORE_INST_INDEX		INST_IDX
+#endif
 
 /*
  * For cpu running normal tasks, its uclamp.min will be 0 and uclamp.max will be 1024,
  * and the sum will be 1024. We use this as index that cpu is not running important tasks.
  */
 #define DEFAULT_IMPRATANCE_THRESHOLD	1024
+#define MAX_CPU_IMPORTANCE		(DEFAULT_IMPRATANCE_THRESHOLD << 1)
 
 /*
  * Sets uclamp_max to the task based on the most efficient point of the CPU the
@@ -30,7 +45,7 @@
 #define AUTO_UCLAMP_MAX_MAGIC		-2
 
 #define AUTO_UCLAMP_MAX_FLAG_TASK	BIT(0)
-#define AUTO_UCLAMP_MAX_FLAG_GROUP	BIT(1)
+#define AUTO_UCLAMP_MAX_FLAG_ST		BIT(1)
 
 #define UCLAMP_BUCKET_DELTA DIV_ROUND_CLOSEST(SCHED_CAPACITY_SCALE, UCLAMP_BUCKETS)
 
@@ -60,11 +75,12 @@
 		      __val / DIV_ROUND_CLOSEST(SCHED_CAPACITY_SCALE, UCLAMP_BUCKETS),	      \
 		      UCLAMP_BUCKETS - 1)
 
+extern unsigned int
+	sched_auto_uclamp_max[SCHED_AUTO_UCLAMP_MAX_NUM_TYPES][CONFIG_VH_SCHED_MAX_CPU_NR];
 extern unsigned int thermal_cap_margin[CONFIG_VH_SCHED_MAX_CPU_NR];
 extern unsigned int sched_capacity_margin[CONFIG_VH_SCHED_MAX_CPU_NR];
 extern unsigned int sched_auto_fits_capacity[CONFIG_VH_SCHED_MAX_CPU_NR];
 extern unsigned int sched_dvfs_headroom[CONFIG_VH_SCHED_MAX_CPU_NR];
-extern unsigned int sched_auto_uclamp_max[CONFIG_VH_SCHED_MAX_CPU_NR];
 extern unsigned int sched_per_cpu_iowait_boost_max_value[CONFIG_VH_SCHED_MAX_CPU_NR];
 extern unsigned int sched_per_task_iowait_boost_max_value;
 extern unsigned int vendor_sched_adpf_rampup_multiplier;
@@ -76,7 +92,6 @@ extern int *pixel_cluster_cpu_num;
 extern int *pixel_cpu_to_cluster;
 extern int *pixel_cluster_enabled;
 extern unsigned int *pixel_cpd_exit_latency;
-extern struct thermal_cap thermal_cap[CONFIG_VH_SCHED_MAX_CPU_NR];
 
 extern unsigned int vh_sched_max_load_balance_interval;
 extern unsigned int vh_sched_min_granularity_ns;
@@ -86,14 +101,27 @@ extern raw_spinlock_t boost_at_fork_task_name_lock;
 extern unsigned long vendor_sched_boost_at_fork_value;
 extern unsigned long vendor_sched_boost_at_fork_duration;
 
+extern unsigned int auto_uclamp_max_st_util_threshold;
+
+extern bool in_suspend_resume;
+extern unsigned int vendor_sched_suspend_resume_boost;
+
 DECLARE_STATIC_KEY_FALSE(auto_migration_margins_enable);
 DECLARE_STATIC_KEY_FALSE(auto_dvfs_headroom_enable);
 
+DECLARE_STATIC_KEY_FALSE(per_task_memory_aware_enable);
 
 unsigned long approximate_util_avg(unsigned long util, u64 delta);
 u64 approximate_runtime(unsigned long util);
-inline void __reset_task_affinity(struct task_struct *p);
+inline void __reset_task_affinity(struct task_struct *p, const struct cpumask *in_mask);
 bool should_boost_at_fork(struct task_struct *p);
+bool is_vcpu_task(struct task_struct *p);
+
+extern bool update_auto_max_uclamp_st(struct task_struct *p);
+
+extern int read_perf_event_local(int cpu, unsigned int event_id, u64 *count);
+
+extern int __update_load_avg_mem_pressure(u64 now, struct cfs_rq *cfs_rq, struct sched_entity *se);
 
 #define cpu_overutilized(cap, max, cpu)	\
 		((cap) * sched_capacity_margin[cpu] > (max) << SCHED_CAPACITY_SHIFT)
@@ -214,6 +242,7 @@ struct vendor_group_property {
 	bool qos_rampup_multiplier_enable;
 
 	bool disable_sched_setaffinity;
+	bool disable_sched_setaffinity_mask;
 	bool use_batch_policy;
 };
 
@@ -278,8 +307,9 @@ enum VENDOR_TUNABLE_TYPE {
 	SCHED_AUTO_UCLAMP_MAX,
 	SCHED_DVFS_HEADROOM,
 	SCHED_IOWAIT_BOOST_MAX,
-	TEO_UTIL_THRESHOLD,
-	THERMAL_CAP_MARGIN,
+	SCHED_TEO_UTIL_THRESHOLD,
+	SCHED_THERMAL_CAP_MARGIN,
+	SCHED_MAX_UCLAMP_ST,
 };
 
 #if !IS_ENABLED(CONFIG_USE_VENDOR_GROUP_UTIL)
@@ -303,6 +333,8 @@ DECLARE_STATIC_KEY_FALSE(enqueue_dequeue_ready);
 
 DECLARE_STATIC_KEY_FALSE(skip_inefficient_opps_enable);
 DECLARE_STATIC_KEY_FALSE(use_em_for_freq_mapping);
+
+DECLARE_STATIC_KEY_FALSE(update_freq_on_idle_enable);
 
 /*
  * Any governor that relies on util signal to drive DVFS, must populate these
@@ -519,7 +551,8 @@ static inline int util_fits_cpu(unsigned long util,
 	 */
 	uclamp_max_fits = (capacity_orig == SCHED_CAPACITY_SCALE) && (uclamp_max == SCHED_CAPACITY_SCALE);
 	uclamp_max_fits = !uclamp_max_fits && (uclamp_max <= capacity_orig);
-	uclamp_max_fits = uclamp_max_fits && (uclamp_max <= thermal_cap[cpu].uclamp_max);
+	uclamp_max_fits = uclamp_max_fits &&
+			  (uclamp_max <= sched_auto_uclamp_max[SCHED_AUTO_UCLAMP_MAX_THERMAL][cpu]);
 	fits = fits || uclamp_max_fits;
 
 	/*
@@ -713,11 +746,12 @@ static inline bool get_preempt_wakeup(struct task_struct *p)
 	       vi->preempt_wakeup) && vg[vp->group].qos_preempt_wakeup_enable;
 }
 
-static inline bool get_auto_uclamp_max(struct task_struct *p)
+static inline bool get_auto_uclamp_max_task(struct task_struct *p)
 {
 	struct vendor_task_struct *vp = get_vendor_task_struct(p);
 
 	return vg[vp->group].auto_uclamp_max ||
+	       (vp->auto_uclamp_max_flags & AUTO_UCLAMP_MAX_FLAG_TASK) ||
 	       (vp->sched_qos_user_defined_flag & BIT(SCHED_QOS_AUTO_UCLAMP_MAX_BIT) &&
 		vg[vp->group].qos_auto_uclamp_max_enable);
 }
@@ -768,6 +802,11 @@ static inline bool get_prefer_high_cap(struct task_struct *p)
 	return get_vendor_task_struct(p)->prefer_high_cap;
 }
 
+static inline unsigned long get_mem_pressure(struct task_struct *p)
+{
+	return get_vendor_task_struct(p)->mp_stats->mp.mem_pressure_avg;
+}
+
 static inline void init_vendor_inheritance_struct(struct vendor_inheritance_struct *vi)
 {
 	int i;
@@ -811,31 +850,19 @@ static inline void init_vendor_task_struct(struct vendor_task_struct *v_tsk)
 	/* Then explicitly set what we expect init value to be */
 	raw_spin_lock_init(&v_tsk->lock);
 	v_tsk->group = VG_SYSTEM;
-	v_tsk->direct_reclaim_ts = 0;
 	INIT_LIST_HEAD(&v_tsk->node);
 	v_tsk->queued_to_list = LIST_NOT_QUEUED;
-	v_tsk->prefer_high_cap = false;
-	v_tsk->auto_uclamp_max_flags = 0;
-	v_tsk->uclamp_filter.uclamp_min_ignored = 0;
-	v_tsk->uclamp_filter.uclamp_max_ignored = 0;
-	v_tsk->iowait_boost = 0;
-	v_tsk->is_binder_task = false;
 	v_tsk->runnable_start_ns = -1;
-	v_tsk->delta_exec = 0;
-	v_tsk->util_enqueued = 0;
-	v_tsk->util_dequeued = 0;
-	v_tsk->prev_util_dequeued = 0;
-	v_tsk->ignore_util_est_update = false;
 	v_tsk->rampup_multiplier = 1;
 	v_tsk->sched_qos_profile = SCHED_QOS_NONE;
-	v_tsk->sched_qos_user_defined_flag = 0;
-	v_tsk->prev_sched_qos_user_defined_flag = 0;
 	init_vendor_inheritance_struct(&v_tsk->vi);
-	v_tsk->adpf_adj = 0;
-	v_tsk->real_cap_avg = 0;
-	v_tsk->real_cap_update_ns = 0;
-	v_tsk->real_cap_total_ns = 0;
-	v_tsk->boost_at_fork_start_ns = 0;
+	v_tsk->mp_stats = kzalloc(sizeof(struct mem_pressure_stats), GFP_ATOMIC);
+	if (!v_tsk->mp_stats) {
+		struct task_struct *p;
+
+		p = __container_of(v_tsk, struct task_struct, android_vendor_data1);
+		pr_err("Failed to alloc mem_pressure_stats for %s[%d]\n", p->comm, p->pid);
+	}
 }
 
 extern u64 sched_slice(struct cfs_rq *cfs_rq, struct sched_entity *se);
@@ -1043,35 +1070,9 @@ static inline bool uclamp_is_ignore_uclamp_max(struct task_struct *p)
 
 static inline bool apply_uclamp_filters(struct rq *rq, struct task_struct *p)
 {
-	int auto_uclamp_max = get_vendor_task_struct(p)->auto_uclamp_max_flags;
 	unsigned long rq_uclamp_min = rq->uclamp[UCLAMP_MIN].value;
 	unsigned long rq_uclamp_max = rq->uclamp[UCLAMP_MAX].value;
 	bool force_cpufreq_update;
-
-	/*
-	 * For AUTO_UCLAMP_MAX_FLAG_GROUP the effective value should have been
-	 * updated correctly already by uclamp_rq_inc_id() by GKI. But for
-	 * per-task auto_uclamp_max we need to ensure we update
-	 * p->uclamp_req[] to reflect the CPU we are currently running on.
-	 */
-	if (auto_uclamp_max & AUTO_UCLAMP_MAX_FLAG_TASK) {
-		/* GKI has incremented it already, undo that */
-		uclamp_rq_dec_id(rq, p, UCLAMP_MAX);
-
-		/* update uclamp_max if set to auto */
-		uclamp_se_set(&p->uclamp_req[UCLAMP_MAX],
-			      sched_auto_uclamp_max[task_cpu(p)], true);
-
-		/*
-		 * re-apply uclamp_max applying the potentially new
-		 * auto value
-		 */
-		uclamp_rq_inc_id(rq, p, UCLAMP_MAX);
-
-		/* Reset clamp idle holding when there is one RUNNABLE task */
-		if (rq->uclamp_flags & UCLAMP_FLAG_IDLE)
-			rq->uclamp_flags &= ~UCLAMP_FLAG_IDLE;
-	}
 
 	/*
 	 * We can't ignore uclamp_min or uclamp_max individually without side

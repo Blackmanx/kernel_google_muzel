@@ -737,7 +737,6 @@ static void pixel_ufs_prepare_command(void *data, struct ufs_hba *hba,
 			struct request *rq, struct ufshcd_lrb *lrbp, int *err)
 {
 	struct pixel_ufs *ufs = to_pixel_ufs(hba);
-	static const blk_opf_t wb_flags = REQ_META | REQ_PRIO;
 	u8 opcode;
 
 	*err = 0;
@@ -747,12 +746,20 @@ static void pixel_ufs_prepare_command(void *data, struct ufs_hba *hba,
 
 	/*
 	 * Set the group number to 0x11, if set_gid is,
-	 *  1: WB_GID_SEL for REQ_META | REQ_PRIO requests,
+	 *  1: WB_GID_SEL for (REQ_META & REQ_PRIO) | (REQ_SYNC & REQ_IDLE) requests,
 	 *  2: WB_GID_ALL for all the requests.
 	 */
-	if (ufs->set_gid == WB_GID_SEL &&
-	    (rq->cmd_flags & wb_flags) != wb_flags)
-		return;
+	if (ufs->set_gid == WB_GID_SEL) {
+		/* Activate writebooster for high-priority requests. */
+		const blk_opf_t high_prio_flags = REQ_META | REQ_PRIO;
+		/* Activate writebooster for direct_IO requests. */
+		const blk_opf_t direct_io_flags = REQ_SYNC | REQ_IDLE;
+		bool use_wb = (rq->cmd_flags & high_prio_flags) == high_prio_flags ||
+			 (rq->cmd_flags & direct_io_flags) == direct_io_flags;
+
+		if (!use_wb)
+			return;
+	}
 
 	/* Do not set the group number for zoned logical units. */
 	if (blk_queue_is_zoned(rq->q))
@@ -1138,6 +1145,8 @@ static ssize_t set_gid_store(struct device *dev,
 	if (i == ufs->set_gid)
 		return count;
 
+	ufshcd_rpm_get_sync(hba);
+
 	/* 0: disable, 1: enable selectively, 2: always */
 	opcode = i != WB_GID_DISABLE ? UPIU_QUERY_OPCODE_SET_FLAG :
 			   UPIU_QUERY_OPCODE_CLEAR_FLAG;
@@ -1146,6 +1155,9 @@ static ssize_t set_gid_store(struct device *dev,
 				QUERY_FLAG_IDN_WB_BUFF_FLUSH_DURING_HIBERN8,
 				index, NULL);
 	ufs->set_gid = i;
+
+	ufshcd_rpm_put_sync(hba);
+
 	return count;
 }
 
@@ -2082,12 +2094,6 @@ static void pixel_ufs_update_sysfs(void *data, struct ufs_hba *hba)
 	queue_work(system_highpri_wq, &ufs->update_sysfs_work);
 }
 
-static void pixel_ufs_update_sdev(void *data, struct scsi_device *sdev)
-{
-	/* do not use slow FUA */
-	sdev->broken_fua = 1;
-}
-
 void pixel_print_cmd_log(struct ufs_hba *hba)
 {
 	struct pixel_ufs *ufs = to_pixel_ufs(hba);
@@ -2172,11 +2178,6 @@ int pixel_init(struct ufs_hba *hba, struct device *pdev,
 
 	ret = register_trace_android_vh_ufs_check_int_errors(
 				pixel_ufs_check_int_errors, NULL);
-	if (ret)
-		return ret;
-
-	ret = register_trace_android_vh_ufs_update_sdev(
-				pixel_ufs_update_sdev, NULL);
 	if (ret)
 		return ret;
 

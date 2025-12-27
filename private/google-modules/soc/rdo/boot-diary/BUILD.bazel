@@ -1,0 +1,33 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+
+load("//build/kernel/kleaf:kernel.bzl", "ddk_module")
+
+filegroup(
+    name = "google_boot_diary.kconfig",
+    srcs = [
+        "Kconfig",
+    ],
+    visibility = [
+        "//private/google-modules/soc/rdo:__subpackages__",
+    ],
+)
+
+ddk_module(
+    name = "google_boot_diary",
+    out = "google_boot_diary.ko",
+    conditional_srcs = {
+        "CONFIG_GOOGLE_BOOT_DIARY": {
+            True: [
+                "google_boot_diary.c",
+                "google_boot_diary.h",
+            ],
+        },
+    },
+    kernel_build = "//private/devices/google/common:kernel",
+    visibility = [
+        "//private/devices/google:__subpackages__",
+    ],
+    deps = [
+        "//common:all_headers_aarch64",
+    ],
+)

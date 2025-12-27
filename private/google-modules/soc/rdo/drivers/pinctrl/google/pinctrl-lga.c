@@ -252,7 +252,7 @@ static const struct google_pinctrl_soc_sswrp_info google_lga_pinctrl_hsios_stby 
 	.pins_excl_regs = hsios_stby_pins_excl_regs,
 	.npins_excl_regs = ARRAY_SIZE(hsios_stby_pins_excl_regs)
 #endif
-	};
+};
 
 static const struct pinctrl_pin_desc google_lga_hsios[] = {
 	PINCTRL_PIN(0, "XHSIOS_UFS_RESETB"),

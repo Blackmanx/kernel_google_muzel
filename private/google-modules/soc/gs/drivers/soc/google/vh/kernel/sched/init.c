@@ -13,6 +13,7 @@
 #include <linux/suspend.h>
 #include <trace/hooks/binder.h>
 #include <trace/hooks/cgroup.h>
+#include <trace/hooks/dtask.h>
 #include <trace/hooks/sched.h>
 #include <trace/hooks/suspend.h>
 #include <trace/hooks/topology.h>
@@ -88,6 +89,8 @@ extern void vh_dump_throttled_rt_tasks_mod(void *data, int cpu, u64 clock, ktime
 #if IS_ENABLED(CONFIG_RVH_SCHED_LIB)
 extern void rvh_sched_setaffinity_mod(void *data, struct task_struct *task,
 					const struct cpumask *in_mask, int *res);
+extern void rvh_set_cpus_allowed_ptr_mod(void *data, struct task_struct *task,
+					struct affinity_context *ctx, bool *skip_user_ptr);
 #endif /* IS_ENABLED(CONFIG_RVH_SCHED_LIB) */
 
 extern void rvh_set_cpus_allowed_by_task(void *data, const struct cpumask *cpu_valid_mask,
@@ -124,10 +127,10 @@ extern void register_set_cluster_enabled_cb(void (*func)(int, int));
 #endif
 extern void vh_sched_resume_end(void *data, void *unused);
 extern void vh_set_task_comm_pixel_mod(void *data, struct task_struct *p);
+extern void vh_exit_check_pixel_mod(void *data, struct task_struct *tsk);
 
 extern struct cpufreq_governor sched_pixel_gov;
 extern bool wait_for_init;
-extern bool in_suspend_resume;
 
 int pixel_cpu_num;
 int pixel_cluster_num;
@@ -391,6 +394,7 @@ static int vh_sched_init(void)
 	 */
 
 	REGISTER_TRACE_VH(dup_task_struct, vh_dup_task_struct_pixel_mod);
+	REGISTER_TRACE_VH(exit_check, vh_exit_check_pixel_mod);
 
 	/*
 	 * Heavy handed, but necessary. We want to initialize our private data
@@ -461,6 +465,7 @@ static int vh_sched_init(void)
 
 #if IS_ENABLED(CONFIG_RVH_SCHED_LIB)
 	REGISTER_TRACE_RVH(sched_setaffinity, rvh_sched_setaffinity_mod);
+	REGISTER_TRACE_RVH(set_cpus_allowed_ptr, rvh_set_cpus_allowed_ptr_mod);
 #endif /* IS_ENABLED(CONFIG_RVH_SCHED_LIB) */
 
 	REGISTER_TRACE_VH(binder_set_priority, vh_binder_set_priority_pixel_mod);
@@ -495,6 +500,9 @@ static int vh_sched_init(void)
 	sysctl_sched_features &= ~(1UL << __SCHED_FEAT_TTWU_QUEUE);
 	static_key_disable(&sched_feat_keys[__SCHED_FEAT_TTWU_QUEUE]);
 
+	// Enable NEXT_BUDDY
+	sysctl_sched_features |= (1UL << __SCHED_FEAT_NEXT_BUDDY);
+	static_key_enable(&sched_feat_keys[__SCHED_FEAT_NEXT_BUDDY]);
 	return 0;
 }
 

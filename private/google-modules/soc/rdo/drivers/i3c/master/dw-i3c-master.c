@@ -96,17 +96,17 @@
 #define QUEUE_THLD_CTRL			0x1c
 #define QUEUE_THLD_CTRL_IBI_STAT_MASK	GENMASK(31, 24)
 #define QUEUE_THLD_CTRL_IBI_STAT(x)	(((x) - 1) << 24)
-#define QUEUE_THLD_CTRL_IBI_DATA_MASK	GENMASK(20, 16)
-#define QUEUE_THLD_CTRL_IBI_DATA(x)	((x) << 16)
+#define QUEUE_THLD_CTRL_IBI_DATA_MASK	GENMASK(23, 16)
+#define QUEUE_THLD_CTRL_IBI_DATA(x)	(((x) & GENMASK(8, 0)) << 16)
 #define QUEUE_THLD_CTRL_RESP_BUF_MASK	GENMASK(15, 8)
-#define QUEUE_THLD_CTRL_RESP_BUF(x)	(((x) - 1) << 8)
+#define QUEUE_THLD_CTRL_RESP_BUF(x)	((((x) - 1) & GENMASK(8, 0)) << 8)
 #define QUEUE_THLD_CTRL_CMD_EMPTY_BUF_MASK GENMASK(7, 0)
-#define QUEUE_THLD_CTRL_CMD_EMPTY_BUF(x) ((x) - 1)
+#define QUEUE_THLD_CTRL_CMD_EMPTY_BUF(x) (((x) - 1) & GENMASK(7, 0))
 
 #define DATA_BUFFER_THLD_CTRL		0x20
 #define DATA_BUFFER_THLD_CTRL_TX_BUF(x) ((x) & GENMASK(2, 0))
 #define DATA_BUFFER_THLD_CTRL_TX_BUF_MASK GENMASK(2, 0)
-#define DATA_BUFFER_THLD_CTRL_RX_BUF(x) (((x) & GENMASK(10, 8)) >> 8)
+#define DATA_BUFFER_THLD_CTRL_RX_BUF(x) (((x) << 8) & GENMASK(10, 8))
 #define DATA_BUFFER_THLD_CTRL_RX_BUF_MASK GENMASK(10, 8)
 
 #define INTR_DATA_BUF_THLD_1		0x0
@@ -330,7 +330,7 @@ static void dump_regs_locked(struct dw_i3c_master *master)
 	tmp = readl(master->regs + regs2read[DCT_PTR_I]);
 	dct_addr = tmp & 0xFFF;
 	dct_size = (tmp >> 12) & 0x7F;	/* Size in bytes */
-	dct_devs_n = dct_size / 16;	/* 4 regs x 8 bytes = 16 bytes per device */
+	dct_devs_n = dct_size / 16;	/* 4 regs x 4 bytes (32 bits) = 16 bytes per device */
 
 	dev_err(master->dev, "regs:");
 	for (i = 0; i < DUMP_REGS_NUM; ++i)

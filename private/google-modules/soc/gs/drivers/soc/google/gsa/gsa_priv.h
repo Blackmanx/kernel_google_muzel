@@ -44,6 +44,7 @@ struct gsa_dev_state {
 	struct gsa_tz_chan_ctx dsp_srv;
 	struct gsa_log *log;
 	struct gsa_cdev cdev_ioctl_node;
+	struct gsa_cdev cdev_pm_stats_node;
 #if IS_ENABLED(CONFIG_GSA_DEBUGFS)
 	struct dentry *debugfs_dir;
 #endif
@@ -56,5 +57,9 @@ int gsa_send_simple_cmd(struct device *dev, u32 cmd);
 int gsa_send_one_arg_cmd(struct device *dev, u32 cmd, u32 arg);
 
 ssize_t gsa_get_gsa_version(struct device *gsa, char *buf);
+
+int gsa_pm_stat_open(struct device *dev, struct gsa_dev_state *s, struct file *filp);
+ssize_t gsa_pm_stat_read(struct file *filp, char __user *buf, size_t count, loff_t *ppos);
+int gsa_pm_state_release(struct inode *inode, struct file *filp);
 
 #endif /* __LINUX_GSA_PRIV_H */

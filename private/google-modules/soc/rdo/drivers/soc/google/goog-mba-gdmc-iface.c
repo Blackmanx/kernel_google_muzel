@@ -494,7 +494,7 @@ void gdmc_unregister_aoc_reset_notifier(struct gdmc_iface *gdmc_iface)
 
 	gdmc_notify = service_handler->priv_data;
 	gdmc_unregister_host_cb(gdmc_iface, service_id);
-	dmam_free_coherent(dev, sizeof(*gdmc_notify->shared_buf), gdmc_notify->shared_buf,
+	dmam_free_coherent(dev, gdmc_notify->shared_buf_size, gdmc_notify->shared_buf,
 			   gdmc_notify->shared_buf_phys_addr);
 	devm_kfree(dev, gdmc_notify);
 }
@@ -606,7 +606,8 @@ static void goog_mba_gdmc_create_ftrace_instance(struct gdmc_iface *gdmc_iface)
 	int i;
 	int ret;
 
-	tr = trace_array_get_by_name("goog_nq_mailbox");
+	tr = trace_array_get_by_name_ext("goog_nq_mailbox",
+					 "goog_mba_ctrl,goog_mba_aggr,goog_mba_gdmc_iface");
 	if (!tr) {
 		dev_err(dev, "Failed to create trace array\n");
 		return;

@@ -19,15 +19,23 @@
  * @printer_ctx: Tracepoint printer context.
  * @printer_buffer: Buffer used for printing tracepoints. It should be big
  *                  enough to hold one line of output.
+ * @log_enabled: If true, tracepoints will be published to the kernel log.
+ * @ftrace_enabled: If true, tracepoints will be published to ftrace.
  */
 struct fwtp_dev {
 	struct fwtp_ipc_client fwtp_ipc_client;
 	struct device *dev;
 	struct fwtp_printer_ctx printer_ctx;
 	char printer_buffer[FWTP_PRINTER_BUFFER_SIZE];
+	bool log_enabled;
+	bool ftrace_enabled;
 };
 
 int fwtp_dev_init(struct fwtp_dev *fwtp_dev);
 void fwtp_dev_deinit(struct fwtp_dev *fwtp_dev);
+int fwtp_dev_get_memio_ring(struct fwtp_dev *fwtp_dev, int ring_num,
+			    struct tracepoint_ring *ring);
+void fwtp_dev_free_memio_ring(struct fwtp_dev *fwtp_dev,
+			      struct tracepoint_ring *ring);
 
 #endif /* __FWTP_H */

@@ -73,22 +73,24 @@ static const u8 reg2offset[REGS_NUM] = {
 };
 
 /* Members in layout should be in the same order as members of google_pinctrl_register_idx enum */
+struct reg_layout {
+	u16 param : 1;
+	u16 dmux : 1;
+	u16 txdata : 1;
+	u16 rxgate : 1;
+	u16 rxdata : 1;
+	u16 isr : 1;
+	u16 isrovf : 1;
+	u16 ier : 1;
+	u16 imr : 1;
+	u16 itr : 1;
+	u16 reserved : 6;
+};
+
 struct google_pinctrl_registers_flags {
 	u8 pin_id;
 	union {
-		struct {
-			u16 param : 1;
-			u16 dmux : 1;
-			u16 txdata : 1;
-			u16 rxgate : 1;
-			u16 rxdata : 1;
-			u16 isr : 1;
-			u16 isrovf : 1;
-			u16 ier : 1;
-			u16 imr : 1;
-			u16 itr : 1;
-			u16 reserved : 6;
-		} layout;
+		struct reg_layout layout;
 		u16 val;
 	};
 };

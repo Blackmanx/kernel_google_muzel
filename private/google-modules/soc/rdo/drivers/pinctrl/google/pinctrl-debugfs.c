@@ -304,6 +304,14 @@ static int dump_regs_form(struct google_pinctrl *gctl, struct seq_file *file)
 
 		pin_excl = (pin_excl_regs != NULL) && (pin_excl_regs->pin_id == i);
 
+		if (gctl->chip.valid_mask && !test_bit(i, gctl->chip.valid_mask)) {
+			tmp_buf_count += scnprintf(tmp_buf + tmp_buf_count,
+						   buf_size - tmp_buf_count,
+						   " INACCESSIBLE/INVALID FROM KERNEL");
+			goto drf_skip_lp;
+		}
+
+
 		for (int j = 0; j < REGS_NUM; ++j) {
 			if (!pin_excl || !pin_excl_reg(*pin_excl_regs, j)) {
 				reg_val = google_readl(reg2offset[j], gctl, pingroup);
@@ -316,6 +324,7 @@ static int dump_regs_form(struct google_pinctrl *gctl, struct seq_file *file)
 			}
 		}
 
+drf_skip_lp:
 		tmp_buf_count = min(tmp_buf_count, buf_size - 2);
 
 		tmp_buf[tmp_buf_count++] = '\n';

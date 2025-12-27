@@ -2164,11 +2164,14 @@ static void pl330_tasklet(struct tasklet_struct *t)
 	fill_queue(pch);
 
 	if (list_empty(&pch->work_list)) {
-		spin_lock(&pch->thread->dmac->lock);
-		_stop(pch->thread);
-		spin_unlock(&pch->thread->dmac->lock);
-		power_down = true;
-		pch->active = false;
+		/* If pch->active is false, then skip */
+		if (pch->active) {
+			spin_lock(&pch->thread->dmac->lock);
+			_stop(pch->thread);
+			spin_unlock(&pch->thread->dmac->lock);
+			power_down = true;
+			pch->active = false;
+		}
 	} else {
 		/* Make sure the PL330 Channel thread is active */
 		spin_lock(&pch->thread->dmac->lock);
@@ -3159,36 +3162,6 @@ static inline void init_pl330_debugfs(struct pl330_dmac *pl330)
 }
 #endif
 
-/*
- * Runtime PM callbacks are provided by amba/bus.c driver.
- *
- * It is assumed here that IRQ safe runtime PM is chosen in probe and amba
- * bus driver will only disable/enable the clock in runtime PM callbacks.
- */
-static int __maybe_unused pl330_suspend(struct device *dev)
-{
-	struct amba_device *pcdev = to_amba_device(dev);
-
-	pm_runtime_force_suspend(dev);
-	clk_unprepare(pcdev->pclk);
-
-	return 0;
-}
-
-static int __maybe_unused pl330_resume(struct device *dev)
-{
-	struct amba_device *pcdev = to_amba_device(dev);
-	int ret;
-
-	ret = clk_prepare(pcdev->pclk);
-	if (ret)
-		return ret;
-
-	pm_runtime_force_resume(dev);
-
-	return ret;
-}
-
 #ifdef CONFIG_PM
 
 static int pl330_pm_runtime_suspend(struct device *dev)
@@ -3224,7 +3197,7 @@ static int pl330_pm_runtime_resume(struct device *dev)
 static const struct dev_pm_ops pl330_pm = {
 	SET_RUNTIME_PM_OPS(pl330_pm_runtime_suspend,
 			   pl330_pm_runtime_resume, NULL)
-	SET_LATE_SYSTEM_SLEEP_PM_OPS(pl330_suspend, pl330_resume)
+	SET_LATE_SYSTEM_SLEEP_PM_OPS(pm_runtime_force_suspend, pm_runtime_force_resume)
 };
 
 static int

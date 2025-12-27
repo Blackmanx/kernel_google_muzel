@@ -46,6 +46,13 @@ fwtp_ipc_client_get_string_table(struct fwtp_ipc_client *fwtp_ipc_client)
 	uint16_t rx_msg_data_size;
 	fwtp_error_code_t err;
 
+	/* Check if peer supports string table numbers. */
+	if (fwtp_ipc_client->fwtp_if.peer_protocol_version <
+	    FWTP_PROTOCOL_VERSION_2) {
+		err = kFwtpErrUnsupported;
+		goto out;
+	}
+
 	/* Allocate an FWTP get strings table message buffer. */
 	msg_get_strings = FWTP_MALLOC(FWTP_IPC_CLIENT_LARGE_MSG_SIZE);
 	if (!msg_get_strings) {
@@ -60,6 +67,7 @@ fwtp_ipc_client_get_string_table(struct fwtp_ipc_client *fwtp_ipc_client)
 		/* Get the next chunk. */
 		memset(msg_get_strings, 0, sizeof(*msg_get_strings));
 		msg_get_strings->base.type = kFwtpMsgTypeGetStrings;
+		msg_get_strings->table_num = fwtp_ipc_client->string_table_num;
 		msg_get_strings->chunk_offset = chunk_offset;
 		msg_get_strings->chunk_size =
 			FWTP_IPC_CLIENT_LARGE_MSG_SIZE -
@@ -245,8 +253,7 @@ fwtp_ipc_client_print_tracepoints(struct fwtp_ipc_client *fwtp_ipc_client,
 	fwtp_error_code_t err;
 
 	/* Set up printer context. */
-	printer_ctx->get_string = fwtp_ipc_client_get_string;
-	printer_ctx->get_string_ctx = fwtp_ipc_client;
+	fwtp_ipc_client_printer_ctx_init(fwtp_ipc_client, printer_ctx);
 
 	/* Allocate an FWTP get tracepoints message buffer. */
 	msg_get_tracepoints = FWTP_MALLOC(FWTP_IPC_CLIENT_LARGE_MSG_SIZE);
@@ -309,3 +316,20 @@ out:
 	return err;
 }
 EXPORT_SYMBOL_GPL(fwtp_ipc_client_print_tracepoints);
+
+/**
+ * fwtp_ipc_client_printer_ctx_init - Initializes printer context.
+ *
+ * Initializes the printer context specified by printer_ctx for use with the
+ * FWTP IPC client specified by fwtp_ipc_client.
+ *
+ * @fwtp_ipc_client: FWTP IPC client to use with printer context.
+ * @printer_ctx: Context ot use for printing with client.
+ */
+void fwtp_ipc_client_printer_ctx_init(struct fwtp_ipc_client *fwtp_ipc_client,
+				      struct fwtp_printer_ctx *printer_ctx)
+{
+	printer_ctx->get_string = fwtp_ipc_client_get_string;
+	printer_ctx->get_string_ctx = fwtp_ipc_client;
+}
+EXPORT_SYMBOL_GPL(fwtp_ipc_client_printer_ctx_init);

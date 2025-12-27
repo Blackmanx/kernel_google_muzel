@@ -56,6 +56,31 @@ enum vendor_sched_qos {
 	SCHED_QOS_MAX,
 };
 
+struct pmu_stats_struct {
+	u64 last_cycle[CONFIG_VH_SCHED_MAX_CLUSTER_NR];
+	u64 last_stall[CONFIG_VH_SCHED_MAX_CLUSTER_NR];
+	u64 last_inst[CONFIG_VH_SCHED_MAX_CLUSTER_NR];
+	u64 cycle[CONFIG_VH_SCHED_MAX_CLUSTER_NR];
+	u64 stall[CONFIG_VH_SCHED_MAX_CLUSTER_NR];
+	u64 inst[CONFIG_VH_SCHED_MAX_CLUSTER_NR];
+};
+
+struct mem_pressure_struct {
+	u64				last_update_time;
+	u64				last_cycle;
+	u64				last_stall;
+	u64				current_cycle;
+	u64				current_stall;
+	u64				mem_pressure_sum;
+	u32				period_contrib;
+	unsigned long			mem_pressure_avg;
+};
+
+struct mem_pressure_stats {
+	struct pmu_stats_struct pmu_stats;
+	struct mem_pressure_struct mp;
+};
+
 struct vendor_inheritance_struct {
 	unsigned int uclamp[VI_MAX][UCLAMP_CNT];
 	short int adpf;
@@ -68,11 +93,6 @@ struct vendor_inheritance_struct {
 struct uclamp_filter {
 	unsigned int uclamp_min_ignored : 1;
 	unsigned int uclamp_max_ignored : 1;
-};
-
-struct thermal_cap {
-	unsigned int uclamp_max;
-	unsigned int freq;
 };
 
 /*
@@ -93,6 +113,8 @@ struct vendor_task_struct {
 	int orig_policy;		/* Protected by task_rq_lock() */
 	unsigned long iowait_boost;
 	bool is_binder_task;
+	bool in_feec;
+	unsigned int state_dequeued;
 
 	/* parameters for inheritance */
 	struct vendor_inheritance_struct vi;
@@ -133,6 +155,9 @@ struct vendor_task_struct {
 
 	/* For boost at fork */
 	u64 boost_at_fork_start_ns;
+
+	/* For per-task memory aware scheduling */
+	struct mem_pressure_stats *mp_stats;
 };
 
 ANDROID_VENDOR_CHECK_SIZE_ALIGN(u64 android_vendor_data1[64], struct vendor_task_struct t);

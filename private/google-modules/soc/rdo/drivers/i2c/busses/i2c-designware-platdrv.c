@@ -36,6 +36,11 @@
 
 #include "i2c-designware-core.h"
 
+#define CREATE_TRACE_POINTS
+#define I2C_PLAT_TRACES
+#include "i2c-trace.h"
+#undef I2C_PLAT_TRACES
+
 #define RPM_AUTOSUSPEND_DELAY_MS 200
 
 static u32 i2c_dw_get_clk_rate_khz(struct dw_i2c_dev *dev)
@@ -284,6 +289,8 @@ static int dw_i2c_plat_probe(struct platform_device *pdev)
 	struct i2c_timings *t;
 	int irq, ret;
 
+	google_i2c_trace_init(pdev);
+
 	irq = platform_get_irq(pdev, 0);
 	if (irq < 0)
 		return irq;
@@ -453,6 +460,8 @@ static int dw_i2c_plat_runtime_suspend(struct device *dev)
 {
 	struct dw_i2c_dev *i_dev = dev_get_drvdata(dev);
 
+	trace_i2c_dw_runtime_suspend(i_dev);
+
 	if (i_dev->shared_with_punit)
 		return 0;
 
@@ -470,6 +479,8 @@ static int dw_i2c_plat_suspend(struct device *dev)
 {
 	struct dw_i2c_dev *i_dev = dev_get_drvdata(dev);
 
+	trace_i2c_dw_suspend(i_dev);
+
 	i2c_mark_adapter_suspended(&i_dev->adapter);
 	return pm_runtime_force_suspend(dev);
 }
@@ -478,6 +489,8 @@ static int dw_i2c_plat_runtime_resume(struct device *dev)
 {
 	struct dw_i2c_dev *i_dev = dev_get_drvdata(dev);
 	int res;
+
+	trace_i2c_dw_runtime_resume(i_dev);
 
 	if (i_dev->cli_state) {
 		res = pinctrl_select_state(i_dev->pinctrl, i_dev->cli_state);
@@ -501,6 +514,8 @@ static int dw_i2c_plat_resume(struct device *dev)
 {
 	struct dw_i2c_dev *i_dev = dev_get_drvdata(dev);
 	int ret;
+
+	trace_i2c_dw_resume(i_dev);
 
 	ret = pm_runtime_force_resume(dev);
 	if (ret < 0)

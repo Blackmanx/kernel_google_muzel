@@ -145,7 +145,8 @@ static int hardlockup_debug_bug_handler(struct pt_regs *regs, unsigned long esr)
 	int cpu = raw_smp_processor_id();
 	unsigned int val;
 	unsigned long flags;
-	int ret;
+	unsigned long last_pc;
+	int log_lock_acquired;
 
 	hardlockup_debug_disable_fiq();
 
@@ -159,8 +160,9 @@ static int hardlockup_debug_bug_handler(struct pt_regs *regs, unsigned long esr)
 	 * locked up. The panic handler sets the hardlockup_core_mask to point
 	 * to all online cores.
 	 */
-	ret = hardlockup_debug_try_lock_timeout(&hardlockup_seq_lock, 500 * USEC_PER_MSEC);
-	if (ret && !hardlockup_core_mask) {
+	log_lock_acquired = hardlockup_debug_try_lock_timeout(&hardlockup_seq_lock,
+			 500 * USEC_PER_MSEC);
+	if (log_lock_acquired && !hardlockup_core_mask) {
 		if (watchdog_fiq && !allcorelockup_detected) {
 			/* 1st WDT FIQ trigger */
 			val = google_cdd_get_hardlockup_magic(cpu);
@@ -178,73 +180,73 @@ static int hardlockup_debug_bug_handler(struct pt_regs *regs, unsigned long esr)
 			}
 		}
 	}
-	if (ret)
+	if (log_lock_acquired)
 		raw_spin_unlock(&hardlockup_seq_lock);
 	else
 		pr_debug("%s: fail to get seq lock\n", __func__);
 
-	/* We expect this bug executed on only lockup core */
-	if (hardlockup_core_mask & BIT(cpu)) {
-		unsigned long last_pc;
+	/* Replace real pc value even if it is invalid */
+	last_pc = google_cdd_get_last_pc(cpu);
+	if (get_fiq_pending_cpu_id() != cpu)
+		regs->pc = last_pc;
 
-		/* Replace real pc value even if it is invalid */
-		last_pc = google_cdd_get_last_pc(cpu);
-		if (get_fiq_pending_cpu_id() != cpu)
-			regs->pc = last_pc;
+	log_lock_acquired = hardlockup_debug_try_lock_timeout(&hardlockup_log_lock,
+						5 * USEC_PER_SEC);
+	if (!log_lock_acquired)
+		pr_emerg("%s: fail to get log lock\n", __func__);
 
-		ret = hardlockup_debug_try_lock_timeout(&hardlockup_log_lock,
-							5 * USEC_PER_SEC);
-		if (!ret)
-			pr_emerg("%s: fail to get log lock\n", __func__);
+	/*
+	 * We expect this bug to be executed only on cores that are part of the
+	 * hardlockup_core_mask. If the current core is not part of the mask, it
+	 * means that the FIQ was triggered by another reason (e.g. APC WDT).
+	 */
+	if (!(hardlockup_core_mask & BIT(cpu)))
+		pr_emerg("Unintended core%d fiq handling, likely due to APC WDT\n", cpu);
 
-		pr_emerg("%s - Debugging Information for Hardlockup core(%d) - locked CPUs mask (0x%lx)\n",
-			 allcorelockup_detected ? "WDT expired" : "Core", cpu,
-			 hardlockup_core_mask);
+	pr_emerg("%s - Debugging Information for Hardlockup core(%d) - locked CPUs mask (0x%lx)\n",
+			allcorelockup_detected ? "WDT expired" : "Core", cpu,
+			hardlockup_core_mask);
 
-		dump_backtrace(regs, NULL, KERN_DEFAULT);
+	dump_backtrace(regs, NULL, KERN_DEFAULT);
 
-		if (atomic_cmpxchg(&dump_tasks_once, 1, 0)) {
+	if (atomic_cmpxchg(&dump_tasks_once, 1, 0)) {
+		show_mem();
+		/*
+		 * Dump task info only when ramdump mode is enabled (userdebug/eng builds)
+		 * to avoid excessive logging to last_kmsg in user builds with limited
+		 * buffers.
+		 */
+		if (ramdump_is_enabled) {
 			/* dummy struct to fulfill dump_tasks interface */
 			struct oom_control oc = { 0 };
 
-			show_mem();
-
-			/*
-			 * Dump task info only when ramdump mode is enabled (userdebug/eng builds)
-			 * to avoid excessive logging to last_kmsg in user builds with limited
-			 * buffers.
-			 */
-			if (ramdump_is_enabled)
-				dump_tasks(&oc);
+			dump_tasks(&oc);
 		}
-
-		spin_lock_irqsave(&pm_suspend_task_lock, flags);
-		if (pm_suspend_task) {
-			pr_emerg("pm_suspend_task '%s' %d hung (state=%d)",
-					pm_suspend_task->comm, pm_suspend_task->pid,
-					pm_suspend_task->__state);
-			sched_show_task(pm_suspend_task);
-		}
-		spin_unlock_irqrestore(&pm_suspend_task_lock, flags);
-
-		hardlockup_core_handled_mask |= BIT(cpu);
-
-		if (ret)
-			raw_spin_unlock(&hardlockup_log_lock);
-
-		if (hardlockup_core_mask == hardlockup_core_handled_mask) {
-			pr_emerg("***** All locked up cores dumped the call stack *****\n");
-			if (pm_suspend_task)
-				panic("PM suspend timeout");
-			//TODO(b/205354981): If we can request warm reset from here
-		}
-		/* If cpu is locked, wait for WDT reset without executing
-		 * code anymore.
-		 */
-		hardlockup_debug_spin_func();
 	}
 
-	pr_emerg("%s: Unintended core%d fiq handling\n", __func__, cpu);
+	spin_lock_irqsave(&pm_suspend_task_lock, flags);
+	if (pm_suspend_task) {
+		pr_emerg("pm_suspend_task '%s' %d hung (state=%d)",
+				pm_suspend_task->comm, pm_suspend_task->pid,
+				pm_suspend_task->__state);
+		sched_show_task(pm_suspend_task);
+	}
+	spin_unlock_irqrestore(&pm_suspend_task_lock, flags);
+
+	hardlockup_core_handled_mask |= BIT(cpu);
+
+	if (log_lock_acquired)
+		raw_spin_unlock(&hardlockup_log_lock);
+
+	if (hardlockup_core_mask == hardlockup_core_handled_mask) {
+		pr_emerg("***** All locked up cores dumped the call stack *****\n");
+		if (pm_suspend_task)
+			panic("PM suspend timeout");
+		//TODO(b/205354981): If we can request warm reset from here
+	}
+	/* If cpu is locked, wait for WDT reset without executing code anymore. */
+	hardlockup_debug_spin_func();
+
 	return DBG_HOOK_ERROR;
 }
 

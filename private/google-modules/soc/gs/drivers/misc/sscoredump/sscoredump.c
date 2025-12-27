@@ -4,6 +4,7 @@
  *
  * Copyright 2019-2020 Google LLC
  */
+#include <kunit/visibility.h>
 #include <linux/kernel.h>
 #include <linux/binfmts.h>
 #include <linux/elf.h>
@@ -24,6 +25,8 @@
 #include <linux/platform_data/sscoredump.h>
 #include <uapi/misc/crashinfo.h>
 
+#include "sscoredump.h"
+
 #define SSCD_MAX_DEVS		128
 #define SSCD_REPORT_TIMEOUT	1000 /* default timeout, ms */
 
@@ -31,68 +34,17 @@
 				 SSCD_FLAGS_ELFARM64HDR)
 #define ELF_STRTAB_SIZE		256
 
-enum sscd_report_level {
-	REPORT_CRASHINFO_ONLY = 0,
-	REPORT_ALL
-};
-
 static const char shd_string_table[] = {
 	"\0"
 	".shstrtab\0"  /* 1-10 */
 	".crashinfo\0" /* 11-21 */
 };
 
-/**
- * struct sscd_device - internal state container for sscd devices.
- * This state container holds most of the runtime variable data
- * for a sscd device.
- */
-struct sscd_device {
-	/**
-	 * device related
-	 * @node: common device list
-	 * @rx_lock: protects access to structure
-	 * @enabled: coredump enabled/disabled
-	 * @opened: tracks active client
-	 */
-	struct device            dev;
-	struct cdev              chrdev;
-	struct device            *parent_dev;
-	struct list_head         node;
-	struct mutex             rx_lock; /* access to structure */
-
-	bool                     enabled;
-	atomic_t                 opened;
-	u32                      read_timeout;
-	wait_queue_head_t        read_wait_q;
-	struct completion        read_completion;
-
-	/**
-	 * subsystem report data (includes extra segments for internal data)
-	 * @report_active: active crash data
-	 * @segs: crash segment data
-	 * @nsegs: number of segments
-	 * @read_offset: read offset within crash data
-	 */
-	atomic_t                 report_active;
-	u32                      report_flags;
-	struct crashinfo_img_hdr crash_hdr;
-	struct sscd_segment      *segs;
-	u16                      nsegs;
-	loff_t                   read_offset;
-
-	/**
-	 * stats
-	 */
-	time64_t                 report_time;
-	u64                      report_count; /* number of reports */
-	u64                      read_count; /* number of read reports */
-};
-
 /* global class data */
 static int sscd_major;
 static u8 sscd_enabled = 1; /* default value */
-static u8 sscd_level = REPORT_CRASHINFO_ONLY;
+VISIBLE_IF_KUNIT u8 sscd_level = REPORT_CRASHINFO_ONLY;
+EXPORT_SYMBOL_IF_KUNIT(sscd_level);
 static LIST_HEAD(sscd_devs_list);
 static DEFINE_IDA(sscd_ida);
 static DEFINE_MUTEX(sscd_mutex); /* protects access to sscd dev list */
@@ -372,7 +324,7 @@ static int fill_elf(struct sscd_segment *elf, struct sscd_segment *segs,
 	return 0;
 }
 
-static void free_report(struct sscd_device *sdev)
+VISIBLE_IF_KUNIT void free_report(struct sscd_device *sdev)
 {
 	if (sdev->report_flags & SSCD_ELFHDR_MASK && sdev->nsegs > 1)
 		kfree(sdev->segs[1].addr);
@@ -381,6 +333,7 @@ static void free_report(struct sscd_device *sdev)
 	sdev->segs = NULL;
 	sdev->nsegs = 0;
 }
+EXPORT_SYMBOL_IF_KUNIT(free_report);
 
 /**
  * create report
@@ -395,7 +348,7 @@ static void free_report(struct sscd_device *sdev)
  *  [1]        ELF segment (optional)
  *  [2..nsegs] crash data
  */
-static int create_report(struct sscd_device *sdev, struct sscd_segment *segs,
+VISIBLE_IF_KUNIT int create_report(struct sscd_device *sdev, struct sscd_segment *segs,
 			 u16 nsegs, u64 flags, const char *crash_info)
 {
 	u32 count = nsegs + 1; /* extra segment for crashinfo header */
@@ -459,6 +412,7 @@ err:
 
 	return rc;
 }
+EXPORT_SYMBOL_IF_KUNIT(create_report);
 
 /**
  * sscd_report report a coredump/crashinfo.
@@ -551,15 +505,16 @@ static ssize_t crash_info_show(struct device *dev,
 	return scnprintf(buf, PAGE_SIZE, "%s\n", sdev->crash_hdr.crashinfo);
 }
 
-static ssize_t sdev_enabled_show(struct device *dev,
+VISIBLE_IF_KUNIT ssize_t sdev_enabled_show(struct device *dev,
 				 struct device_attribute *attr, char *buf)
 {
 	struct sscd_device *sdev = dev_get_drvdata(dev);
 
 	return scnprintf(buf, PAGE_SIZE, "%d\n", (int)sdev->enabled);
 }
+EXPORT_SYMBOL_IF_KUNIT(sdev_enabled_show);
 
-static ssize_t sdev_enabled_store(struct device *dev,
+VISIBLE_IF_KUNIT ssize_t sdev_enabled_store(struct device *dev,
 				  struct device_attribute *attr,
 				  const char *buf, size_t count)
 {
@@ -575,6 +530,7 @@ static ssize_t sdev_enabled_store(struct device *dev,
 	}
 	return status ? status : count;
 }
+EXPORT_SYMBOL_IF_KUNIT(sdev_enabled_store);
 
 static ssize_t read_count_show(struct device *dev,
 			       struct device_attribute *attr, char *buf)
@@ -741,7 +697,7 @@ static void sscoredump_release(struct device *dev)
  * A zero is returned on success and a negative errno code for
  * failure.
  */
-static int sscoredump_probe(struct platform_device *pdev)
+VISIBLE_IF_KUNIT int sscoredump_probe(struct platform_device *pdev)
 {
 	int minor;
 	int ret;
@@ -809,8 +765,9 @@ fail1:
 
 	return -EAGAIN;
 }
+EXPORT_SYMBOL_IF_KUNIT(sscoredump_probe);
 
-static int sscoredump_remove(struct platform_device *pdev)
+VISIBLE_IF_KUNIT int sscoredump_remove(struct platform_device *pdev)
 {
 	struct sscd_device *sdev = platform_get_drvdata(pdev);
 	int minor;
@@ -836,6 +793,7 @@ static int sscoredump_remove(struct platform_device *pdev)
 
 	return 0;
 }
+EXPORT_SYMBOL_IF_KUNIT(sscoredump_remove);
 
 static struct platform_driver sscoredump_driver = {
 	.probe = sscoredump_probe,

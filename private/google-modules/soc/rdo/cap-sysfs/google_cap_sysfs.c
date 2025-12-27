@@ -538,6 +538,7 @@ static int parse_stats_regions_prop(struct device *dev, struct device_node *stat
 	int ret;
 	u64 raw_reg_addr, reg_size;
 	struct device_node *child_stats_region;
+	bool tf_a_region;
 
 	for_each_child_of_node(stats_regions, child_stats_region) {
 		struct stats_region *region =
@@ -552,7 +553,13 @@ static int parse_stats_regions_prop(struct device *dev, struct device_node *stat
 			return ret;
 		}
 
-		region->start_addr = devm_ioremap(dev, raw_reg_addr, reg_size);
+		tf_a_region = of_property_read_bool(child_stats_region, "tf_a");
+		if (tf_a_region)
+			region->start_addr =
+				devm_memremap(dev, raw_reg_addr, reg_size, MEMREMAP_WB);
+		else
+			region->start_addr = devm_ioremap(dev, raw_reg_addr, reg_size);
+
 		if (!region->start_addr) {
 			dev_err(dev, "Failed to iomap %s stats region property\n",
 				child_stats_region->name);

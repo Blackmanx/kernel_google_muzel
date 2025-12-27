@@ -303,7 +303,7 @@ static int goog_chip_info_probe(struct platform_device *pdev)
 	struct goog_chip_info_descriptor *descriptors;
 	int ret;
 
-	chip_info = devm_kmalloc(dev, sizeof(*chip_info), GFP_KERNEL);
+	chip_info = devm_kzalloc(dev, sizeof(*chip_info), GFP_KERNEL);
 	if (!chip_info)
 		return -ENOMEM;
 

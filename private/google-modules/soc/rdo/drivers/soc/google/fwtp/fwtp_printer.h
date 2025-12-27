@@ -22,6 +22,8 @@
 #include <lib/utils/compiler.h>
 #include <stdbool.h>
 #include <stdint.h>
+
+#define __counted_by(member) __attribute__((__counted_by__(member)))
 #endif
 
 __BEGIN_CDECLS
@@ -36,7 +38,7 @@ struct fwtp_data_item {
 	/* Size of data item data. */
 	uint8_t data_size;
 	/* Data item data. */
-	uint8_t data[];
+	uint8_t data[] __counted_by(data_size);
 };
 
 /*
@@ -57,6 +59,25 @@ struct fwtp_data_item_list {
 	unsigned int item_count;
 	/* Pointer to the location of the next data item to be read or written. */
 	uint8_t *p_next_data_item;
+};
+
+/*
+ * This structure is used for reading tracepoint data.
+ */
+struct fwtp_tracepoint_data_reader {
+	/* The full tracepoint. */
+	uint8_t *tracepoint;
+	/* The full tracepoint size. */
+	int tracepoint_size;
+	/* Index of the next byte of tracepoint data to read. */
+	int next_data;
+	/* If true, the tracepoint is a low-latency tracepoint. */
+	bool is_ll;
+	/*
+	 * If true, the tracepoint data has underflowed (i.e., an attempt was made to
+	 * read a byte of tracepoint data, but there was no more data left to read).
+	 */
+	bool underflow;
 };
 
 /*
@@ -81,19 +102,22 @@ typedef void (*fwtp_append_output_func)(struct fwtp_printer_ctx *printer_ctx,
 
 /*
  * A function of this type runs post-processing using the decoded tracepoint
- * with the timestamp specified by timestamp, title string specified by str, and
- * data items specified by data_items. This function doesn't modify the
- * tracepoint or printer output, but it may collect information from the
- * tracepoint for other uses (e.g., generating a SEM report). The printer
- * context is specified by printer_ctx.
+ * with the type specified by type, timestamp specified by timestamp, title
+ * string specified by str_id and str, and data items specified by data_items.
+ * This function doesn't modify the tracepoint or printer output, but it may
+ * collect information from the tracepoint for other uses (e.g., generating a
+ * SEM report). The printer context is specified by printer_ctx.
  *
  *   printer_ctx            Printer context.
+ *   type                   Tracepoint type.
  *   timestamp              Tracepoint timestamp.
+ *   str_id                 Tracepoint title string ID.
  *   str                    Tracepoint title string.
  *   data_items             Tracepoint data items.
  */
 typedef void (*fwtp_post_process_func)(struct fwtp_printer_ctx *printer_ctx,
-				       uint64_t timestamp, const char *str,
+				       unsigned int type, uint64_t timestamp,
+				       uint32_t str_id, const char *str,
 				       struct fwtp_data_item_list *data_items);
 
 /*
@@ -119,6 +143,8 @@ typedef void (*fwtp_post_process_func)(struct fwtp_printer_ctx *printer_ctx,
  * data items. The data_items.data_buffer and data_items.data_buffer_size fields
  * should be set up with a buffer in which to place the data items.
  *
+ * If name is not null, it is prepended to each printed tracepoint.
+ *
  * If additional context is required for any of the functions, this structure
  * may be added to a container structure with more context. The container
  * structure may then be obtained using containerof.
@@ -130,9 +156,9 @@ typedef void (*fwtp_post_process_func)(struct fwtp_printer_ctx *printer_ctx,
  *     int log_level;
  *   };
  *
- *   void my_append_output(struct fwtp_printer_ctx *printer_ctx,
- *                         const char *str) {
- *     struct my_printer_ctx *my_printer_ctx =
+ *   void my_append_output(struct fwtp_printer_ctx* printer_ctx,
+ *                         const char* str) {
+ *     struct my_printer_ctx* my_printer_ctx =
  *         containerof(printer_ctx, struct my_printer_ctx, base_printer_ctx);
  *     LOG(my_printer_ctx->log_level, str);
  *   }
@@ -152,6 +178,8 @@ struct fwtp_printer_ctx {
 	void *post_process_ctx;
 	/* Tracepoint data item list for post-processing. */
 	struct fwtp_data_item_list data_items;
+	/* Tracepoints name. */
+	const char *name;
 	/* Timestatmp frequency in Hz. If zero, timestamp frequency is unspecified. */
 	uint32_t timestamp_hz;
 	/* Latest absolute timestamp. */
@@ -171,6 +199,13 @@ struct fwtp_printer_ctx {
 void fwtp_print_ring_entries(struct fwtp_printer_ctx *printer_ctx,
 			     struct tracepoint_ring *ring,
 			     int recent_entry_count);
+
+void fwtp_print_ring_entries_with_decode_buffer(struct fwtp_printer_ctx
+							*printer_ctx,
+						struct tracepoint_ring *ring,
+						int recent_entry_count,
+						void *decode_buffer,
+						unsigned int decode_buffer_size);
 
 void fwtp_print_entries(struct fwtp_printer_ctx *printer_ctx,
 			const uint64_t *entry_words, int num_words);

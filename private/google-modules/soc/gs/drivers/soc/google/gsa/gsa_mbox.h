@@ -17,6 +17,8 @@
 #include <linux/platform_device.h>
 #include <linux/mailbox_client.h>
 
+#define GSA_PAGE_SIZE (4096)
+
 /**
  * enum gsa_mbox_cmd - mailbox commands
  */

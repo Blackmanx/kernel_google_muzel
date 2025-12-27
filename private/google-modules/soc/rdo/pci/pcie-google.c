@@ -8,7 +8,6 @@
 #include "pcie-designware-host-customized.h"
 
 #include <linux/version.h>
-#include <perf/core/gs_domain_idle.h>
 
 #define CREATE_TRACE_POINTS
 #include "pcie_trace.h"
@@ -123,6 +122,60 @@ static LIST_HEAD(gpcie_inst_list);
 #define PCIE_GEN_3_GOOGLE_ICC_BW_MB 900
 #define PCIE_GEN_2_GOOGLE_ICC_BW_MB 450
 #define PCIE_GEN_1_GOOGLE_ICC_BW_MB 225
+
+#define PCI_AER_CAP_SIZE 0x48
+
+/**
+ * google_pcie_dump_region - Dumps a memory region to the kernel log.
+ * @gpcie: Pointer to the google_pcie struct.
+ * @name: The name of the region for logging purposes.
+ * @base: The base __iomem address of the memory region.
+ * @size: The size of the memory region.
+ */
+static void google_pcie_dump_region(struct google_pcie *gpcie, const char *name,
+				    void __iomem *base, size_t size)
+{
+	size_t size_align;
+	int i;
+
+	if (!gpcie) {
+		pr_err("Invalid PCI handle for %s dump\n", name);
+		return;
+	}
+	if (!base) {
+		dev_info(gpcie->dev, "%s base not mapped\n", name);
+		return;
+	}
+
+	dev_info(gpcie->dev, "Dump %s regs (size: %zu):\n", name, size);
+	size_align = size & ~0xf;
+	for (i = 0; i < size_align; i += 0x10) {
+		dev_info(gpcie->dev, " [+0x%04x]: %08x %08x %08x %08x\n", i,
+			 readl(base + i),
+			 readl(base + i + 4),
+			 readl(base + i + 8),
+			 readl(base + i + 12));
+	}
+
+	if (i < size) {
+		char line_buf[100];
+		char *buf = line_buf;
+		size_t len = sizeof(line_buf);
+		int ret;
+
+		ret = scnprintf(buf, len, " [+0x%04x]:", i);
+		buf += ret;
+		len -= ret;
+
+		for (; i < size; i += 0x4) {
+			ret = scnprintf(buf, len, " %08x",
+					readl(base + i));
+			buf += ret;
+			len -= ret;
+		}
+		dev_info(gpcie->dev, "%s\n", line_buf);
+	}
+}
 
 static void google_pcie_dump_icd(struct google_pcie *gpcie, char *where)
 {
@@ -940,6 +993,53 @@ int google_pcie_get_link_stats(int num,
 }
 EXPORT_SYMBOL_GPL(google_pcie_get_link_stats);
 
+static void google_pcie_dump_aer_register(struct google_pcie *gpcie)
+{
+	struct dw_pcie *pci = gpcie->pci;
+	u32 val, i;
+
+	dev_err(pci->dev, "AER Register Dump\n");
+	for (i = 0; i < PCI_AER_CAP_SIZE; i += 0x4) {
+		val = dw_pcie_readl_dbi(pci, gpcie->aer + i);
+		dev_err(pci->dev, "Offset %#04x -> Val %#010x\n", i, val);
+	}
+}
+
+/**
+ * google_pcie_dump_debug - Dump debug registers
+ *
+ * Endpoints can use this when they encounter error conditions that
+ * require a dump of PCIe debug registers.
+ *
+ * @num: The domain number representing the PCIe controller in the system
+ */
+void google_pcie_dump_debug(int num)
+{
+	struct google_pcie *gpcie;
+
+	gpcie = google_pcie_get_handle(num);
+	if (!gpcie) {
+		pr_err("Invalid PCI handle chan %d\n", num);
+		return;
+	}
+
+	scoped_guard(spinlock_irqsave, &gpcie->power_on_lock) {
+		if (!gpcie->powered_on) {
+			dev_info(gpcie->dev, "PCIe is down\n");
+			return;
+		}
+		google_pcie_dump_region(gpcie, "sii", gpcie->sii_base, gpcie->sii_size);
+		google_pcie_dump_region(gpcie, "top", gpcie->top_base, gpcie->top_size);
+	}
+
+	/*
+	 * The AER dump is done outside this lock to prevent a deadlock, as the
+	 * underlying read functions re-acquire the same lock.
+	 */
+	google_pcie_dump_aer_register(gpcie);
+}
+EXPORT_SYMBOL_GPL(google_pcie_dump_debug);
+
 static void google_pcie_check_pending_txns(struct google_pcie *gpcie)
 {
 	int check_time = 0;
@@ -949,7 +1049,7 @@ static void google_pcie_check_pending_txns(struct google_pcie *gpcie)
 		usleep_range(10, 12);
 		check_time += 10;
 		val = readl(gpcie->sii_base + PCIE_SII_BUS_DBG);
-		if ((val & BRDG_SLV_XFER_PENDING) && (val & RADM_XFER_PENDING))
+		if (!(val & BRDG_SLV_XFER_PENDING) && !(val & RADM_XFER_PENDING))
 			break;
 	}
 }
@@ -1008,8 +1108,6 @@ int google_pcie_rc_poweron(int num)
 			return ret;
 		}
 	}
-
-	gs_domain_c4_disable();
 
 	ret = pm_runtime_get_sync(gpcie->dev);
 	if (ret < 0) {
@@ -1092,6 +1190,7 @@ int google_pcie_rc_poweron(int num)
 		dev_err(gpcie->dev, "Failed to start link, giving up retries\n");
 		gpcie->link_stats.link_recovery_failure_count++;
 		ret = -EPIPE;
+		google_pcie_dump_debug(num);
 		goto clkreq_idle;
 	}
 
@@ -1163,7 +1262,6 @@ clkreq_idle:
 pm_put:
 	if (gpcie->aux_clk)
 		clk_disable_unprepare(gpcie->aux_clk);
-	gs_domain_c4_enable();
 	gpcie->current_link_speed = 0;
 	gpcie->current_link_width = 0;
 	spin_lock_irqsave(&gpcie->power_on_lock, flags);
@@ -1353,14 +1451,22 @@ int google_pcie_rc_poweroff(int num)
 		need_enable_link_down--;
 	}
 
-	gs_domain_c4_enable();
-
 	mutex_unlock(&gpcie->link_lock);
 	return 0;
 }
 EXPORT_SYMBOL_GPL(google_pcie_rc_poweroff);
 
-void google_pcie_rc_set_link_down(int num)
+/**
+ * google_pcie_rc_prepare_for_forced_poweroff - Prepares for a forced power-off on link failure.
+ *
+ * Called by an endpoint driver when the link has failed and a graceful shutdown is not
+ * possible. It sets is_link_up to false, which guards the endpoint's configuration
+ * space from further access. It also ensures that the next call to google_pcie_rc_poweroff()
+ * bypasses the standard teardown, proceeding directly to power down the controller.
+ *
+ * @num: The domain number representing the PCIe controller in the system.
+ */
+void google_pcie_rc_prepare_for_forced_poweroff(int num)
 {
 	struct google_pcie *gpcie;
 	unsigned long flags;
@@ -1385,10 +1491,10 @@ void google_pcie_rc_set_link_down(int num)
 		return;
 	}
 
-	dev_info(gpcie->dev, "set is_link_up to false\n");
+	dev_info(gpcie->dev, "Preparing for forced power-off due to reported link failure\n");
+
 	gpcie->is_link_up = false;
 
-	/* Ensure subsequent poweroff will skip teardown steps */
 	gpcie->in_link_down = true;
 	/*
 	 * Avoid spurious link-down IRQs during error handling. We undo this
@@ -1398,7 +1504,7 @@ void google_pcie_rc_set_link_down(int num)
 
 	spin_unlock_irqrestore(&gpcie->link_up_lock, flags);
 }
-EXPORT_SYMBOL_GPL(google_pcie_rc_set_link_down);
+EXPORT_SYMBOL_GPL(google_pcie_rc_prepare_for_forced_poweroff);
 
 /**
  * google_pcie_link_state - Query link state by PCIe controller number
@@ -1803,59 +1909,6 @@ int google_pcie_link_status(int num)
 }
 EXPORT_SYMBOL_GPL(google_pcie_link_status);
 
-static void google_pcie_dump_sii(struct google_pcie *gpcie)
-{
-	int i;
-
-	dev_info(gpcie->dev, "Dump SII values");
-	if (!gpcie) {
-		pr_err("Invalid PCI handle");
-		return;
-	}
-	for (i = 0; i < gpcie->sii_size; i += 4)
-		dev_info(gpcie->dev, "0x%08x\n", readl(gpcie->sii_base + i));
-}
-
-static void google_pcie_dump_aer_register(struct google_pcie *gpcie)
-{
-	struct dw_pcie *pci = gpcie->pci;
-	u32 val, i, aer_start = 0, aer_end = 0x48;
-
-	dev_err(pci->dev, "AER Register Dump\n");
-	for (i = aer_start; i < aer_end; i += 0x4) {
-		val = dw_pcie_readl_dbi(pci, gpcie->aer + i);
-		dev_err(pci->dev, "Offset %#04x -> Val %#010x\n", i, val);
-	}
-}
-
-/**
- * google_pcie_dump_debug - Dump debug registers
- *
- * Endpoints can use this when they encounter error conditions that
- * require a dump of PCIe debug registers.
- *
- * @num: The domain number representing the PCIe controller in the system
- */
-void google_pcie_dump_debug(int num)
-{
-	struct google_pcie *gpcie;
-
-	gpcie = google_pcie_get_handle(num);
-	if (!gpcie) {
-		pr_err("Invalid PCI handle chan %d\n", num);
-		return;
-	}
-
-	if (!gpcie->powered_on) {
-		dev_info(gpcie->dev, "PCIe is down\n");
-		return;
-	}
-
-	google_pcie_dump_sii(gpcie);
-	google_pcie_dump_aer_register(gpcie);
-
-}
-EXPORT_SYMBOL_GPL(google_pcie_dump_debug);
 
 static irqreturn_t google_pcie_cpl_timeout_thread(int irq, void *data)
 {
@@ -2513,12 +2566,14 @@ static int google_pcie_probe(struct platform_device *pdev)
 	struct pci_dev *pci_dev = NULL;
 	struct resource *phy_sram_res;
 	struct resource *sii_res;
+	struct resource *top_res;
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0)
 	struct dw_pcie_rp *pp;
 #else
 	struct pcie_port *pp;
 #endif
 	int ret;
+	struct of_phandle_args pd_args, additional_parent_pd_args;
 
 	gpcie = devm_kzalloc(dev, sizeof(*gpcie), GFP_KERNEL);
 	if (!gpcie)
@@ -2528,9 +2583,15 @@ static int google_pcie_probe(struct platform_device *pdev)
 	if (!pci)
 		return -ENOMEM;
 
-	gpcie->top_base = devm_platform_ioremap_resource_byname(pdev, "top");
+	top_res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "top");
+	if (!top_res)
+		return -EINVAL;
+
+	gpcie->top_base = devm_ioremap_resource(dev, top_res);
 	if (IS_ERR(gpcie->top_base))
 		return PTR_ERR(gpcie->top_base);
+
+	gpcie->top_size = resource_size(top_res);
 
 	phy_sram_res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "phy_sram");
 	if (phy_sram_res) {
@@ -2651,6 +2712,29 @@ static int google_pcie_probe(struct platform_device *pdev)
 	}
 
 	google_pcie_init_genpd(gpcie);
+
+	additional_parent_pd_args.args_count = 0;
+	additional_parent_pd_args.np = of_parse_phandle(np, "additional-parent-domain", 0);
+	if (additional_parent_pd_args.np) {
+		ret = of_parse_phandle_with_args(np, "power-domains", "#power-domain-cells", 0,
+				&pd_args);
+		if (ret) {
+			dev_err(dev, "Unable to parse the power domain\n");
+			of_node_put(additional_parent_pd_args.np);
+			return ret;
+		}
+
+		ret = of_genpd_add_subdomain(&additional_parent_pd_args, &pd_args);
+		if (ret) {
+			dev_err(dev, "Failed to add subdomain to additional parent %s\n",
+					additional_parent_pd_args.np->name);
+			of_node_put(additional_parent_pd_args.np);
+			of_node_put(pd_args.np);
+			return ret;
+		}
+		of_node_put(additional_parent_pd_args.np);
+		of_node_put(pd_args.np);
+	}
 
 	gpcie->allow_suspend_in_linkup =
 		device_property_read_bool(dev, "google,allow-suspend-in-linkup");

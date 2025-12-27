@@ -12,6 +12,7 @@
 #include <linux/debugfs.h>
 #include <linux/gpio/consumer.h>
 #include <linux/iopoll.h>
+#include <linux/mutex.h>
 #include <linux/notifier.h>
 #include <linux/of.h>
 #include <linux/of_address.h>
@@ -28,6 +29,7 @@
 #include <ufs/ufshci.h>
 
 #if IS_ENABLED(CONFIG_UFS_PIXEL_FEATURES)
+#include <perf/core/gs_domain_idle.h>
 #include "ufs-pixel.h"
 #endif
 
@@ -57,6 +59,13 @@ enum phy_patch_mode {
 	PHY_BOOTLD_BYPASS_MODE = 2,
 };
 
+struct reg_info {
+	u32 offset;
+	const char *name;
+};
+
+#define REG_INFO(name) { name, #name }
+
 /**
  * Platform-specific operations.
  */
@@ -85,12 +94,17 @@ struct ufs_google_host {
 	bool multi_intr_enabled;
 	bool calibration_needed;
 	bool phy_patching_needed;
+	bool phy_init_needed;
 	enum phy_patch_mode phy_patch_mode;
 	bool clkgate_delay_set;
+	ktime_t device_off_time;
 
 	void __iomem *ufs_top_mmio;
 	void __iomem *ufs_phy_sram_mmio;
 	void __iomem *ufs_ss_mmio;
+	void __iomem *hsios_psm_status_mmio;
+	void __iomem *ufs_hc_psm_status_mmio;
+	void __iomem *ufs_phy_psm_status_mmio;
 	struct ufs_vreg *vdd0p75;
 	struct ufs_vreg *vdd1p2;
 	struct reset_control *a_rst;
@@ -103,12 +117,14 @@ struct ufs_google_host {
 	struct cq_irq_desc cq_desc[MAXQ];
 	struct pm_qos_request pm_qos_req;
 	struct mutex indirect_reg_mutex;
+	struct mutex ufs_pm_lock;
 	struct clk *refclk;
 	struct pinctrl *pinctrl;
 	struct pinctrl_state *refclk_on_state;
 	struct pinctrl_state *refclk_off_state;
 	struct clk *hsios_aux_clk;
 	struct mphy_reg *phy_cal_data;
+	struct delayed_work ufs_sleep_work;
 	int phy_cal_size;
 	bool pm_request_active;
 	bool pm_set;
@@ -128,6 +144,9 @@ enum google_host_cap {
 	GCAP_HC_AH8_PG = BIT(1),
 	GCAP_HC_SWH8_PG = BIT(2),
 	GCAP_PHY_CAL = BIT(3), /* calibration */
+	GCAP_LOCAL_RPM = BIT(4),
+	GCAP_LOCAL_SWH8 = BIT(5),
+	GCAP_BLOCK_C4 = BIT(6),
 
 	/* Resources CAPs - starts from bit 32 */
 	GCAP_RSC_IP_IDLE = BIT(32),

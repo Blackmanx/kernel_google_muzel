@@ -33,3 +33,14 @@ Description:
 		 cd /sys/devices/platform/power_controller/latency_stats
 		 cat sswrp_gpu_pd/on/min
 		 cat sswrp_gpu_pd/off/average
+
+What:		/sys/devices/platform/power_controller/enforce_cpm_send_failure
+Date:		June 2025
+Contact:	"Mariano Marciello" <mmarciello@google.com>
+Description:
+		Control node to enable panic when a CPM message encounters an error.
+		Echo 1 to turn on, 0 to turn off. Default is off.
+
+		On read returns if the flag is enabled "1" or disabled "0".
+
+		Default value: off.

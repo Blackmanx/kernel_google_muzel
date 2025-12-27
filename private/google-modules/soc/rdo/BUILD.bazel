@@ -37,6 +37,9 @@ filegroup(
     srcs = glob([
         "**/Kconfig",
     ]) + [
+        "//private/google-modules/soc/rdo/boot-diary:google_boot_diary.kconfig",
+        "//private/google-modules/soc/rdo/cap-sysfs:google_cap_sysfs.kconfig",
+        "//private/google-modules/soc/rdo/cpu-lpm-stats:google_cpu_lpm_stats.kconfig",
         "//private/google-modules/soc/rdo/mem-qos:google-mem-qos.kconfig",
         "//private/google-modules/soc/rdo/pci:Kconfig",
     ],

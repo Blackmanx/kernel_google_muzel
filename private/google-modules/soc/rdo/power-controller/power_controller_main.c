@@ -7,6 +7,7 @@
 #include <linux/arm-smccc.h>
 #include <linux/container_of.h>
 #include <linux/debugfs.h>
+#include <linux/device.h>
 #include <linux/list.h>
 #include <linux/uaccess.h>
 #include <linux/bitfield.h>
@@ -54,6 +55,42 @@
 
 static u32 mbx_send_timeout_ms = 3000;
 static u32 mbx_receive_timeout_ms = 3000;
+
+/*
+ * 0 if panic is disable, 1 if panic is enabled.
+ */
+static bool enforce_cpm_send_failure;
+
+static ssize_t enforce_cpm_send_failure_show(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+	return sysfs_emit(buf, "%d\n", enforce_cpm_send_failure);
+}
+
+static ssize_t enforce_cpm_send_failure_store(struct device *dev,
+	struct device_attribute *attr, const char *buf, size_t count)
+{
+	if (kstrtobool(buf, &enforce_cpm_send_failure))
+		return -EINVAL;
+
+	return count;
+}
+
+/**
+ * @brief Panic if enforce_cpm_send_failure is true.
+ *
+ * This function will panic if enforce_cpm_send_failure is true, it will print
+ * a generic message, the caller is responsible to print a more detailed error
+ * message before calling this function.
+ */
+static void cpm_send_failure_cond_panic(void)
+{
+	if (enforce_cpm_send_failure)
+		panic("CPM send message failure, check previous error messages for details");
+}
+
+static struct device_attribute attr_enforce_cpm_send_failure =
+	__ATTR_RW(enforce_cpm_send_failure);
 
 static inline struct power_domain *to_power_domain(struct generic_pm_domain *d)
 {
@@ -204,12 +241,14 @@ static int send_lpb_mail(struct power_domain *pd, bool power_on)
 		false);
 
 	if (ret < 0) {
-		dev_err(dev, "%s: %s: send lpb message failed ret (%d)\n",
-			pd->name, ON_OFF_STR(power_on), ret);
-
+		dev_err(dev,
+			"%s: %s: send lpb message failed ret (%d)\n",
+			 pd->name, ON_OFF_STR(power_on), ret);
+		cpm_send_failure_cond_panic();
 		pd->cpm_err = ret;
 		goto finish_lpb;
 	}
+
 	dev_dbg(dev, "%s: %s: lpb response msg %d %d %d\n", pd->name, ON_OFF_STR(power_on),
 		resp_msg.payload[0], resp_msg.payload[1], resp_msg.payload[2]);
 
@@ -238,8 +277,10 @@ static int send_lpb_mail(struct power_domain *pd, bool power_on)
 		ret = wait_for_completion_timeout(&pd->cpm_resp_done,
 						  msecs_to_jiffies(mbx_receive_timeout_ms));
 		if (ret == 0) {
-			panic("%s: %s: wait for CPM response timeout\n",
+			dev_err(dev,
+				"%s: %s: wait for CPM completion timeout\n",
 				pd->name, ON_OFF_STR(power_on));
+			cpm_send_failure_cond_panic();
 			pd->cpm_err = -ETIMEDOUT;
 			goto finish_lpb;
 		}
@@ -298,9 +339,10 @@ static int send_lpcm_mail(struct power_domain *pd, bool power_on)
 	trace_recv_result_lpcm(pd, power_on, resp_msg.payload[0]);
 
 	if (ret < 0) {
-		dev_err(dev, "%s: %s: send lpcm message failed ret (%d)\n",
+		dev_err(dev,
+		"%s: %s: send message to CPM failed ret (%d)\n",
 			pd->name, ON_OFF_STR(power_on), ret);
-
+		cpm_send_failure_cond_panic();
 		pd->cpm_err = ret;
 		goto finish_lpcm;
 	}
@@ -582,6 +624,10 @@ static int power_controller_probe(struct platform_device *pdev)
 		goto cleanup_pds;
 	}
 	cpm_map = desc->cpm_map;
+
+	ret = device_create_file(dev, &attr_enforce_cpm_send_failure);
+	if (ret)
+		dev_err(dev, "Failed to create attr_enforce_cpm_send_failure (ret: %d)\n", ret);
 
 	for_each_available_child_of_node(np, child_np) {
 		struct power_domain *pd = &power_controller->pds[i];

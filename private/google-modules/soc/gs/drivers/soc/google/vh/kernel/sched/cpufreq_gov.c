@@ -787,13 +787,19 @@ unsigned long schedutil_cpu_util_pixel_mod(int cpu, unsigned long util_cfs,
 	 */
 	util = util_cfs + cpu_util_rt(rq);
 	if (type == FREQUENCY_UTIL) {
-		/*
-		 * Speed up/slow down response timee first then apply DVFS
-		 * headroom. We only want to do that for cfs+rt util.
-		 */
-		util = sugov_apply_response_time(util, cpu);
-		util = apply_dvfs_headroom(util, cpu, true);
-		util = uclamp_rq_util_with(rq, util, p);
+		/* Reset util on idle to conserve power */
+		if (static_branch_likely(&update_freq_on_idle_enable) &&
+		    !in_suspend_resume && !p && !rq->nr_running) {
+			util = 0;
+		} else {
+			/*
+			 * Speed up/slow down response time first then apply DVFS
+			 * headroom. We only want to do that for cfs+rt util.
+			 */
+			util = sugov_apply_response_time(util, cpu);
+			util = apply_dvfs_headroom(util, cpu, true);
+			util = uclamp_rq_util_with(rq, util, p);
+		}
 		trace_schedutil_cpu_util_clamp(cpu, util_cfs, cpu_util_rt(rq), util, max);
 	}
 
@@ -1041,7 +1047,7 @@ static void sugov_update_single(struct update_util_data *hook, u64 time,
 				unsigned int flags)
 {
 	struct sugov_cpu *sg_cpu = container_of(hook, struct sugov_cpu, update_util);
-	unsigned int next_f;
+	unsigned int next_f, suspend_resume_boost;
 	bool busy;
 
 #if IS_ENABLED(CONFIG_UCLAMP_STATS)
@@ -1088,6 +1094,14 @@ static void sugov_update_single(struct update_util_data *hook, u64 time,
 	next_f = clamp(next_f, sg_cpu->sg_policy->scaling_freq_min,
 		       sg_cpu->sg_policy->scaling_freq_max);
 #endif
+
+	if (in_suspend_resume) {
+		suspend_resume_boost = map_util_freq_pixel_mod(
+							arch_scale_cpu_capacity(sg_cpu->cpu) >> 1,
+							sg_cpu->sg_policy->policy->cpuinfo.max_freq,
+							sg_cpu->max, sg_cpu->cpu);
+		next_f = max(next_f, suspend_resume_boost);
+	}
 
 	/*
 	 * This code runs under rq->lock for the target CPU, so it won't run
@@ -1151,7 +1165,7 @@ static void
 sugov_update_shared(struct update_util_data *hook, u64 time, unsigned int flags)
 {
 	struct sugov_cpu *sg_cpu = container_of(hook, struct sugov_cpu, update_util);
-	unsigned int next_f;
+	unsigned int next_f, suspend_resume_boost;
 
 	raw_spin_lock(&sg_cpu->sg_policy->update_lock);
 
@@ -1201,6 +1215,13 @@ sugov_update_shared(struct update_util_data *hook, u64 time, unsigned int flags)
 		next_f = clamp(next_f, sg_cpu->sg_policy->scaling_freq_min,
 			       sg_cpu->sg_policy->scaling_freq_max);
 #endif
+
+	if (in_suspend_resume) {
+		suspend_resume_boost = map_util_freq_pixel_mod(vendor_sched_suspend_resume_boost,
+							sg_cpu->sg_policy->policy->cpuinfo.max_freq,
+							sg_cpu->max, sg_cpu->cpu);
+		next_f = max(next_f, suspend_resume_boost);
+	}
 
 		if (sg_cpu->sg_policy->policy->fast_switch_enabled)
 			cpufreq_driver_fast_switch(sg_cpu->sg_policy->policy, next_f);

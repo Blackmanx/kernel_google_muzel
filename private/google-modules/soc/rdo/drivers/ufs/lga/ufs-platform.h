@@ -5,6 +5,7 @@
 #ifndef _UFS_LGA_PLATFORM_H_
 #define _UFS_LGA_PLATFORM_H_
 
+#include "ufs-google.h"
 #include "lga/ufs-regs-gen.h"
 
 
@@ -61,5 +62,11 @@
 #define IAEN BIT(31)
 #define MAX_QUEUE_SUP GENMASK(7, 0)
 #define MCQ_IAG_EVENT_STATUS 0x200000
+
+extern const struct reg_info hc_registers[];
+extern const struct reg_info top_registers[];
+extern const struct reg_info ufs_refclk_registers[];
+extern const struct reg_info ufs_resetb_registers[];
+extern const struct reg_info ufs_pwr_en_registers[];
 
 #endif /* _UFS_LGA_PLATFORM_H_ */

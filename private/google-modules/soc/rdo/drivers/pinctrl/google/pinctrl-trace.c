@@ -38,7 +38,7 @@ void google_pinctrl_trace_init(struct platform_device *pdev)
 {
 	struct trace_array *trace_instance;
 
-	trace_instance = trace_array_get_by_name("pinctrl_google");
+	trace_instance = trace_array_get_by_name_ext("pinctrl_google", "pinctrl");
 	if (!trace_instance)
 		dev_err(&pdev->dev, "Pinctrl trace instance creation/retrieve did not succeed\n");
 

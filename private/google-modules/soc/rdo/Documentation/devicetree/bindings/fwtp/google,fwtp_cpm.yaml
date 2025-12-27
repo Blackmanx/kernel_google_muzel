@@ -28,11 +28,15 @@ properties:
   memory-region:
     description: DMA buffer to use for IPC with CPM.
 
+  tracepoint-list:
+    description: List of sub-devices for which to publish tracepoints.
+
 required:
   - compatible
   - mboxes
   - mba-dest-channel
   - memory-region
+  - tracepoint-list
 
 additionalProperties: false
 
@@ -43,4 +47,5 @@ examples:
       mboxes = <&goog_mba_cpm_iface>;
       mba-dest-channel = <MBOX_DEST_CHAN_CPM_FWTP>;
       memory-region = <&cpm_tracepoint_ipc_dma>;
+      tracepoint-list = "cpm", "cap";
     };

@@ -22,8 +22,6 @@ config INPUT_KEYCOMBO
 
 source "$(KCONFIG_SOC_GS_PREFIX)drivers/input/misc/Kconfig"
 
-source "$(KCONFIG_SOC_GS_PREFIX)drivers/input/fingerprint/Kconfig"
-
 source "$(KCONFIG_SOC_GS_PREFIX)drivers/input/keyboard/Kconfig"
 
 endif

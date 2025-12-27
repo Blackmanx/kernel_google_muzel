@@ -71,10 +71,10 @@ typedef void (*cpm_iface_cb_t)(u32 context, void *msg, void *priv_data);
 /*
  * cpm_iface_request_client - Registers a client with the CPM interface
  * @dev:			Client's device structure.
- * @src_id:			Client's source ID for identification by CPM (optional).
- *				Set valid src_id (1 to GOOG_MBA_Q_XPORT_MAX_SRC_ID_VAL) and
- *				callback in @cpm_iface_cb to be invoked by CPM initiated request.
- *				Otherwise, specify to 0 if you don't want to.
+ * @src_id:			Client's service ID for identification by CPM (optional).
+ *				Register client's service ID (1 to GOOG_MBA_Q_XPORT_MAX_SRC_ID_VAL)
+ *				with callback in @cpm_iface_cb to handle CPM initiated request.
+ *				Otherwise, specify to 0.
  * @cpm_iface_cb:		Callback function invoked for CPM-initiated requests (optional).
  * @prv_data:			Private data passed to the callback function (optional).
  *
